@@ -4,6 +4,7 @@ import { createWeaponModel } from './world.js';
 import { ArenaGame, disposeModel } from './game.js';
 import { Input } from './input.js';
 import { GameAudio } from './audio.js';
+import { MultiplayerUI } from './multiplayer-ui.js';
 
 const $ = id => document.getElementById(id);
 const storageKey = 'block-ops-v1';
@@ -20,7 +21,7 @@ const settings = {
   sound: typeof rawSettings.sound === 'boolean' ? rawSettings.sound : true,
 };
 let selected = getWeapon(saved.weaponId), activeClass = selected.classId;
-let mode = 'armory', settingsOrigin = 'armory', game, preview, toastUntil = 0;
+let mode = 'armory', settingsOrigin = 'armory', game, preview, multiplayer, toastUntil = 0;
 const audio = new GameAudio();
 const input = new Input(() => pauseGame());
 const classNames = { assault: 'ASSAULT', smg: 'SMG', shotgun: 'SHOTGUN', sniper: 'SNIPER', marksman: 'MARKSMAN', lmg: 'LMG', sidearm: 'SIDEARM' };
@@ -28,11 +29,19 @@ const traits = { assault: 'Versatile. Reliable. Ready for anything.', smg: 'Fast
 function persist() { try { localStorage.setItem(storageKey, JSON.stringify({ weaponId: selected.id, settings })); } catch { /* Play remains available without storage. */ } }
 function setMode(next) {
   mode = next; document.body.dataset.mode = next;
+  // Remote starts, results and disconnects replace any locally open settings.
+  $('settings-screen').hidden = true;
   $('armory').hidden = next !== 'armory';
+  $('online-screen').hidden = next !== 'lobby';
   $('game-ui').hidden = !['playing', 'paused', 'results'].includes(next);
   $('pause-screen').hidden = next !== 'paused';
   $('results-screen').hidden = next !== 'results';
-  if (next !== 'playing' && game) game.pause();
+  const online = multiplayer && multiplayer.isActive();
+  document.querySelector('.pause-dialog h2').textContent = online ? 'MATCH STILL LIVE' : 'GAME PAUSED';
+  document.querySelector('.pause-dialog .eyebrow').textContent = online ? 'CONTROLS PAUSED' : 'TAKE YOUR TIME';
+  document.querySelector('.pause-dialog p').textContent = online ? 'Your controls are paused. The match continues and other players can still move and shoot.' : 'Your round is right where you left it.';
+  $('quit-button').textContent = online ? 'Leave room & return to armory' : 'End round & return to armory';
+  if (next !== 'playing' && game) { if (online) multiplayer.pause(); else game.pause(); }
 }
 function pauseGame() {
   if (mode === 'playing') { setMode('paused'); $('resume-button').focus({ preventScroll: true }); }
@@ -62,7 +71,7 @@ function renderSelected() {
   const power = Math.min(100, Math.round(selected.damage * Math.sqrt(selected.pellets)));
   const rate = Math.min(100, Math.round(.05 / selected.fireInterval * 100));
   const accuracy = Math.round(Math.max(10, 100 - selected.spread * 600));
-  $('weapon-stats').innerHTML = [['POWER', power], ['FIRE RATE', rate], ['ACCURACY', accuracy]].map(([label, amount]) => `<div><div class="stat-label"><span>${label}</span><span>${amount}</span></div><div class="stat-track"><i style="width:${amount}%"></i></div></div>`).join('') + `<div class="gun-meta"><span><b>${selected.magazine}</b> ROUNDS</span><span><b>${selected.reloadTime.toFixed(1)}s</b> RELOAD</span><span><b>${Math.round(60 / selected.fireInterval)}</b> RPM</span></div>`;
+  $('weapon-stats').innerHTML = [['POWER', power], ['FIRE RATE', rate], ['ACCURACY', accuracy]].map(([label, amount]) => `<div><div class="stat-label"><span>${label}</span><span>${amount}</span></div><div class="stat-track"><i style="width:${amount}%"></i></div></div>`).join('') + `<div class="gun-meta"><span><b>${selected.magazine}</b> MAG</span><span><b>${selected.magazine + selected.reserve}</b> TOTAL</span><span><b>${selected.reloadTime.toFixed(1)}s</b> RELOAD</span><span><b>${Math.round(60 / selected.fireInterval)}</b> RPM</span></div>`;
   renderTabs();
   if (preview) preview.equip(selected);
 }
@@ -73,21 +82,22 @@ $('weapon-grid').addEventListener('click', event => {
 });
 function showArmory() {
   setMode('armory'); activeClass = selected.classId; renderSelected();
-  $('play-button').innerHTML = game && game.hasRound && !game.match.ended ? 'RETURN TO MATCH <span>↗</span>' : 'DEPLOY <span>↗</span>';
+  $('play-button').innerHTML = multiplayer && multiplayer.isConnected() ? (multiplayer.room.phase === 'playing' ? 'RETURN TO MATCH <span>↗</span>' : 'BACK TO ROOM <span>↗</span>') : game && game.hasRound && !game.match.ended ? 'RETURN TO MATCH <span>↗</span>' : 'DEPLOY <span>↗</span>';
 }
 function deploy(forceNew = false) {
   if (!game) return;
+  if (multiplayer && multiplayer.isConnected()) { multiplayer.deploy(selected.id); document.activeElement.blur(); return; }
   audio.unlock();
   if (forceNew || !game.hasRound || game.match.ended) game.start(selected.id, settings);
   else { game.setWeapon(selected.id); game.resume(); }
   setMode('playing'); game.events.onHud(game); document.activeElement.blur();
 }
 $('play-button').addEventListener('click', () => deploy());
-$('again-button').addEventListener('click', () => deploy(true));
+$('again-button').addEventListener('click', () => { if (multiplayer && multiplayer.isConnected()) multiplayer.open(); else deploy(true); });
 $('pause-button').addEventListener('click', pauseGame);
-$('resume-button').addEventListener('click', () => { audio.unlock(); game.resume(); setMode('playing'); document.activeElement.blur(); });
+$('resume-button').addEventListener('click', () => { audio.unlock(); if (multiplayer && multiplayer.isActive()) multiplayer.resume(); else game.resume(); setMode('playing'); document.activeElement.blur(); });
 for (const id of ['loadout-button', 'pause-loadout', 'results-loadout']) $(id).addEventListener('click', showArmory);
-$('quit-button').addEventListener('click', () => { game.quit(); showArmory(); });
+$('quit-button').addEventListener('click', () => { if (multiplayer && multiplayer.isConnected()) multiplayer.leave(); else game.quit(); showArmory(); });
 $('retry-button').addEventListener('click', () => location.reload());
 function updateSettings() {
   audio.enabled = settings.sound;
@@ -154,7 +164,7 @@ function onHud(current) {
   $('respawn-count').textContent = Math.ceil(current.player.dead);
   if (performance.now() > toastUntil) $('toast').textContent = '';
 }
-function showFatal(message) { if (game) game.pause(); $('fatal-message').textContent = message; $('fatal-screen').hidden = false; }
+function showFatal(message) { if (multiplayer && multiplayer.isConnected()) multiplayer.leave(); if (game) game.pause(); $('fatal-message').textContent = message; $('fatal-screen').hidden = false; }
 renderSelected(); updateSettings();
 try {
   game = new ArenaGame($('arena'), input, audio, {
@@ -163,13 +173,15 @@ try {
     onToast: message => { $('toast').textContent = message; toastUntil = performance.now() + 1900; },
     onFatal: showFatal,
   });
+  multiplayer = new MultiplayerUI({ getGame: () => game, getSettings: () => settings, getSelected: () => selected, onMode: setMode, onLoadout: showArmory, onToast: message => { $('toast').textContent = message; toastUntil = performance.now() + 1900; } });
   preview = new WeaponPreview($('weapon-preview'));
   let previous = performance.now();
   function frame(now) {
     const dt = Math.min(.05, (now - previous) / 1000); previous = now;
     if (!document.hidden) {
-      if (mode === 'playing') game.update(dt);
-      else if (mode === 'armory') preview.render(now / 1000);
+      if (multiplayer && multiplayer.isActive()) multiplayer.update(dt);
+      else if (mode === 'playing') game.update(dt);
+      if (mode === 'armory') preview.render(now / 1000);
     }
     requestAnimationFrame(frame);
   }

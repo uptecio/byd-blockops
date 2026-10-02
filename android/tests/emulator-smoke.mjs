@@ -18,7 +18,10 @@ let socket, forwarded = false;
 try {
   await shell('svc', 'wifi', 'disable');
   await shell('svc', 'data', 'disable');
-  await shell('am', 'start', '-n', 'au.local.blockops/.MainActivity');
+  // Fresh disposable AVDs otherwise show Android's first-run fullscreen
+  // tutorial above the app, consuming Back before it reaches the activity.
+  await shell('settings', 'put', 'secure', 'immersive_mode_confirmations', 'confirmed');
+  await shell('am', 'start', '-W', '-n', 'au.local.blockops/.MainActivity');
   const pid = (await shell('pidof', 'au.local.blockops')).stdout.trim();
   assert.match(pid, /^\d+$/);
   await command('forward', 'tcp:9228', `localabstract:webview_devtools_remote_${pid}`);
@@ -57,7 +60,7 @@ try {
     if (result.exceptionDetails) throw new Error(JSON.stringify(result.exceptionDetails));
     return result.result.value;
   };
-  const state = () => evaluate('({hidden:document.hidden,mode:document.body.dataset.mode,timer:document.getElementById("timer").textContent,fatal:!document.getElementById("fatal-screen").hidden,pause:!document.getElementById("pause-screen").hidden,classes:document.querySelectorAll(".class-tab").length})');
+  const state = () => evaluate('document.getElementById("timer") ? ({hidden:document.hidden,mode:document.body.dataset.mode,timer:document.getElementById("timer").textContent,fatal:!document.getElementById("fatal-screen").hidden,pause:!document.getElementById("pause-screen").hidden,classes:document.querySelectorAll(".class-tab").length}) : ({mode:"loading"})');
   const wait = async predicate => {
     const deadline = Date.now() + 10000;
     while (Date.now() < deadline) {
@@ -74,6 +77,7 @@ try {
   assert.equal(await evaluate('document.querySelectorAll(".weapon-card").length'), 4);
   await evaluate('document.getElementById("play-button").click()');
   await wait(current => current.mode === 'playing' && current.timer !== '03:00');
+  assert.equal(await evaluate('Number(document.getElementById("ammo-count").textContent)+Number(document.getElementById("reserve-count").textContent)'), 500, 'Solo starts with 500 total rounds');
   await mkdir('artifacts', { recursive: true });
   const shot = await run(adb, ['-s', serial, 'exec-out', 'screencap', '-p'], { encoding: 'buffer', maxBuffer: 10000000, timeout: 10000 });
   await writeFile('artifacts/android-gameplay.png', shot.stdout);
@@ -91,7 +95,7 @@ try {
   assert.equal(foreground.pause, true); assert.equal(foreground.timer, background.timer);
   assert.deepEqual(errors, [], 'No JavaScript or CSP errors');
   assert.deepEqual(remote, [], 'No external runtime requests');
-  console.log('Native emulator smoke passed: offline menu, deploy, landscape, Android back/background pause, explicit resume required.');
+  console.log('Native emulator smoke passed: offline menu, deploy, 500 rounds, landscape, Android back/background pause, explicit resume required.');
 } finally {
   if (socket) socket.close();
   if (forwarded) await command('forward', '--remove', 'tcp:9228');

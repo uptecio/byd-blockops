@@ -7,4 +7,5 @@ android/**/build/
 android/app/src/main/assets/
 artifacts/
 .superpowers/
+.tools/
 *.log

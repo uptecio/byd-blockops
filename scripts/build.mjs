@@ -1,8 +1,10 @@
 import { build } from 'esbuild';
-import { mkdir, copyFile } from 'node:fs/promises';
+import { mkdir, copyFile, readFile } from 'node:fs/promises';
+const configuredServer = JSON.parse(await readFile(new URL('../game-server.json', import.meta.url), 'utf8')).url;
+const serverUrl = process.env.GAME_SERVER_URL ?? configuredServer;
 await mkdir('dist', { recursive: true });
-await build({ entryPoints: ['src/main.js'], outfile: 'dist/game.js', bundle: true, format: 'iife', target: 'es2017', minify: true, legalComments: 'eof' });
+await build({ entryPoints: ['src/main.js'], outfile: 'dist/game.js', bundle: true, format: 'iife', target: 'es2017', minify: true, legalComments: 'eof', define: { __GAME_SERVER_URL__: JSON.stringify(serverUrl) } });
 await copyFile('index.html', 'dist/index.html');
 await copyFile('src/styles.css', 'dist/styles.css');
 await copyFile('node_modules/three/LICENSE', 'dist/THREE-LICENSE.txt');
-console.log('Built offline game in dist/');
+console.log('Built solo + online game in dist/');

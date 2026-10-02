@@ -4,8 +4,8 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
   <meta name="theme-color" content="#111a26">
-  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'none'; object-src 'none'; base-uri 'none'">
-  <title>Block Ops · Offline Arena</title>
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self' wss: ws://127.0.0.1:* ws://localhost:*; object-src 'none'; base-uri 'none'">
+  <title>Block Ops · Arena</title>
   <link rel="stylesheet" href="styles.css">
   <script defer src="game.js"></script>
 </head>
@@ -13,8 +13,8 @@
   <canvas id="arena" aria-label="First-person block arena"></canvas>
   <section id="armory" class="screen armory">
     <header class="topbar">
-      <div class="brand"><span class="brand-mark" aria-hidden="true">B<span>O</span></span><div>BLOCK OPS<small>OFFLINE ARENA</small></div></div>
-      <div class="topbar-right"><span class="online-badge"><i></i> SOLO / OFFLINE</span><button class="icon-button settings-open" aria-label="Settings">⚙</button></div>
+      <div class="brand"><span class="brand-mark" aria-hidden="true">B<span>O</span></span><div>BLOCK OPS<small>SOLO + ONLINE ARENA</small></div></div>
+      <div class="topbar-right"><span id="mode-badge" class="online-badge"><i></i> SOLO / OFFLINE</span><button id="online-button" class="online-entry">ONLINE FRIENDS <span>↗</span></button><button class="icon-button settings-open" aria-label="Settings">⚙</button></div>
     </header>
     <main class="armory-layout">
       <div class="arsenal">
@@ -34,17 +34,35 @@
         <div class="loadout-footer"><div><span class="map-dot"></span><strong>COURTYARD</strong><small>FREE-FOR-ALL · SOLO VS BOTS</small></div><button id="play-button" class="primary">DEPLOY <span>↗</span></button></div>
       </section>
     </main>
-    <footer class="app-footer"><span>BUILT FOR A GOOD BREAK. <b>PLAY WHILE PARKED.</b></span><span>TOUCH CONTROLS <span class="footer-divider">/</span> v0.1 PROTOTYPE</span></footer>
+    <footer class="app-footer"><span>BUILT FOR A GOOD BREAK. <b>PLAY WHILE PARKED.</b></span><span>TOUCH CONTROLS <span class="footer-divider">/</span> v0.2 PROTOTYPE</span></footer>
+  </section>
+  <section id="online-screen" class="screen online-screen" hidden>
+    <div class="online-shell">
+      <header class="online-heading"><div><span class="eyebrow">BLOCK OPS / MULTIPLAYER</span><h2>BETTER WITH FRIENDS.</h2><p>Real players. Your room. All 28 weapons unlocked.</p></div><button id="online-back" class="icon-button" aria-label="Back to loadout">×</button></header>
+      <div id="online-setup">
+        <label class="online-label" for="player-name">YOUR CALLSIGN</label><input id="player-name" class="online-input" maxlength="16" placeholder="Player name" autocomplete="off" value="Ranger">
+        <div class="join-options"><div class="join-option"><span class="eyebrow">BRING THE SQUAD</span><h3>Create a room</h3><p>Get a code to share. You choose when the match starts.</p><button id="create-room" class="primary">CREATE ROOM <span>↗</span></button></div><div class="join-option"><span class="eyebrow">GOT AN INVITE?</span><h3>Join your friends</h3><input id="room-code-input" class="online-input code-input" maxlength="6" placeholder="ROOM CODE" autocomplete="off" autocapitalize="characters" aria-label="Six-character room code"><button id="join-room" class="secondary">JOIN ROOM</button></div></div>
+        <details class="server-settings"><summary>Server settings</summary><label class="online-label" for="server-address">GAME SERVER</label><input id="server-address" class="online-input" type="url" placeholder="https://your-game-server.example" spellcheck="false"><p>Everyone joining a room must use the same server. Change this if your server address changes.</p></details>
+      </div>
+      <div id="room-lobby" hidden>
+        <div class="room-banner"><div><span class="online-label">YOUR ROOM CODE</span><strong id="room-code">------</strong></div><button id="copy-invite" class="secondary">COPY INVITE LINK ↗</button></div>
+        <div class="roster-heading"><span>PLAYERS <b id="room-player-count">1 / 8</b></span><span id="room-phase">WAITING FOR FRIENDS</span></div>
+        <div id="room-roster" class="room-roster"></div>
+        <div class="room-actions"><button id="start-online" class="primary">START MATCH <span>↗</span></button><button id="room-loadout" class="secondary">CHANGE LOADOUT</button><button id="leave-room" class="text-button">Leave room</button></div><p id="room-help" class="room-help">Share the invite link. Your friends can play in their browser or the APK.</p>
+      </div>
+      <div id="connection-status" class="connection-status" role="status" aria-live="polite">Internet required · 2–8 players · 3-minute rounds</div>
+    </div>
   </section>
   <section id="game-ui" hidden aria-label="Game controls">
     <div id="aim-zone" aria-label="Drag to look around"></div>
     <div class="hud-top"><div class="health-panel"><span class="eyebrow">SOLO / BOTS</span><div class="health-row"><span>✚</span><strong id="health-count">100</strong><div class="health-track"><i id="health-bar"></i></div></div></div><div class="score-panel"><strong><span id="kills">0</span><span class="score-target"> / 15</span></strong><span id="timer">03:00</span></div><div class="hud-actions"><button id="loadout-button" class="hud-button" aria-label="Change weapon">▤ <span>LOADOUT</span></button><button id="pause-button" class="hud-button" aria-label="Pause">Ⅱ</button></div></div>
+    <div id="online-scoreboard" class="online-scoreboard" hidden aria-label="Live leaderboard"></div>
     <div id="reticle"><i></i><i></i><i></i><i></i></div><div id="hit-marker">×</div><div id="damage-flash"></div>
     <div id="scope-overlay" hidden><div></div></div>
     <div id="respawn-banner" hidden><strong>BACK IN THE FIGHT</strong><span id="respawn-count">3</span></div>
     <div class="move-control"><div id="joystick" role="button" aria-label="Movement joystick"><span class="joystick-guides">✛</span><div id="joystick-knob"></div></div><span class="control-label">MOVE</span></div>
     <div class="combat-controls"><button id="zoom-button" class="touch-button small" aria-label="Aim down sights"><span>⌕</span><small>AIM</small></button><button id="jump-button" class="touch-button small" aria-label="Jump"><span>↑</span><small>JUMP</small></button><button id="reload-button" class="touch-button small" aria-label="Reload"><span>⟳</span><small>RELOAD</small></button><button id="fire-button" class="touch-button fire" aria-label="Fire weapon"><span>⌖</span><small>FIRE</small></button></div>
-    <div class="ammo-panel"><span id="hud-weapon">M4A1</span><strong><span id="ammo-count">30</span><small> / <span id="reserve-count">150</span></small></strong><span id="reload-status"></span></div>
+    <div class="ammo-panel"><span id="hud-weapon">M4A1</span><strong><span id="ammo-count">30</span><small> / <span id="reserve-count">470</span></small></strong><span id="reload-status"></span></div>
     <div id="game-hint">DRAG TO AIM <span>·</span> HOLD FIRE TO SHOOT</div><div id="toast" role="status"></div>
   </section>
   <section id="pause-screen" class="modal-screen" hidden><div class="dialog pause-dialog"><span class="eyebrow">TAKE YOUR TIME</span><h2>GAME PAUSED</h2><p>Your round is right where you left it.</p><button id="resume-button" class="primary">BACK TO THE ACTION <span>↗</span></button><button id="pause-loadout" class="secondary">CHANGE LOADOUT</button><button class="secondary settings-open">SETTINGS</button><button id="quit-button" class="text-button">End round & return to armory</button></div></section>

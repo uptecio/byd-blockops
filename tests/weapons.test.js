@@ -27,7 +27,7 @@ test('unknown IDs normalize to the default weapon and independent fresh states',
   assert.equal(getWeapon('missing').id, 'm4a1');
   const first = createWeaponState('missing');
   const second = createWeaponState('m4a1');
-  assert.deepEqual(first, { weaponId: 'm4a1', ammo: getWeapon('m4a1').magazine, reserve: getWeapon('m4a1').reserve, cooldown: 0, reloadRemaining: 0 });
+  assert.deepEqual(first, { weaponId: 'm4a1', ammo: 30, reserve: 470, cooldown: 0, reloadRemaining: 0 });
   tryFire(first);
   assert.equal(second.ammo, getWeapon('m4a1').magazine);
 });
@@ -123,10 +123,14 @@ test('invalid delta times do not poison timers or advance a reload', () => {
   }
 });
 
-test('every weapon conserves ammunition across sustained fire and repeated reloads', () => {
+test('all 28 weapons start with 500 total rounds and conserve them through repeated fire and reloads', () => {
+  assert.equal(WEAPONS.length, 28);
   for (const weapon of WEAPONS) {
     const state = createWeaponState(weapon.id);
-    const initialTotal = state.ammo + state.reserve;
+    assert.equal(state.ammo, weapon.magazine, `${weapon.id} starts with a full magazine`);
+    assert.equal(state.ammo + state.reserve, 500, `${weapon.id} starts with exactly 500 rounds`);
+    assert.equal(weapon.magazine + weapon.reserve, 500, `${weapon.id} catalogue matches its starting supply`);
+    const initialTotal = 500;
     let shots = 0;
     for (let attempt = 0; attempt < initialTotal + 1; attempt++) {
       if (state.ammo === 0 && state.reserve > 0) {

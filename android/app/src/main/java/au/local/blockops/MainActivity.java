@@ -74,7 +74,7 @@ public final class MainActivity extends Activity {
         settings.setAllowContentAccess(false);
         settings.setAllowFileAccessFromFileURLs(false);
         settings.setAllowUniversalAccessFromFileURLs(false);
-        settings.setBlockNetworkLoads(true);
+        settings.setBlockNetworkLoads(false);
         settings.setMixedContentMode(WebSettings.MIXED_CONTENT_NEVER_ALLOW);
         settings.setJavaScriptCanOpenWindowsAutomatically(false);
         settings.setMediaPlaybackRequiresUserGesture(true);
@@ -124,7 +124,7 @@ public final class MainActivity extends Activity {
         Map<String, String> headers = new HashMap<>();
         headers.put("Cache-Control", "no-store");
         headers.put("X-Content-Type-Options", "nosniff");
-        headers.put("Content-Security-Policy", "default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'none'; object-src 'none'; base-uri 'none'; frame-src 'none'");
+        headers.put("Content-Security-Policy", "default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src wss:; object-src 'none'; base-uri 'none'; frame-src 'none'");
         if (name != null) {
             String mime = name.endsWith(".js") ? "application/javascript"
                     : name.endsWith(".css") ? "text/css" : "text/html";

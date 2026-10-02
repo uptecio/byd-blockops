@@ -30,6 +30,8 @@ try {
   await page.locator('#play-button').click();
   await page.waitForSelector('body[data-mode="playing"]');
   assert.match(await page.locator('#hud-weapon').textContent(), /M4A1/);
+  assert.equal(await page.locator('#ammo-count').textContent(), '30');
+  assert.equal(await page.locator('#reserve-count').textContent(), '470', '500 total rounds include the loaded magazine');
   await page.keyboard.press('f');
   await page.waitForTimeout(300);
   assert.ok(Number(await page.locator('#ammo-count').textContent()) < 30, 'firing consumes ammo');

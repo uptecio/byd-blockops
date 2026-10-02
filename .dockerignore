@@ -1,0 +1,7 @@
+.git
+.tools
+node_modules
+android
+artifacts
+docs
+tests
