@@ -70,10 +70,32 @@ try {
   await pages[1].locator('#room-loadout').click();
   await pages[1].locator('#armory .settings-open').click();
   assert.equal(await pages[1].locator('#settings-screen').isVisible(), true);
+  // Exercise the exact boundary MainActivity.onPause calls, while the guest
+  // has no arena yet. Headless Chromium does not deliver real tab visibility.
+  await pages[1].evaluate(() => window.pauseGame());
   await pages[0].locator('#start-online').click();
-  for (const page of pages) await page.waitForSelector('body[data-mode="playing"]');
-  assert.equal(await pages[1].locator('#settings-screen').isHidden(), true, 'host start closes obsolete guest settings before enabling controls');
+  await pages[0].waitForSelector('body[data-mode="playing"]');
   await waitFor(() => snapshots.every(snapshot => snapshot && snapshot.phase === 'playing' && snapshot.players.length === 2), 'both clients share the running match');
+  assert.equal(await pages[1].locator('body').getAttribute('data-mode'), 'paused', 'native background suspension survives remote start');
+  assert.equal(await pages[1].locator('#settings-screen').isHidden(), true, 'host start closes obsolete guest settings without enabling controls');
+  // Android onResume only resumes rendering; it never calls game Resume.
+  await pages[1].bringToFront();
+  await pages[1].evaluate(() => window.dispatchEvent(new Event('focus')));
+  const suspendedGuest = { ...snapshots[1].players.find(player => player.name === 'Friend') };
+  const suspendedTime = snapshots[0].timeLeft;
+  await pages[1].keyboard.down('KeyW'); await pages[1].keyboard.down('KeyF');
+  try { await waitFor(() => snapshots[0].timeLeft < suspendedTime - 1, 'shared match continues while the foreground guest awaits Resume'); }
+  finally { await pages[1].keyboard.up('KeyW'); await pages[1].keyboard.up('KeyF'); }
+  const foregroundGuest = snapshots[0].players.find(player => player.name === 'Friend');
+  assert.equal(await pages[1].locator('body').getAttribute('data-mode'), 'paused', 'foregrounding does not implicitly resume the remotely started arena');
+  assert.ok(Math.hypot(foregroundGuest.x - suspendedGuest.x, foregroundGuest.z - suspendedGuest.z) < .05, 'background-started guest stays motionless until explicit Resume');
+  assert.equal(foregroundGuest.ammo, suspendedGuest.ammo, 'background-started guest cannot fire before explicit Resume');
+  await mkdir('.superpowers/sdd/2026-10-02-home-maps-skins-modes/screenshots', { recursive: true });
+  await pages[1].screenshot({ path: '.superpowers/sdd/2026-10-02-home-maps-skins-modes/screenshots/background-remote-paused.png' });
+  await pages[1].locator('#resume-button').click();
+  await pages[1].waitForSelector('body[data-mode="playing"]');
+  await pages[1].keyboard.press('KeyF');
+  await waitFor(() => snapshots[0].players.find(player => player.name === 'Friend').ammo < suspendedGuest.ammo, 'explicit Resume restores guest controls for a fresh input');
   assert.equal(await pages[0].locator('#room-map').isDisabled(), true, 'host settings lock in play');
   assert.equal(snapshots[0].players.find(player => player.name === 'Host').ammo + snapshots[0].players.find(player => player.name === 'Host').reserve, 500);
   const before = snapshots[0].players.find(player => player.name === 'Host').z;
@@ -177,8 +199,11 @@ try {
     await pages[0].locator('#room-map').selectOption('space-station');
     await pages[0].locator('#room-mode').selectOption('ctf');
     await waitFor(() => snapshots.every(room => room.modeId === 'ctf' && room.mapId === 'space-station'), 'host selects CTF for next round');
+    await pages[1].locator('#room-loadout').click();
+    await pages[1].locator('#armory .settings-open').click();
     await pages[0].locator('#start-online').click();
     for (const page of pages) await page.waitForSelector('body[data-mode="playing"]');
+    assert.equal(await pages[1].locator('#settings-screen').isHidden(), true, 'ordinary local settings do not latch background suspension on remote start');
     assert.match(await pages[1].locator('#objective-status').textContent(), /RED FLAG: HOME.*BLUE FLAG: HOME/);
     await pages[0].setViewportSize({ width: 960, height: 540 });
     for (const id of ['home-button', 'pause-button', 'loadout-button', 'objective-status', 'joystick', 'fire-button', 'ammo-panel']) {
@@ -242,5 +267,5 @@ try {
     }
   }
   assert.deepEqual(errors, []);
-  console.log(`Multiplayer browser passed: two real clients, movement/shots/ammo, authoritative settings/skins, Home cancel/confirm/host transfer, live clock, remote overlay invalidation, departed winner, team/flag HUD and peer screenshots. ${base}`);
+  console.log(`Multiplayer browser passed: two real clients, movement/shots/ammo, authoritative settings/skins, Home cancel/confirm/host transfer, live clock, native background remote-start suspension until explicit Resume, remote overlay invalidation, departed winner, team/flag HUD and peer screenshots. ${base}`);
 } finally { await browser.close(); if (server) await server.close(); }

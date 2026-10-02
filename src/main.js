@@ -27,12 +27,16 @@ const settings = {
 let selection = validateSelection(saved.selection, saved.weaponId);
 let selected = getWeapon(selection.weaponId), activeClass = selected.classId;
 let mode = 'home', settingsOrigin = 'home', game, preview, home, multiplayer, toastUntil = 0, confirmation = null;
+let backgroundSuspended = false;
 const audio = new GameAudio();
 const input = new Input(() => pauseGame());
 const classNames = { assault: 'ASSAULT', smg: 'SMG', shotgun: 'SHOTGUN', sniper: 'SNIPER', marksman: 'MARKSMAN', lmg: 'LMG', sidearm: 'SIDEARM' };
 const traits = { assault: 'Versatile. Reliable. Ready for anything.', smg: 'Fast hands. Close quarters. No hesitation.', shotgun: 'Get close. Make every shot count.', sniper: 'One sightline. One perfect shot.', marksman: 'Precision at your own pace.', lmg: 'Big magazines. Keep the pressure on.', sidearm: 'Travel light. Hit above your weight.' };
 function persist() { try { localStorage.setItem(storageKey, JSON.stringify({ weaponId: selected.id, selection, settings })); } catch { /* Play remains available without storage. */ } }
 function setMode(next) {
+  // A remote start may create/enable an arena while native rendering is
+  // suspended. Re-pause it synchronously and retain that state on foreground.
+  if (next === 'playing' && (backgroundSuspended || document.hidden)) { backgroundSuspended = true; next = 'paused'; }
   confirmation = null; $('confirm-home-screen').hidden = true;
   mode = next; document.body.dataset.mode = next;
   // Remote starts, results and disconnects replace any locally open settings.
@@ -97,9 +101,10 @@ function selectConfiguration(next) {
 function pauseGame() {
   if (mode === 'playing') { setMode('paused'); $('resume-button').focus({ preventScroll: true }); }
 }
-window.pauseGame = pauseGame;
-document.addEventListener('visibilitychange', () => { if (document.hidden) pauseGame(); });
-window.addEventListener('blur', pauseGame);
+function suspendForBackground() { backgroundSuspended = true; input.clear(); pauseGame(); }
+window.pauseGame = suspendForBackground;
+document.addEventListener('visibilitychange', () => { if (document.hidden) suspendForBackground(); });
+window.addEventListener('blur', suspendForBackground);
 
 function silhouette(weapon) {
   const colour = '#' + weapon.colour.toString(16).padStart(6, '0');
@@ -151,7 +156,11 @@ function deploy(forceNew = false) {
 $('play-button').addEventListener('click', () => deploy());
 $('again-button').addEventListener('click', () => { if (multiplayer && multiplayer.isConnected()) multiplayer.open(); else deploy(true); });
 $('pause-button').addEventListener('click', pauseGame);
-$('resume-button').addEventListener('click', () => { audio.unlock(); if (multiplayer && multiplayer.isActive()) multiplayer.resume(); else game.resume(); setMode('playing'); document.activeElement.blur(); });
+$('resume-button').addEventListener('click', () => {
+  if (document.hidden) { suspendForBackground(); return; }
+  backgroundSuspended = false;
+  audio.unlock(); if (multiplayer && multiplayer.isActive()) multiplayer.resume(); else game.resume(); setMode('playing'); document.activeElement.blur();
+});
 for (const id of ['loadout-button', 'pause-loadout', 'results-loadout']) $(id).addEventListener('click', showArmory);
 $('retry-button').addEventListener('click', () => location.reload());
 function updateSettings() {
