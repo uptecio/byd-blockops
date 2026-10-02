@@ -69,9 +69,9 @@ test('a ray starting inside a solid cannot see outside it', () => {
   assert.equal(hasLineOfSight({ x: 0, y: 1, z: 0 }, { x: 5, y: 1, z: 0 }, [wall]), false);
 });
 
-test('arena spawn positions are walkable and several bots are visible on entry', () => {
+test('Courtyard preserves its clear spawn positions and first-enemy sightlines', () => {
   const scene = new THREE.Scene();
-  const world = createWorld(THREE, scene);
+  const world = createWorld(THREE, scene, 'courtyard');
   assert.ok(world.spawns.length >= 8);
   assert.equal(canOccupy(world.playerSpawn.x, world.playerSpawn.z, 0.4, world.solids), true);
   for (const spawn of world.spawns) {
