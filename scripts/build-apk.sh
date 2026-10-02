@@ -26,15 +26,16 @@ if [[ -z "$task_gradle" || ! -x "$task_gradle" ]]; then
 fi
 
 task_assets="$task_root/android/app/src/main/assets"
-mkdir -p "$task_assets" "$task_root/artifacts"
+task_dist="${DIST_DIR:-$task_root/dist}"
 for task_asset in index.html game.js styles.css THREE-LICENSE.txt; do
-    if [[ ! -s "$task_root/dist/$task_asset" ]]; then
-        printf 'Missing dist/%s. Run npm run build first.\n' "$task_asset" >&2
+    if [[ ! -f "$task_dist/$task_asset" || ! -s "$task_dist/$task_asset" ]]; then
+        printf 'Missing %s/%s. Build the selected asset directory first.\n' "$task_dist" "$task_asset" >&2
         exit 1
     fi
 done
+mkdir -p "$task_assets" "$task_root/artifacts"
 for task_asset in index.html game.js styles.css THREE-LICENSE.txt; do
-    cp -- "$task_root/dist/$task_asset" "$task_assets/$task_asset"
+    cp -- "$task_dist/$task_asset" "$task_assets/$task_asset"
 done
 
 export ANDROID_HOME="$task_sdk"

@@ -1,6 +1,6 @@
 {
   "name": "block-ops-offline",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "private": true,
   "type": "module",
   "scripts": {
@@ -12,6 +12,7 @@
     "test:home": "node tests/home.browser.mjs",
     "test:touch": "node tests/input.browser.mjs",
     "test:multiplayer": "node tests/multiplayer.browser.mjs",
+    "test:configurations": "node tests/configurations.browser.mjs",
     "apk": "npm run build && bash scripts/build-apk.sh"
   },
   "dependencies": {

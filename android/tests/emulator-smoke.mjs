@@ -31,8 +31,8 @@ try {
   assert.ok(target, 'Game must load from packaged local HTTPS assets');
   socket = new WebSocket(target.webSocketDebuggerUrl);
   await new Promise((resolve, reject) => { socket.onopen = resolve; socket.onerror = reject; });
-  let next = 0;
-  const pending = new Map(), errors = [], remote = [];
+  let next = 0, pageLoaded;
+  const pending = new Map(), errors = [], remote = [], webSockets = [];
   socket.onmessage = event => {
     const message = JSON.parse(event.data);
     if (message.id) {
@@ -40,13 +40,15 @@ try {
       if (!request) return;
       pending.delete(message.id); clearTimeout(request.timeout);
       message.error ? request.reject(new Error(JSON.stringify(message.error))) : request.resolve(message.result);
-    } else if (message.method === 'Runtime.exceptionThrown') errors.push(message.params.exceptionDetails.text);
+    } else if (message.method === 'Page.loadEventFired') pageLoaded?.();
+    else if (message.method === 'Runtime.exceptionThrown') errors.push(message.params.exceptionDetails.text);
     else if (message.method === 'Log.entryAdded' && message.params.entry.level === 'error') {
       const entry = message.params.entry;
       // Chromium probes a favicon automatically; the exact asset whitelist
       // intentionally blocks that optional browser icon with a local 403.
       if (!(entry.source === 'network' && entry.url === 'https://appassets.androidplatform.net/favicon.ico')) errors.push(JSON.stringify(entry));
     }
+    else if (message.method === 'Network.webSocketCreated') webSockets.push(message.params.url);
     else if (message.method === 'Network.requestWillBeSent' && !message.params.request.url.startsWith('https://appassets.androidplatform.net/')) remote.push(message.params.request.url);
   };
   const send = (method, params = {}) => new Promise((resolve, reject) => {
@@ -60,6 +62,19 @@ try {
     if (result.exceptionDetails) throw new Error(JSON.stringify(result.exceptionDetails));
     return result.result.value;
   };
+  const reload = async () => {
+    let timeout;
+    const loaded = new Promise((resolve, reject) => {
+      timeout = setTimeout(() => reject(new Error('Native document reload timed out')), 10000);
+      pageLoaded = resolve;
+    });
+    try { await send('Page.reload'); await loaded; }
+    finally { clearTimeout(timeout); pageLoaded = undefined; }
+  };
+  const tap = async id => {
+    const point = await evaluate(`(() => { const r = document.getElementById(${JSON.stringify(id)}).getBoundingClientRect(); return { x: (r.x + r.width / 2) * devicePixelRatio, y: (r.y + r.height / 2) * devicePixelRatio }; })()`);
+    await shell('input', 'tap', String(Math.round(point.x)), String(Math.round(point.y)));
+  };
   const state = () => evaluate('document.getElementById("timer") ? ({hidden:document.hidden,mode:document.body.dataset.mode,timer:document.getElementById("timer").textContent,fatal:!document.getElementById("fatal-screen").hidden,pause:!document.getElementById("pause-screen").hidden,classes:document.querySelectorAll(".class-tab").length}) : ({mode:"loading"})');
   const wait = async predicate => {
     const deadline = Date.now() + 10000;
@@ -70,10 +85,19 @@ try {
     }
     assert.fail(`Native state timeout: ${JSON.stringify(await state())}`);
   };
-  await send('Runtime.enable'); await send('Log.enable'); await send('Network.enable');
-  await evaluate('location.reload()');
-  await wait(current => !current.hidden && !current.fatal && current.classes === 7);
+  await send('Runtime.enable'); await send('Log.enable'); await send('Network.enable'); await send('Page.enable');
+  await reload();
+  await wait(current => current.mode === 'home' && !current.hidden && !current.fatal && current.classes === 7);
   assert.equal(await evaluate('innerWidth > innerHeight'), true);
+  assert.equal(await evaluate('document.querySelectorAll("[data-map]").length'), 8);
+  assert.equal(await evaluate('document.querySelectorAll("[data-skin]").length'), 8);
+  await evaluate('document.querySelector("[data-map=space-station]").click(); document.querySelector("[data-skin=space-guard]").click()');
+  await reload();
+  await wait(current => current.mode === 'home');
+  assert.equal(await evaluate('document.querySelector("[data-map=space-station]").getAttribute("aria-pressed")'), 'true');
+  assert.equal(await evaluate('document.querySelector("[data-skin=space-guard]").getAttribute("aria-pressed")'), 'true');
+  assert.equal(await evaluate('document.getElementById("character-preview").width > 1'), true);
+  await evaluate('document.querySelector("[data-mode-id=ffa]").click(); document.getElementById("home-armory").click()');
   assert.equal(await evaluate('document.querySelectorAll(".weapon-card").length'), 4);
   await evaluate('document.getElementById("play-button").click()');
   await wait(current => current.mode === 'playing' && current.timer !== '03:00');
@@ -93,9 +117,29 @@ try {
   const foreground = await wait(current => !current.hidden);
   assert.equal(foreground.mode, 'paused', 'Foregrounding requires explicit resume');
   assert.equal(foreground.pause, true); assert.equal(foreground.timer, background.timer);
+  await tap('pause-home');
+  await evaluate('document.getElementById("confirm-home").click()');
+  await wait(current => current.mode === 'home');
+  for (const [modeId, label, target] of [['ffa', 'FREE FOR ALL', '15'], ['tdm', 'TEAM DEATHMATCH', '30'], ['ctf', 'CAPTURE THE FLAG', '3 CAPTURES']]) {
+    await evaluate(`document.querySelector('[data-mode-id=${modeId}]').click(); document.getElementById('home-solo').click()`);
+    await wait(current => current.mode === 'playing');
+    assert.match(await evaluate('document.getElementById("hud-mode").textContent'), new RegExp(label));
+    assert.equal((await evaluate('document.querySelector(".score-target").textContent')).trim(), `/ ${target}`);
+    assert.equal(await evaluate('Number(document.getElementById("ammo-count").textContent)+Number(document.getElementById("reserve-count").textContent)'), 500);
+    if (modeId === 'ctf') assert.match(await evaluate('document.getElementById("objective-status").textContent'), /RED FLAG: HOME.*BLUE FLAG: HOME/);
+    if (modeId !== 'ffa') assert.match(await evaluate('document.getElementById("hud-mode").textContent'), /RED/);
+    await evaluate('document.getElementById("home-button").click()');
+    const confirmation = await state();
+    await delay(1100); assert.equal((await state()).timer, confirmation.timer, 'Home confirmation freezes solo clock');
+    await evaluate('document.getElementById("cancel-home").click()');
+    await wait(current => current.mode === 'playing');
+    await evaluate('document.getElementById("home-button").click(); document.getElementById("confirm-home").click()');
+    await wait(current => current.mode === 'home');
+  }
   assert.deepEqual(errors, [], 'No JavaScript or CSP errors');
   assert.deepEqual(remote, [], 'No external runtime requests');
-  console.log('Native emulator smoke passed: offline menu, deploy, 500 rounds, landscape, Android back/background pause, explicit resume required.');
+  assert.deepEqual(webSockets, [], 'Offline Home/solo never opens a WebSocket');
+  console.log('Native emulator smoke passed: offline Home/persistence/preview, nondefault map/skin, all modes, Home cancel/confirm, 500 rounds, landscape, Back/background pause, no external requests or WebSockets.');
 } finally {
   if (socket) socket.close();
   if (forwarded) await command('forward', '--remove', 'tcp:9228');
