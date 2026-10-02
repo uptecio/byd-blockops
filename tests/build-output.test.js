@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
-import { readFile, readdir, mkdtemp, cp, symlink, rm } from 'node:fs/promises';
+import { readFile, readdir, mkdtemp, mkdir, writeFile, cp, symlink, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { resolve, join } from 'node:path';
 import { createHash } from 'node:crypto';
@@ -15,19 +15,26 @@ async function files(root) {
   }
   return result;
 }
+async function optionalFiles(root) {
+  try { return await files(root); }
+  catch (error) { if (error.code === 'ENOENT') return null; throw error; }
+}
 test('isolated build and preview serve staged assets while live dist is preserved', async context => {
-  const before = await files('dist');
+  const before = await optionalFiles('dist');
   // Even a regression that ignores BUILD_DIR can write only this test-owned cwd.
   const scratch = await mkdtemp(join(tmpdir(), 'arena-build-'));
   context.after(() => rm(scratch, { recursive: true, force: true }));
   for (const name of ['src', 'node_modules']) await symlink(resolve(name), join(scratch, name), 'dir');
-  for (const name of ['dist', 'index.html', 'game-server.json']) await cp(name, join(scratch, name), { recursive: true });
+  for (const name of ['index.html', 'game-server.json']) await cp(name, join(scratch, name));
+  await mkdir(join(scratch, 'dist'));
+  await writeFile(join(scratch, 'dist', 'game.js'), 'disposable baseline bundle');
+  await writeFile(join(scratch, 'dist', 'index.html'), 'disposable baseline page');
   const scratchBefore = await files(join(scratch, 'dist'));
   const build = spawn(process.execPath, [resolve('scripts/build.mjs')], { cwd: scratch, env: { ...process.env, BUILD_DIR: staged } });
   let output = ''; build.stdout.on('data', data => { output += data; }); build.stderr.on('data', data => { output += data; });
   const exit = await new Promise(resolve => build.on('close', resolve));
   assert.equal(exit, 0, output);
-  assert.deepEqual(await files('dist'), before);
+  assert.deepEqual(await optionalFiles('dist'), before);
   assert.deepEqual(await files(join(scratch, 'dist')), scratchBefore);
   const stageRoot = join(scratch, staged);
   assert.ok((await readFile(`${stageRoot}/game.js`, 'utf8')).length > 10000);
@@ -39,6 +46,22 @@ test('isolated build and preview serve staged assets while live dist is preserve
       server.on('error', reject);
     });
     assert.equal(await (await fetch(`${address}/game.js`)).text(), await readFile(`${stageRoot}/game.js`, 'utf8'));
-    assert.deepEqual(await files('dist'), before);
+    assert.deepEqual(await optionalFiles('dist'), before);
   } finally { server.kill(); await new Promise(resolve => server.on('close', resolve)); }
+});
+
+test('build-output validation succeeds in a checkout without generated dist', async context => {
+  const checkout = await mkdtemp(join(tmpdir(), 'arena-clean-checkout-'));
+  context.after(() => rm(checkout, { recursive: true, force: true }));
+  for (const name of ['src', 'node_modules', 'scripts']) await symlink(resolve(name), join(checkout, name), 'dir');
+  for (const name of ['index.html', 'game-server.json']) await cp(name, join(checkout, name));
+  await assert.rejects(readdir(join(checkout, 'dist')), { code: 'ENOENT' });
+  // Do not inherit the parent test-runner marker: this is a fresh runner.
+  const { NODE_TEST_CONTEXT, ...env } = process.env;
+  const child = spawn(process.execPath, ['--test', '--test-name-pattern=^isolated build', resolve('tests/build-output.test.js')], { cwd: checkout, env });
+  let output = ''; child.stdout.on('data', data => { output += data; }); child.stderr.on('data', data => { output += data; });
+  const exit = await new Promise(resolve => child.on('close', resolve));
+  assert.equal(exit, 0, output);
+  assert.match(output, /isolated build and preview serve staged assets/);
+  await assert.rejects(readdir(join(checkout, 'dist')), { code: 'ENOENT' });
 });
