@@ -55,15 +55,19 @@ try {
   assert.equal(saved.weaponId, 'awp');
   assert.deepEqual(saved.selection, { mapId: 'space-station', modeId: 'ctf', skinId: 'space-guard', weaponId: 'awp' });
   await mkdir(artifacts, { recursive: true });
-  for (const size of [{ width: 1200, height: 700 }, { width: 960, height: 540 }]) {
+  for (const size of [{ width: 1200, height: 700 }, { width: 960, height: 540 }, { width: 854, height: 480 }, { width: 853, height: 480 }]) {
     await page.setViewportSize(size);
+    await page.screenshot({ path: `${artifacts}/home-${size.width}.png` });
+    const footer = await page.locator('#home-screen .app-footer').boundingBox();
     for (const id of ['home-solo', 'home-online', 'home-armory', 'home-settings', 'character-preview']) {
       const bounds = await page.locator('#' + id).boundingBox();
       assert.ok(bounds && bounds.x >= 0 && bounds.y >= 0 && bounds.x + bounds.width <= size.width && bounds.y + bounds.height <= size.height, `${id} fits ${size.width}×${size.height}`);
+      if (id !== 'character-preview') {
+        assert.ok(bounds.width >= 44 && bounds.height >= 44, `${id} retains a usable touch target`);
+        assert.ok(bounds.y + bounds.height <= footer.y, `${id} does not overlap parked-play footer`);
+      }
     }
-    const footer = await page.locator('#home-screen .app-footer').boundingBox();
-    const deploy = await page.locator('#home-solo').boundingBox();
-    assert.ok(deploy.y + deploy.height <= footer.y, 'parked-play footer does not overlap actions');
+    assert.ok(footer.y + footer.height <= size.height, 'parked-play footer fits viewport');
     assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth), false);
     await page.screenshot({ path: `${artifacts}/home-${size.width}.png` });
   }
@@ -160,5 +164,5 @@ try {
   await page.locator('#home-armory').click();
   assert.equal(await page.locator('#selected-name').textContent(), 'M4A1');
   assert.deepEqual(errors, [], 'no page exceptions');
-  console.log('Home browser passed: catalogues, previews, persistence/fallback, armory, configured solo, confirmation/input, compact bounds and 26 screenshots.');
+  console.log('Home browser passed: catalogues, previews, persistence/fallback, armory, configured solo, confirmation/input, compact bounds and 28 screenshots.');
 } finally { await browser.close(); await server.close(); await new Promise(resolve => pendingServer.close(resolve)); }
