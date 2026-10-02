@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { createBotModel } from './world.js';
+import { createAvatarModel } from './avatar.js';
 import { disposeModel } from './game.js';
 
 const neutral = (yaw, pitch) => ({ type: 'input', x: 0, y: 0, yaw, pitch, fire: false, firePressed: false, jump: false, reload: false, zoom: false });
@@ -31,15 +31,20 @@ export class OnlineArena {
     this.id = id; this.running = true; this.suspended = false; this.endReported = false;
     this.lastEvent = room.events.reduce((maximum, event) => Math.max(maximum, event.id), -1);
     this.sendTimer = 0; this.hudTimer = 0; this.previousRespawn = own.respawnRemaining;
-    this.game.start(own.weaponId, { ...settings, bots: 0 }); this.game.active = false;
+    this.game.start(own.weaponId, { ...settings, mapId: room.mapId, modeId: room.modeId, skinId: own.skinId, bots: 0 }); this.game.active = false;
     this.game.yaw = own.yaw; this.game.pitch = own.pitch;
     Object.assign(this.game.player, { x: own.x, z: own.z, jump: own.y });
-    this.sync(room, true); this.game.input.setEnabled(room.phase === 'playing'); this.game.placeCamera();
+    this.sync(room, true); this.game.input.setEnabled(room.phase === 'playing' && !this.suspended); this.game.placeCamera();
   }
   sync(room, initial = false) {
     if (!this.running) return;
     const game = this.game, own = room.players.find(player => player.id === this.id);
     if (!own) return;
+    if (game.world.definition.id !== room.mapId) {
+      for (const remote of this.remotes.values()) disposeModel(remote.model);
+      this.remotes.clear(); game.loadMap(room.mapId); initial = true;
+    }
+    Object.assign(game.settings, { mapId: room.mapId, modeId: room.modeId, skinId: own.skinId });
     this.room = room;
     this.target = { x: own.x, z: own.z, y: own.y };
     const respawned = this.previousRespawn > 0 && own.respawnRemaining === 0;
@@ -50,8 +55,14 @@ export class OnlineArena {
     if (own.health < game.player.health) game.damageFlash = .3;
     if (own.respawnRemaining > 0 && this.previousRespawn <= 0) { game.input.clear(); this.pending = { firePressed: false, jump: false, reload: false }; this.onToast('ELIMINATED · RESPAWNING'); }
     this.previousRespawn = own.respawnRemaining;
-    Object.assign(game.player, { health: own.health, dead: own.respawnRemaining, protected: own.protectedRemaining });
-    Object.assign(game.match, { timeLeft: room.timeLeft, kills: own.kills, deaths: own.deaths, ended: room.phase === 'ended' });
+    Object.assign(game.player, { id: own.id, name: own.name, teamId: own.teamId, skinId: own.skinId, pendingSkinId: own.pendingSkinId, health: own.health, dead: own.respawnRemaining, protected: own.protectedRemaining });
+    game.matchView = {
+      mapId: room.mapId, modeId: room.modeId, timeLeft: room.timeLeft, ended: room.phase === 'ended',
+      winnerId: room.winnerId, winnerName: room.winnerName, winnerTeamId: room.winnerTeamId,
+      teamScores: { ...room.teamScores }, flags: room.flags ? Object.fromEntries(Object.entries(room.flags).map(([team, flag]) => [team, { ...flag }])) : null,
+      players: room.players.map(player => ({ id: player.id, name: player.name, teamId: player.teamId, skinId: player.skinId, kills: player.kills, deaths: player.deaths })),
+    };
+    game.match = { ...game.matchView, kills: own.kills, deaths: own.deaths };
     if (game.weapon.id !== own.weaponId) game.setWeapon(own.weaponId);
     if (own.reloadRemaining > 0 && game.weaponState.reloadRemaining === 0 && !this.suspended) game.audio.reload();
     Object.assign(game.weaponState, { ammo: own.ammo, reserve: own.reserve, reloadRemaining: own.reloadRemaining, cooldown: 0 });
@@ -60,11 +71,12 @@ export class OnlineArena {
       if (player.id === this.id) continue;
       present.add(player.id);
       let remote = this.remotes.get(player.id);
-      if (!remote) {
-        const model = createBotModel(THREE, 0xe99062); game.world.botGroup.add(model);
+      if (!remote || remote.model.userData.skinId !== player.skinId || remote.model.userData.teamId !== player.teamId || remote.model.userData.weaponId !== player.weaponId || remote.name !== player.name) {
+        disposeModel(remote?.model);
+        const model = createAvatarModel(THREE, player); game.world.botGroup.add(model);
         addNameLabel(model, player.name);
         model.position.set(player.x, player.y, player.z);
-        remote = { model, player }; this.remotes.set(player.id, remote);
+        remote = { model, player, name: player.name }; this.remotes.set(player.id, remote);
       }
       remote.player = player; remote.model.visible = player.respawnRemaining <= 0;
       remote.model.rotation.y = player.yaw + Math.PI;
@@ -79,9 +91,26 @@ export class OnlineArena {
       } else if (event.type === 'hit') {
         if (event.playerId === this.id) { game.hitFlash = .18; game.audio.hit(); }
         if (event.targetId === this.id) game.damageFlash = .3;
-      } else if (event.type === 'kill' && event.playerId === this.id) { game.audio.kill(); this.onToast(`+1 ELIMINATION · ${own.kills} / 15`); }
+      } else if (event.type === 'kill' && event.playerId === this.id) {
+        game.audio.kill();
+        this.onToast(room.modeId === 'ffa' ? `+1 ELIMINATION · ${own.kills} / 15` : room.modeId === 'tdm' ? `+1 ELIMINATION · ${own.teamId.toUpperCase()} ${room.teamScores[own.teamId]} / 30` : '+1 ELIMINATION');
+      } else if (event.type.startsWith('flag-')) {
+        const team = event.teamId.toUpperCase();
+        const messages = { 'flag-pickup': `${team} FLAG PICKED UP`, 'flag-drop': `${team} FLAG DROPPED`, 'flag-return': `${team} FLAG RETURNED`, 'flag-capture': `${team} TEAM CAPTURED A FLAG` };
+        this.onToast(messages[event.type]);
+      }
     }
+    this.updateObjectives();
+    if (room.phase !== 'playing' && !this.suspended) this.pause();
     if (room.phase === 'ended' && !initial && !this.endReported) { this.endReported = true; this.pause(); this.onEnd(game.match); }
+  }
+  updateObjectives() {
+    const game = this.game;
+    const actors = this.room.phase === 'ended' ? [] : [
+      { id: this.id, x: game.player.x, y: game.player.jump, z: game.player.z },
+      ...[...this.remotes].map(([id, remote]) => ({ id, x: remote.model.position.x, y: remote.model.position.y, z: remote.model.position.z })),
+    ];
+    game.objectives.update({ flags: game.matchView.flags, actors, viewerId: this.id });
   }
   update(dt) {
     if (!this.running || !Number.isFinite(dt) || dt <= 0) return;
@@ -112,6 +141,7 @@ export class OnlineArena {
       const target = remote.player;
       remote.model.position.lerp(new THREE.Vector3(target.x, target.y, target.z), smoothing);
     }
+    this.updateObjectives();
     game.recoil *= Math.exp(-dt * 13); game.placeCamera();
     // Online shots follow the transmitted pitch. Keep recoil on the weapon
     // model so the reticle and the server's authoritative ray stay aligned.
@@ -146,6 +176,8 @@ export class OnlineArena {
   stop() {
     if (this.running) this.pause();
     for (const remote of this.remotes.values()) disposeModel(remote.model);
-    this.remotes.clear(); this.game.clearEffects(); this.running = false;
+    this.remotes.clear(); this.game.clearEffects();
+    if (this.running) { this.game.objectives?.dispose(); this.game.objectives = null; }
+    this.running = false; this.suspended = true; this.room = null; this.target = null;
   }
 }

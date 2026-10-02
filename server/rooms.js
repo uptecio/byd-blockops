@@ -49,7 +49,7 @@ export class RoomManager {
     if (this.rooms.size >= this.maxRooms) throw new Error('Server room limit reached.');
     let code;
     do { code = Array.from({ length: 6 }, () => ALPHABET[randomInt(ALPHABET.length)]).join(''); } while (this.rooms.has(code));
-    const room = { code, hostId: id, phase: 'lobby', timeLeft: 180, winnerId: null, winnerTeamId: null, mapId, modeId, map, physics: physicsFor(map), players: new Map(), lifeCounters: new Map(), events: [], nextEventId: 1,
+    const room = { code, hostId: id, phase: 'lobby', timeLeft: 180, winnerId: null, winnerName: null, winnerTeamId: null, mapId, modeId, map, physics: physicsFor(map), players: new Map(), lifeCounters: new Map(), events: [], nextEventId: 1,
       modeState: createModeState({ modeId, map, participants: [] }) };
     this.addPlayer(room, id, name, weaponId, skinId);
     this.rooms.set(code, room);
@@ -101,7 +101,7 @@ export class RoomManager {
   rebuildMode(room, map, modeId) {
     const assignments = assignTeams([...room.players.keys()], modeId);
     const modeState = createModeState({ modeId, map, participants: [...room.players.keys()].map(id => ({ id, teamId: assignments[id] })) });
-    Object.assign(room, { map, mapId: map.id, modeId, physics: physicsFor(map), modeState, timeLeft: 180, winnerId: null, winnerTeamId: null, events: [] });
+    Object.assign(room, { map, mapId: map.id, modeId, physics: physicsFor(map), modeState, timeLeft: 180, winnerId: null, winnerName: null, winnerTeamId: null, events: [] });
     for (const player of room.players.values()) Object.assign(player, { health: 0, teamId: assignments[player.id], kills: 0, deaths: 0 });
     for (const player of room.players.values()) this.spawn(room, player);
   }
@@ -255,6 +255,7 @@ export class RoomManager {
 
   syncMode(room) {
     const state = room.modeState;
+    if (state.ended && room.phase !== 'ended') room.winnerName = state.winnerId === null ? null : room.players.get(state.winnerId)?.name ?? null;
     room.timeLeft = state.timeLeft; room.winnerId = state.winnerId; room.winnerTeamId = state.winnerTeamId;
     if (state.ended) room.phase = 'ended';
     for (const player of room.players.values()) {
@@ -265,7 +266,7 @@ export class RoomManager {
   snapshot(room, consumeEvents = true) {
     const events = structuredClone(room.events); if (consumeEvents) room.events = [];
     const { mapId, modeId, teamScores, flags, winnerTeamId } = getModeSnapshot(room.modeState);
-    return { code: room.code, hostId: room.hostId, phase: room.phase, timeLeft: room.timeLeft, winnerId: room.winnerId, mapId, modeId, teamScores, winnerTeamId, flags, events,
+    return { code: room.code, hostId: room.hostId, phase: room.phase, timeLeft: room.timeLeft, winnerId: room.winnerId, winnerName: room.winnerName, mapId, modeId, teamScores, winnerTeamId, flags, events,
       players: [...room.players.values()].map(player => {
         const state = player.inventory.get(player.weaponId);
         const { id, name, x, z, y, yaw, pitch, health, kills, deaths, weaponId, respawnRemaining, protectedRemaining, teamId, skinId, pendingSkinId } = player;

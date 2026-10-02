@@ -14,6 +14,22 @@ function pair(mapId = 'courtyard', modeId = 'ffa', weaponId = 'awp') {
 function put(player, x, z) { Object.assign(player, { x, z, y: 0, protectedRemaining: 0 }); }
 function fire(manager) { manager.input('a', { ...controls, firePressed: true }); manager.tick(1 / 30); }
 
+test('FFA winner identity is frozen for late joiners after departure and reset on new configuration', () => {
+  const { manager, room, a, b } = pair();
+  assert.equal(manager.snapshot(room).winnerName, null);
+  manager.start('a'); put(a, 0, 5); put(b, 0, -5); fire(manager); manager.tick(180);
+  const final = manager.snapshot(room);
+  assert.equal(final.phase, 'ended'); assert.equal(final.winnerId, 'a'); assert.equal(final.winnerName, 'A');
+  manager.leave('a'); manager.join('c', room.code, 'Late Join', 'g17');
+  const late = manager.snapshot(room);
+  assert.equal(late.winnerId, 'a'); assert.equal(late.winnerName, 'A');
+  assert.equal(late.players.some(player => player.id === 'a'), false);
+  manager.start('b'); assert.equal(manager.snapshot(room).winnerName, null);
+  manager.tick(180); assert.equal(manager.snapshot(room).winnerName, null, 'draw has no winner name');
+  manager.configure('b', { mapId: 'harbor', modeId: 'tdm' });
+  assert.equal(manager.snapshot(room).winnerName, null);
+});
+
 // Catches adapters silently falling back to the default map/mode or wrong team spawns.
 for (const map of MAPS) for (const modeId of ['ffa', 'tdm', 'ctf']) {
   test(`${map.id}/${modeId} starts an authoritative round with safe mode-specific spawns`, () => {

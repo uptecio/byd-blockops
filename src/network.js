@@ -1,6 +1,17 @@
 import { WEAPONS } from './weapons.js';
+import { MAPS, DEFAULT_MAP_ID } from './maps.js';
+import { MODES } from './modes.js';
+import { SKINS, DEFAULT_SKIN_ID } from './skins.js';
+import { PROTOCOL_VERSION } from './protocol.js';
 
 const weaponIds = new Set(WEAPONS.map(weapon => weapon.id));
+const mapIds = new Set(MAPS.map(map => map.id));
+const modeIds = new Set(MODES.map(mode => mode.id));
+const skinIds = new Set(SKINS.map(skin => skin.id));
+const teams = ['red', 'blue'];
+const validId = id => typeof id === 'string' && id.trim().length > 0;
+const count = value => Number.isSafeInteger(value) && value >= 0;
+const updateRequired = 'Update required: install the latest Block Ops APK or reload the game.';
 const finitePoint = point => point && ['x', 'y', 'z'].every(key => Number.isFinite(point[key]));
 
 export function normaliseServerUrl(raw) {
@@ -12,15 +23,45 @@ export function normaliseServerUrl(raw) {
 }
 
 function validRoom(room) {
-  if (!room || typeof room.code !== 'string' || typeof room.hostId !== 'string' || !['lobby', 'playing', 'ended'].includes(room.phase) || !Number.isFinite(room.timeLeft) || room.timeLeft < 0 || !Array.isArray(room.players) || room.players.length > 8 || !Array.isArray(room.events)) return false;
+  if (!room || !validId(room.code) || !validId(room.hostId) || !['lobby', 'playing', 'ended'].includes(room.phase) || !Number.isFinite(room.timeLeft) || room.timeLeft < 0 || room.timeLeft > 180 || !Array.isArray(room.players) || room.players.length < 1 || room.players.length > 8 || !Array.isArray(room.events)) return false;
+  if (!mapIds.has(room.mapId) || !modeIds.has(room.modeId) || !room.teamScores || !teams.every(team => count(room.teamScores[team])) || Object.keys(room.teamScores).some(team => !teams.includes(team))) return false;
+  if (room.winnerId !== null && !validId(room.winnerId)) return false;
+  if (room.winnerId === null ? room.winnerName !== null : !validId(room.winnerName)) return false;
+  if (room.winnerTeamId !== null && !teams.includes(room.winnerTeamId)) return false;
+  if (room.phase !== 'ended' && (room.winnerId !== null || room.winnerTeamId !== null)) return false;
+  if (room.modeId === 'ffa' ? room.winnerTeamId !== null : room.winnerId !== null) return false;
   const ids = new Set();
   for (const player of room.players) {
-    if (!player || typeof player.id !== 'string' || ids.has(player.id) || typeof player.name !== 'string' || !weaponIds.has(player.weaponId)) return false;
+    if (!player || !validId(player.id) || ids.has(player.id) || typeof player.name !== 'string' || !weaponIds.has(player.weaponId) || !skinIds.has(player.skinId) || (player.pendingSkinId !== null && !skinIds.has(player.pendingSkinId))) return false;
+    if (room.modeId === 'ffa' ? player.teamId !== null : !teams.includes(player.teamId)) return false;
     ids.add(player.id);
     if (!['x', 'y', 'z', 'yaw', 'pitch', 'health', 'kills', 'deaths', 'ammo', 'reserve', 'reloadRemaining', 'respawnRemaining', 'protectedRemaining'].every(key => Number.isFinite(player[key]))) return false;
     if (['health', 'kills', 'deaths', 'ammo', 'reserve', 'reloadRemaining', 'respawnRemaining', 'protectedRemaining'].some(key => player[key] < 0)) return false;
+    if (!['kills', 'deaths', 'ammo', 'reserve'].every(key => count(player[key]))) return false;
   }
-  return room.events.every(event => event && Number.isSafeInteger(event.id) && ['shot', 'hit', 'kill'].includes(event.type) && typeof event.playerId === 'string' && (!event.from || finitePoint(event.from)) && (!event.to || finitePoint(event.to)));
+  if (!ids.has(room.hostId)) return false;
+  if (room.modeId !== 'ctf') { if (room.flags !== null) return false; }
+  else {
+    if (!room.flags || Object.keys(room.flags).some(team => !teams.includes(team))) return false;
+    const carriers = new Set();
+    for (const team of teams) {
+      const flag = room.flags[team];
+      if (!flag || flag.teamId !== team || !['home', 'carried', 'dropped'].includes(flag.status) || !Number.isFinite(flag.x) || !Number.isFinite(flag.z) || !Number.isFinite(flag.returnRemaining) || flag.returnRemaining < 0 || flag.returnRemaining > 15) return false;
+      if (flag.status === 'carried') {
+        if (!validId(flag.carrierId) || carriers.has(flag.carrierId) || flag.returnRemaining !== 0 || room.phase === 'lobby') return false;
+        carriers.add(flag.carrierId);
+        if (room.phase === 'playing') {
+          const carrier = room.players.find(player => player.id === flag.carrierId);
+          if (!carrier || carrier.teamId === team || carrier.health <= 0 || carrier.respawnRemaining > 0) return false;
+        }
+      } else if (flag.carrierId !== null || (flag.status === 'home' ? flag.returnRemaining !== 0 : flag.returnRemaining <= 0)) return false;
+    }
+  }
+  return room.events.every(event => {
+    if (!event || !count(event.id)) return false;
+    if (['flag-pickup', 'flag-drop', 'flag-return', 'flag-capture'].includes(event.type)) return room.modeId === 'ctf' && teams.includes(event.teamId) && (validId(event.playerId) || (event.type === 'flag-return' && event.playerId === null));
+    return ['shot', 'hit', 'kill'].includes(event.type) && validId(event.playerId) && (event.targetId === undefined || validId(event.targetId)) && (event.from === undefined || finitePoint(event.from)) && (event.to === undefined || finitePoint(event.to));
+  });
 }
 
 export class RoomClient {
@@ -47,8 +88,9 @@ export class RoomClient {
       this.cancelPending = () => { intentional = true; if (!settled) fail('Connection cancelled.'); };
       socket.addEventListener('open', () => {
         if (this.socket !== socket || intentional) return;
-        const packet = { type: request.type, name: request.name, weaponId: request.weaponId };
+        const packet = { type: request.type, protocol: PROTOCOL_VERSION, name: request.name, weaponId: request.weaponId, skinId: request.skinId ?? DEFAULT_SKIN_ID };
         if (request.type === 'join') packet.code = request.code;
+        else Object.assign(packet, { mapId: request.mapId ?? DEFAULT_MAP_ID, modeId: request.modeId ?? 'ffa' });
         try { socket.send(JSON.stringify(packet)); } catch { fail('Unable to send the room request.'); }
       });
       socket.addEventListener('message', event => {
@@ -65,6 +107,7 @@ export class RoomClient {
           return;
         }
         if (packet.type === 'welcome' || packet.type === 'state') {
+          if (packet.protocol !== PROTOCOL_VERSION) { if (!welcomed) fail(updateRequired); else this.onError(updateRequired); return; }
           const valid = validRoom(packet.room) && (packet.type !== 'welcome' || (typeof packet.id === 'string' && packet.room.players.some(player => player.id === packet.id)));
           if (!valid) {
             if (!welcomed) fail('The server sent an invalid room snapshot.'); else this.onError('The server sent an invalid room snapshot.');
