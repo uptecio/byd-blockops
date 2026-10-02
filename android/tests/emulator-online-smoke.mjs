@@ -3,6 +3,7 @@ import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { setTimeout as delay } from 'node:timers/promises';
+import { cleanupOwnedOnlineSession } from './online-cleanup.mjs';
 
 // Run after installing the debug APK on a disposable emulator. Uses the real
 // public WSS server, a second independent peer, and raw WebView CDP (no focus
@@ -33,8 +34,11 @@ const opened = socket => new Promise((resolve, reject) => {
   socket.addEventListener('open', () => { clearTimeout(timeout); resolve(); }, { once: true });
   socket.addEventListener('error', () => { clearTimeout(timeout); reject(new Error('WebSocket open failed')); }, { once: true });
 });
-let socket, peer, incompatible, forwarded = false, evaluate;
+let socket, peer, incompatible, forwarded = false, evaluate, verifyDeparture, originalError, ownedApp = false;
 try {
+  const avdName = (await command('emu', 'avd', 'name')).stdout.trim().split('\n')[0].trim();
+  assert.equal(avdName, process.env.ANDROID_TEST_AVD || 'BlockOpsTask9', 'Native smoke must use its explicitly owned disposable AVD');
+  ownedApp = true;
   await shell('svc', 'wifi', 'enable');
   await shell('settings', 'put', 'secure', 'immersive_mode_confirmations', 'confirmed');
   await shell('am', 'start', '-W', '-n', 'au.local.blockops/.MainActivity');
@@ -97,6 +101,7 @@ try {
   };
   await send('Runtime.enable'); await send('Log.enable'); await send('Network.enable'); await send('Page.enable');
   for (const modeId of ['ffa', 'tdm', 'ctf']) {
+  verifyDeparture = undefined;
   await evaluate('localStorage.removeItem("block-ops-online")');
   await reload();
   await until(state, current => current.mode === 'home', 'Home loaded');
@@ -122,6 +127,8 @@ try {
   const peerSend = packet => peer.send(JSON.stringify(packet));
   peerSend({ type: 'join', protocol: 2, code: lobby.code, name: 'SocketFriend', weaponId: 'm4a1', skinId: 'robo-unit' });
   await until(() => latest, room => room?.players.length === 2, 'Independent real peer joins');
+  const hostNativeId = latest.players.find(player => player.id !== peerId).id;
+  verifyDeparture = () => until(() => latest, room => room?.code === lobby.code && !room.players.some(player => player.id === hostNativeId), 'Observer verifies owned native host departure before teardown');
   assert.equal(latest.mapId, 'space-station'); assert.equal(latest.modeId, modeId);
   assert.equal(latest.players.find(player => player.id === peerId).skinId, 'robo-unit');
   assert.equal(latest.players.find(player => player.id !== peerId).skinId, 'space-guard');
@@ -206,13 +213,16 @@ try {
   await until(state, current => current.mode === 'home', 'Confirmed leave returns Home');
   await until(() => latest, room => room?.players.length === 1, 'Peer observes native departure');
 
-  peerSend({ type: 'leave' }); latest = undefined; peerCode = null;
+  peerSend({ type: 'leave' }); latest = undefined; peerCode = null; verifyDeparture = undefined;
   peerSend({ type: 'create', protocol: 2, name: 'SocketHost', weaponId: 'm4a1', mapId: 'space-station', modeId, skinId: 'robo-unit' });
   const friendRoom = await until(() => latest, room => room?.players.length === 1 && room.phase === 'lobby' && room.code !== lobby.code, 'Peer creates independent room');
   await click('home-online');
   await evaluate(`document.getElementById("room-code-input").value=${JSON.stringify(friendRoom.code)}`);
   await click('join-room');
   await until(state, current => current.players === 2 && current.code === friendRoom.code, 'Native joins existing room');
+  await until(() => latest, room => room?.code === friendRoom.code && room.players.length === 2, 'Independent host observes native guest');
+  const guestNativeId = latest.players.find(player => player.id !== peerId).id;
+  verifyDeparture = () => until(() => latest, room => room?.code === friendRoom.code && !room.players.some(player => player.id === guestNativeId), 'Observer verifies owned native guest departure before teardown');
   assert.equal(await evaluate('document.getElementById("start-online").disabled'), true, 'Joining non-host cannot start');
   // Actual Android lifecycle: a remote host must not arm guest controls while
   // its APK is behind the launcher, even when it was only in a lobby before.
@@ -261,11 +271,25 @@ try {
   assert.deepEqual(errors, [], 'No JavaScript or CSP errors');
   assert.ok(sockets.length >= 2 && sockets.every(url => url === wsURL), 'Only configured secure WebSockets are opened');
   assert.deepEqual(remote, [], 'No remote HTTP assets or requests');
-  console.log('Native online smoke passed: protocol 2 WSS, all modes, nondefault map/skins, teams/flags, create/join, authoritative input, Home cancel/leave, live lifecycle clock, incompatible client rejection.');
+} catch (error) {
+  originalError = error;
+  throw error;
 } finally {
-  if (evaluate) await evaluate('document.getElementById("leave-room").click()').catch(() => {});
-  if (peer) peer.close();
-  if (incompatible) incompatible.close();
-  if (socket) socket.close();
-  if (forwarded) await command('forward', '--remove', 'tcp:9228');
+  await cleanupOwnedOnlineSession({
+    stopApp: async () => {
+      if (!ownedApp) return;
+      await shell('am', 'force-stop', 'au.local.blockops');
+      const running = await shell('pidof', 'au.local.blockops').catch(error => {
+        if (error.code === 1) return { stdout: '' };
+        throw error;
+      });
+      assert.equal(running.stdout.trim(), '', 'Only the owned app process must be stopped');
+    },
+    verifyDeparture: async () => { if (peer?.readyState === WebSocket.OPEN && verifyDeparture) await verifyDeparture(); },
+    closePeers: () => { peer?.close(); incompatible?.close(); },
+    closeCdp: () => socket?.close(),
+    removeForward: async () => { if (forwarded) await command('forward', '--remove', 'tcp:9228'); },
+    originalError,
+  });
 }
+console.log('Native online smoke passed: protocol 2 WSS, all modes, nondefault map/skins, teams/flags, create/join, authoritative input, Home cancel/leave, live lifecycle clock, incompatible client rejection and verified owned cleanup.');

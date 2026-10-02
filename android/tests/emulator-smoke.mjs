@@ -97,9 +97,19 @@ try {
   assert.equal(await evaluate('document.querySelector("[data-map=space-station]").getAttribute("aria-pressed")'), 'true');
   assert.equal(await evaluate('document.querySelector("[data-skin=space-guard]").getAttribute("aria-pressed")'), 'true');
   assert.equal(await evaluate('document.getElementById("character-preview").width > 1'), true);
+  for (const id of ['home-solo', 'home-online', 'home-armory', 'home-settings']) {
+    const bounds = await evaluate(`(() => { const r = document.getElementById(${JSON.stringify(id)}).getBoundingClientRect(); return { x:r.x, y:r.y, width:r.width, height:r.height, viewportWidth:innerWidth, viewportHeight:innerHeight, footerTop:document.querySelector('#home-screen .app-footer').getBoundingClientRect().top }; })()`);
+    assert.ok(bounds.width >= 44 && bounds.height >= 44, `${id} remains a native touch target`);
+    assert.ok(bounds.x >= 0 && bounds.y >= 0 && bounds.x + bounds.width <= bounds.viewportWidth && bounds.y + bounds.height <= Math.min(bounds.viewportHeight, bounds.footerTop), `${id} fits the actual native viewport above its footer`);
+  }
+  await mkdir('artifacts', { recursive: true });
+  const homeShot = await run(adb, ['-s', serial, 'exec-out', 'screencap', '-p'], { encoding: 'buffer', maxBuffer: 10000000, timeout: 10000 });
+  await writeFile('artifacts/android-home.png', homeShot.stdout);
   await evaluate('document.querySelector("[data-mode-id=ffa]").click(); document.getElementById("home-armory").click()');
   assert.equal(await evaluate('document.querySelectorAll(".weapon-card").length'), 4);
-  await evaluate('document.getElementById("play-button").click()');
+  await evaluate('document.getElementById("armory-home").click()');
+  await wait(current => current.mode === 'home');
+  await tap('home-solo');
   await wait(current => current.mode === 'playing' && current.timer !== '03:00');
   assert.equal(await evaluate('Number(document.getElementById("ammo-count").textContent)+Number(document.getElementById("reserve-count").textContent)'), 500, 'Solo starts with 500 total rounds');
   await mkdir('artifacts', { recursive: true });
