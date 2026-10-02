@@ -149,7 +149,12 @@ function deploy(forceNew = false) {
   if (!game) return;
   if (multiplayer && multiplayer.isConnected()) { multiplayer.deploy(selected.id); document.activeElement.blur(); return; }
   audio.unlock();
-  if (forceNew || !game.hasRound || game.match.ended) game.start(selected.id, { ...settings, ...selection });
+  if (forceNew || !game.hasRound || game.match.ended) {
+    // Explicit foreground deployment authorizes a NEW solo round, not a
+    // resumed/remote one. Background clicks retain the Resume requirement.
+    if (!document.hidden && document.hasFocus()) backgroundSuspended = false;
+    game.start(selected.id, { ...settings, ...selection });
+  }
   else { game.setWeapon(selected.id); game.resume(); }
   setMode('playing'); game.events.onHud(game); document.activeElement.blur();
 }

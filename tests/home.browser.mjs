@@ -92,23 +92,57 @@ try {
   assert.match(await page.locator('#hud-mode').textContent(), /CAPTURE|FLAG/i);
   assert.match(await page.locator('#objective-status').textContent(), /RED|BLUE/i);
   assert.equal(await page.locator('#hud-weapon').textContent(), 'AWP');
+  // Use automatic fire so an uncleared held trigger would keep spending ammo.
+  await page.locator('#loadout-button').click();
+  await page.locator('[data-class="assault"]').click();
+  await page.locator('[data-weapon="m4a1"]').click();
+  await page.locator('#play-button').click();
+  const loadedAmmo = Number(await page.locator('#ammo-count').textContent());
+  // Observe the first shot's HUD before pausing: simulation can spend a round
+  // between HUD ticks. Pause in that mutation's microtask so the held automatic
+  // trigger cannot spend another round between the baseline and Home action.
+  await page.evaluate(ammo => {
+    const count = document.getElementById('ammo-count');
+    const observer = new MutationObserver(() => {
+      if (Number(count.textContent) >= ammo) return;
+      observer.disconnect(); document.getElementById('home-button').click();
+    });
+    observer.observe(count, { childList: true });
+  }, loadedAmmo);
   await page.keyboard.down('KeyF');
-  await page.locator('#home-button').click();
-  await page.keyboard.up('KeyF');
+  await page.waitForSelector('body[data-mode="confirm-home"]');
   const clock = await page.locator('#timer').textContent();
   await page.waitForTimeout(1100);
   assert.equal(await page.locator('#timer').textContent(), clock, 'solo confirmation pauses time');
+  const ammo = await page.locator('#ammo-count').textContent();
   await page.locator('#cancel-home').click();
   await page.waitForSelector('body[data-mode="playing"]');
-  const ammo = await page.locator('#ammo-count').textContent();
   await page.waitForTimeout(800);
   assert.equal(await page.locator('#ammo-count').textContent(), ammo, 'cancel clears held input');
+  await page.keyboard.up('KeyF'); // Hold through Cancel: keyup cannot mask stuck fire.
   await page.locator('#pause-button').click();
   await page.locator('#pause-home').click();
   await page.locator('#cancel-home').click();
   assert.equal(await page.locator('body').getAttribute('data-mode'), 'paused', 'cancel restores paused origin');
+  // Native background suspension may survive foregrounding, but a confirmed
+  // Home followed by an explicit foreground fresh round is a new intent.
+  await page.evaluate(() => window.pauseGame());
   await page.locator('#pause-home').click();
   await page.locator('#confirm-home').click();
+  await page.waitForSelector('body[data-mode="home"]');
+  // Controlled hidden-document signal: programmatic background deployment
+  // must not grant controls, and restoring visibility is not Resume.
+  await page.evaluate(() => {
+    Object.defineProperty(document, 'hidden', { configurable: true, get: () => true });
+    document.getElementById('home-solo').click();
+    delete document.hidden;
+  });
+  assert.equal(await page.locator('body').getAttribute('data-mode'), 'paused', 'background fresh-solo action remains paused after foregrounding');
+  await page.locator('#pause-home').click(); await page.locator('#confirm-home').click();
+  await page.waitForSelector('body[data-mode="home"]');
+  await page.locator('#home-solo').click();
+  assert.equal(await page.locator('body').getAttribute('data-mode'), 'playing', 'explicit foreground fresh solo starts after native suspension and confirmed Home');
+  await page.locator('#home-button').click(); await page.locator('#confirm-home').click();
   await page.waitForSelector('body[data-mode="home"]');
   await page.locator('#home-online').click();
   await page.locator('.server-settings').evaluate(element => { element.open = true; });
