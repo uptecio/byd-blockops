@@ -47,6 +47,7 @@ const equip = async (classId, weaponId) => {
 
 try {
   await page.goto('http://127.0.0.1:4180');
+  await page.locator('#home-armory').click();
   await page.locator('#play-button').waitFor();
   await page.locator('#armory .settings-open').click();
   await page.locator('#bots').fill('1');
@@ -55,6 +56,7 @@ try {
   await page.locator('#settings-done').click();
   assert.match(await page.locator('#bot-count-label').textContent(), /1 BOT/);
   await page.reload();
+  await page.locator('#home-armory').click();
   await page.locator('#armory .settings-open').click();
   assert.equal(await page.locator('#bots').inputValue(), '1', 'bot count persists');
   assert.equal(await page.locator('#difficulty').inputValue(), 'easy', 'difficulty persists');
@@ -91,6 +93,7 @@ try {
   await touch('touchMove', [{ ...joystick, y: joystick.y - 30 }, { ...aim, x: aim.x - 35 }, { ...fire, x: fire.x - 20 }]);
   await page.waitForTimeout(150);
   await touch('touchCancel');
+  await page.waitForFunction(() => window.touchObservations.aimCancels > 0, null, { timeout: 5000 });
   assert.ok(await page.evaluate(() => window.touchObservations.aimCancels) > 0, 'aim drag receives browser cancellation');
   assert.equal(await page.locator('#joystick-knob').evaluate(element => element.style.transform), '', 'cancellation centers joystick');
   await stableAmmo('canceling aim/fire drag clears held firing');
@@ -146,6 +149,35 @@ try {
   assert.equal(await page.locator('body').getAttribute('data-mode'), 'paused', 'closing in-round settings stays paused');
   await page.locator('#resume-button').click();
   await stableAmmo('settings resume carries no stale held input');
+
+  // Keep real held fingers down across Home cancel and across a fresh round.
+  const homeStick = await point('#joystick', 11), homeFire = await point('#fire-button', 12);
+  await touch('touchStart', [homeStick, homeFire]);
+  await touch('touchMove', [{ ...homeStick, x: homeStick.x + 25 }, homeFire]);
+  await page.waitForTimeout(150);
+  await page.locator('#home-button').click();
+  assert.equal(await page.locator('#confirm-home-screen').isVisible(), true);
+  const homeTime = await page.locator('#timer').textContent();
+  await page.waitForTimeout(700);
+  assert.equal(await page.locator('#timer').textContent(), homeTime, 'Home dialog pauses solo clock with fingers held');
+  assert.equal(await page.locator('#joystick-knob').evaluate(element => element.style.transform), '', 'Home clears held joystick');
+  await page.locator('#cancel-home').click();
+  await stableAmmo('Home cancel resumes without held fire');
+  await touch('touchEnd');
+  await stableAmmo('late releases after Home cancel remain neutral');
+  await touch('touchStart', [homeStick, homeFire]);
+  await page.waitForTimeout(100);
+  await page.locator('#home-button').click();
+  await page.locator('#confirm-home').click();
+  await page.waitForSelector('body[data-mode="home"]');
+  await page.locator('#home-solo').click();
+  await page.waitForSelector('body[data-mode="playing"]');
+  assert.equal(await ammo(), 30, 'new round starts replenished');
+  await stableAmmo('new solo round does not revive held fire');
+  assert.equal(await page.locator('#joystick-knob').evaluate(element => element.style.transform), '', 'new round keeps old joystick neutral');
+  await touch('touchEnd');
+  await stableAmmo('late releases from departed round stay neutral');
+  console.log('PASS held-finger Home cancel/confirm and fresh-round input');
   assert.deepEqual(errors, [], 'no browser exceptions');
   console.log('Touch acceptance passed: settings, multitouch, release/cancel, single shots, ammo preservation, native/UI pause.');
 } finally {

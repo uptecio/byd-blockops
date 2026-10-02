@@ -1,14 +1,25 @@
 import { RoomClient } from './network.js';
 import { OnlineArena } from './online-game.js';
 import { GAME_SERVER_URL } from './config.js';
+import { MAPS } from './maps.js';
+import { MODES } from './modes.js';
+import { SKINS } from './skins.js';
+import { renderMatchResults } from './match-ui.js';
 
 const $ = id => document.getElementById(id);
 export class MultiplayerUI {
-  constructor({ getGame, getSettings, getSelected, onMode, onLoadout, onToast }) {
-    Object.assign(this, { getGame, getSettings, getSelected, onMode, onLoadout, onToast });
+  constructor({ getGame, getSettings, getSelected, getSelection, onSkin, onConfiguration, onHome, onMode, onLoadout, onToast }) {
+    Object.assign(this, { getGame, getSettings, getSelected, getSelection, onSkin, onConfiguration, onHome, onMode, onLoadout, onToast });
     this.arena = null; this.room = null; this.busy = false;
     this.client = new RoomClient({ onRoom: room => this.receive(room), onError: message => this.status(message, true), onDisconnect: () => this.disconnected() });
-    document.querySelector('.health-panel .eyebrow').id = 'hud-mode';
+    $('room-map').innerHTML = MAPS.map(map => `<option value="${map.id}">${map.name}</option>`).join('');
+    $('room-mode').innerHTML = MODES.map(mode => `<option value="${mode.id}">${mode.name}</option>`).join('');
+    $('room-skin').innerHTML = SKINS.map(skin => `<option value="${skin.id}">${skin.name}</option>`).join('');
+    $('room-skin').addEventListener('change', () => this.onSkin($('room-skin').value));
+    for (const id of ['room-map', 'room-mode']) $(id).addEventListener('change', () => {
+      if (!this.room || this.room.hostId !== this.client.id || this.room.phase === 'playing') return;
+      this.client.send({ type: 'configure', mapId: $('room-map').value, modeId: $('room-mode').value });
+    });
     let saved = {}; try { saved = JSON.parse(localStorage.getItem('block-ops-online') || '{}') || {}; } catch {}
     $('player-name').value = typeof saved.name === 'string' ? saved.name.slice(0, 16) : 'Ranger';
     const browserOrigin = location.hostname === 'appassets.androidplatform.net' ? '' : location.origin;
@@ -17,7 +28,7 @@ export class MultiplayerUI {
     $('server-address').value = invite && browserOrigin ? browserOrigin : saved.server || hostedOrigin || GAME_SERVER_URL || browserOrigin;
     if (invite && /^[A-Za-z0-9]{6}$/.test(invite)) { $('room-code-input').value = invite.toUpperCase(); queueMicrotask(() => this.open()); }
     $('online-button').addEventListener('click', () => this.open());
-    $('online-back').addEventListener('click', () => this.onLoadout());
+    $('online-back').addEventListener('click', () => this.onHome());
     $('create-room').addEventListener('click', () => this.connect('create'));
     $('join-room').addEventListener('click', () => this.connect('join'));
     $('room-code-input').addEventListener('input', () => { $('room-code-input').value = $('room-code-input').value.toUpperCase().replace(/[^A-Z0-9]/g, ''); });
@@ -26,7 +37,7 @@ export class MultiplayerUI {
       else this.client.send({ type: 'start' });
     });
     $('room-loadout').addEventListener('click', () => this.onLoadout());
-    $('leave-room').addEventListener('click', () => { this.leave(); this.open(); });
+    $('leave-room').addEventListener('click', () => this.onHome());
     $('copy-invite').addEventListener('click', () => this.copyInvite());
   }
   isConnected() { return Boolean(this.client.connected && this.room); }
@@ -45,7 +56,7 @@ export class MultiplayerUI {
     this.busy = true; $('create-room').disabled = $('join-room').disabled = true; this.status('Connecting to the game server…');
     try {
       const server = $('server-address').value.trim();
-      await this.client.connect(server, { type, code, name, weaponId: this.getSelected().id });
+      await this.client.connect(server, { type, code, name, ...this.getSelection() });
       try { localStorage.setItem('block-ops-online', JSON.stringify({ name, server })); } catch {}
       this.status('Connected · Share your room code or invite link.');
     } catch (error) { this.status(error.message || 'Could not connect. Check your connection and server address.', true); }
@@ -54,8 +65,8 @@ export class MultiplayerUI {
   receive(room) {
     const previous = this.room;
     this.room = room; this.renderRoom();
+    if (room.hostId === this.client.id && (!previous || previous.hostId !== room.hostId || previous.mapId !== room.mapId || previous.modeId !== room.modeId)) this.onConfiguration({ mapId: room.mapId, modeId: room.modeId });
     $('mode-badge').textContent = `ONLINE / ${room.code}`;
-    $('hud-mode').textContent = `ONLINE / ${room.code}`;
     $('online-setup').hidden = true; $('room-lobby').hidden = false;
     if (room.phase === 'playing' && (!this.arena || !previous || previous.phase !== 'playing')) {
       if (this.arena) this.arena.stop();
@@ -74,15 +85,22 @@ export class MultiplayerUI {
     $('room-code').textContent = room.code; $('room-player-count').textContent = `${room.players.length} / 8`;
     $('room-phase').textContent = room.phase === 'playing' ? 'MATCH IN PROGRESS' : room.phase === 'ended' ? 'ROUND COMPLETE' : 'WAITING FOR FRIENDS';
     const host = room.hostId === this.client.id;
+    $('room-map').value = room.mapId; $('room-mode').value = room.modeId;
+    const own = room.players.find(player => player.id === this.client.id);
+    $('room-skin').value = own?.pendingSkinId || own?.skinId || this.getSelection().skinId;
+    $('room-map').disabled = $('room-mode').disabled = !host || room.phase === 'playing';
+    $('room-settings-help').textContent = room.phase === 'playing' ? 'Map and mode are fixed for this round.' : host ? 'Choose the next round’s map and mode.' : 'The host chooses map and mode between rounds.';
     const sorted = [...room.players].sort((a, b) => b.kills - a.kills || a.deaths - b.deaths);
     $('room-roster').replaceChildren(); $('online-scoreboard').replaceChildren();
     for (const player of sorted) {
       const row = document.createElement('div'); row.className = 'roster-player';
+      if (player.teamId) row.dataset.team = player.teamId;
       const name = document.createElement('span'); name.textContent = `${player.name}${player.id === this.client.id ? ' (YOU)' : ''}`;
-      const badge = document.createElement('small'); badge.textContent = player.id === room.hostId ? 'HOST' : 'READY';
+      const badge = document.createElement('small'); badge.textContent = `${player.teamId ? player.teamId.toUpperCase() + ' · ' : ''}${player.id === room.hostId ? 'HOST' : 'READY'}`;
       row.append(name, badge); $('room-roster').append(row);
       const score = document.createElement('div'); score.classList.toggle('is-you', player.id === this.client.id);
-      const scoreName = document.createElement('span'); scoreName.textContent = player.name;
+      if (player.teamId) score.dataset.team = player.teamId;
+      const scoreName = document.createElement('span'); scoreName.textContent = `${player.teamId ? player.teamId.toUpperCase() + ' · ' : ''}${player.name}`;
       const count = document.createElement('b'); count.textContent = `${player.kills} / ${player.deaths}`; score.append(scoreName, count); $('online-scoreboard').append(score);
     }
     $('online-scoreboard').hidden = room.phase !== 'playing';
@@ -94,16 +112,14 @@ export class MultiplayerUI {
   showResults(room) {
     room = room && Array.isArray(room.players) ? room : this.room;
     if (!room) return;
-    const own = room.players.find(player => player.id === this.client.id);
-    const winner = room.players.find(player => player.id === room.winnerId);
-    $('result-kills').textContent = own ? own.kills : 0; $('result-deaths').textContent = own ? own.deaths : 0;
-    $('result-title').textContent = winner && winner.id === this.client.id ? 'YOU WON.' : winner ? `${winner.name.toUpperCase()} WINS.` : 'ROUND COMPLETE.';
+    renderMatchResults(room, this.client.id);
     $('again-button').textContent = 'BACK TO ROOM ↗';
     this.onMode('results');
   }
   deploy(weaponId) {
     if (!this.room) { this.open(); return; }
     this.client.send({ type: 'equip', weaponId });
+    this.client.send({ type: 'skin', skinId: this.getSelection().skinId });
     if (this.room.phase !== 'playing') { this.open(); return; }
     this.resume(); this.onMode('playing'); this.getGame().audio.unlock();
   }

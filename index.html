@@ -9,12 +9,16 @@
   <link rel="stylesheet" href="styles.css">
   <script defer src="game.js"></script>
 </head>
-<body data-mode="armory">
+<body data-mode="home">
   <canvas id="arena" aria-label="First-person block arena"></canvas>
-  <section id="armory" class="screen armory">
+  <section id="home-screen" class="screen home-screen">
+    <header class="topbar"><div class="brand"><span class="brand-mark" aria-hidden="true">B<span>O</span></span><div>BLOCK OPS<small>YOUR ARENA. YOUR RULES.</small></div></div><button id="home-settings" class="secondary">⚙ SETTINGS</button></header>
+    <main class="home-layout"><section class="character-panel" aria-label="Selected character"><span class="eyebrow">READY WHEN YOU ARE</span><h1 id="home-skin-name">Ranger</h1><span id="home-team" class="home-team">ALL SKINS UNLOCKED</span><div class="character-stage"><div class="preview-ring"></div><canvas id="character-preview" aria-label="Selected character model"></canvas></div><div class="character-loadout"><span class="eyebrow">EQUIPPED</span><strong id="home-weapon-name">M4A1</strong><button id="home-armory" class="secondary">ARMORY · 28 GUNS ↗</button></div></section><section class="home-options" aria-label="Match configuration"><div class="selector-heading"><h2>CHOOSE YOUR MAP</h2><span>8 ORIGINAL ARENAS</span></div><div id="map-grid" class="map-grid" aria-label="Maps"></div><div class="selector-heading"><h2>GAME MODE</h2><span>3 MINUTE ROUNDS</span></div><div id="mode-grid" class="mode-grid" aria-label="Game modes"></div><div class="selector-heading"><h2>YOUR SKIN</h2><span>COSMETICS ONLY</span></div><div id="skin-grid" class="skin-grid" aria-label="Character skins"></div><div class="home-deploy"><span id="home-selection"></span><div><button id="home-solo" class="primary">SOLO BOTS <span>↗</span></button><button id="home-online" class="secondary">ONLINE FRIENDS ↗</button></div></div></section></main><footer class="app-footer"><span>BUILT FOR A GOOD BREAK. <b>PLAY WHILE PARKED.</b></span><span>ALL MAPS + SKINS BUNDLED OFFLINE</span></footer>
+  </section>
+  <section id="armory" class="screen armory" hidden>
     <header class="topbar">
       <div class="brand"><span class="brand-mark" aria-hidden="true">B<span>O</span></span><div>BLOCK OPS<small>SOLO + ONLINE ARENA</small></div></div>
-      <div class="topbar-right"><span id="mode-badge" class="online-badge"><i></i> SOLO / OFFLINE</span><button id="online-button" class="online-entry">ONLINE FRIENDS <span>↗</span></button><button class="icon-button settings-open" aria-label="Settings">⚙</button></div>
+      <div class="topbar-right"><button id="armory-home" class="secondary">HOME</button><span id="mode-badge" class="online-badge"><i></i> SOLO / OFFLINE</span><button id="online-button" class="online-entry">ONLINE FRIENDS <span>↗</span></button><button class="icon-button settings-open" aria-label="Settings">⚙</button></div>
     </header>
     <main class="armory-layout">
       <div class="arsenal">
@@ -24,21 +28,21 @@
         <nav id="class-tabs" class="class-tabs" aria-label="Weapon classes"></nav>
         <div class="roster-heading"><span id="class-description"></span><span>ALL UNLOCKED <span class="unlock">↗</span></span></div>
         <div id="weapon-grid" class="weapon-grid" aria-label="Weapons"></div>
-        <div class="session-info"><div><span class="info-icon">◷</span><strong>3 MIN</strong><small>QUICK ROUNDS</small></div><div><span class="info-icon">⌖</span><strong>15 KILLS</strong><small>TO WIN</small></div><div><span class="info-icon">▧</span><strong id="bot-count-label">5 BOTS</strong><small>ZERO INTERNET</small></div></div>
+        <div class="session-info"><div><span class="info-icon">◷</span><strong>3 MIN</strong><small>QUICK ROUNDS</small></div><div><span class="info-icon">⌖</span><strong id="session-target">15 ELIMINATIONS</strong><small>TO WIN</small></div><div><span class="info-icon">▧</span><strong id="bot-count-label">5 BOTS</strong><small>ZERO INTERNET</small></div></div>
       </div>
       <section class="loadout-panel" aria-label="Selected weapon">
         <div class="panel-top"><span class="eyebrow">EQUIPPED / <span id="selected-class">ASSAULT RIFLE</span></span><span class="loadout-number">01</span></div>
         <h2 id="selected-name">M4A1</h2><p id="selected-description">A versatile all-rounder.</p>
         <div class="preview-stage"><div class="preview-ring"></div><canvas id="weapon-preview" aria-label="Rotating 3D model of selected gun"></canvas><span class="preview-caption">FIELD READY <i></i></span></div>
         <div id="weapon-stats" class="weapon-stats"></div>
-        <div class="loadout-footer"><div><span class="map-dot"></span><strong>COURTYARD</strong><small>FREE-FOR-ALL · SOLO VS BOTS</small></div><button id="play-button" class="primary">DEPLOY <span>↗</span></button></div>
+        <div class="loadout-footer"><div><span class="map-dot"></span><strong id="armory-map">COURTYARD</strong><small id="armory-mode">FREE-FOR-ALL · SOLO VS BOTS</small></div><button id="play-button" class="primary">DEPLOY <span>↗</span></button></div>
       </section>
     </main>
     <footer class="app-footer"><span>BUILT FOR A GOOD BREAK. <b>PLAY WHILE PARKED.</b></span><span>TOUCH CONTROLS <span class="footer-divider">/</span> v0.2 PROTOTYPE</span></footer>
   </section>
   <section id="online-screen" class="screen online-screen" hidden>
     <div class="online-shell">
-      <header class="online-heading"><div><span class="eyebrow">BLOCK OPS / MULTIPLAYER</span><h2>BETTER WITH FRIENDS.</h2><p>Real players. Your room. All 28 weapons unlocked.</p></div><button id="online-back" class="icon-button" aria-label="Back to loadout">×</button></header>
+      <header class="online-heading"><div><span class="eyebrow">BLOCK OPS / MULTIPLAYER</span><h2>BETTER WITH FRIENDS.</h2><p>Real players. Your room. All 28 weapons unlocked.</p></div><button id="online-back" class="secondary" aria-label="Return Home">HOME</button></header>
       <div id="online-setup">
         <label class="online-label" for="player-name">YOUR CALLSIGN</label><input id="player-name" class="online-input" maxlength="16" placeholder="Player name" autocomplete="off" value="Ranger">
         <div class="join-options"><div class="join-option"><span class="eyebrow">BRING THE SQUAD</span><h3>Create a room</h3><p>Get a code to share. You choose when the match starts.</p><button id="create-room" class="primary">CREATE ROOM <span>↗</span></button></div><div class="join-option"><span class="eyebrow">GOT AN INVITE?</span><h3>Join your friends</h3><input id="room-code-input" class="online-input code-input" maxlength="6" placeholder="ROOM CODE" autocomplete="off" autocapitalize="characters" aria-label="Six-character room code"><button id="join-room" class="secondary">JOIN ROOM</button></div></div>
@@ -46,6 +50,7 @@
       </div>
       <div id="room-lobby" hidden>
         <div class="room-banner"><div><span class="online-label">YOUR ROOM CODE</span><strong id="room-code">------</strong></div><button id="copy-invite" class="secondary">COPY INVITE LINK ↗</button></div>
+        <div class="room-settings"><label>MAP<select id="room-map"></select></label><label>GAME MODE<select id="room-mode"></select></label><label>YOUR SKIN<select id="room-skin"></select></label><span id="room-settings-help">Host chooses map and mode between rounds.</span></div>
         <div class="roster-heading"><span>PLAYERS <b id="room-player-count">1 / 8</b></span><span id="room-phase">WAITING FOR FRIENDS</span></div>
         <div id="room-roster" class="room-roster"></div>
         <div class="room-actions"><button id="start-online" class="primary">START MATCH <span>↗</span></button><button id="room-loadout" class="secondary">CHANGE LOADOUT</button><button id="leave-room" class="text-button">Leave room</button></div><p id="room-help" class="room-help">Share the invite link. Your friends can play in their browser or the APK.</p>
@@ -55,7 +60,8 @@
   </section>
   <section id="game-ui" hidden aria-label="Game controls">
     <div id="aim-zone" aria-label="Drag to look around"></div>
-    <div class="hud-top"><div class="health-panel"><span class="eyebrow">SOLO / BOTS</span><div class="health-row"><span>✚</span><strong id="health-count">100</strong><div class="health-track"><i id="health-bar"></i></div></div></div><div class="score-panel"><strong><span id="kills">0</span><span class="score-target"> / 15</span></strong><span id="timer">03:00</span></div><div class="hud-actions"><button id="loadout-button" class="hud-button" aria-label="Change weapon">▤ <span>LOADOUT</span></button><button id="pause-button" class="hud-button" aria-label="Pause">Ⅱ</button></div></div>
+    <div class="hud-top"><div class="health-panel"><span id="hud-mode" class="eyebrow">SOLO / BOTS</span><div class="health-row"><span>✚</span><strong id="health-count">100</strong><div class="health-track"><i id="health-bar"></i></div></div></div><div class="score-panel"><strong><span id="kills">0</span><span class="score-target"> / 15</span></strong><span id="timer">03:00</span></div><div class="hud-actions"><button id="home-button" class="hud-button home-hud">HOME</button><button id="loadout-button" class="hud-button" aria-label="Change weapon">▤ <span>LOADOUT</span></button><button id="pause-button" class="hud-button" aria-label="Pause">Ⅱ</button></div></div>
+    <div id="objective-status" class="objective-status" hidden></div>
     <div id="online-scoreboard" class="online-scoreboard" hidden aria-label="Live leaderboard"></div>
     <div id="reticle"><i></i><i></i><i></i><i></i></div><div id="hit-marker">×</div><div id="damage-flash"></div>
     <div id="scope-overlay" hidden><div></div></div>
@@ -65,9 +71,10 @@
     <div class="ammo-panel"><span id="hud-weapon">M4A1</span><strong><span id="ammo-count">30</span><small> / <span id="reserve-count">470</span></small></strong><span id="reload-status"></span></div>
     <div id="game-hint">DRAG TO AIM <span>·</span> HOLD FIRE TO SHOOT</div><div id="toast" role="status"></div>
   </section>
-  <section id="pause-screen" class="modal-screen" hidden><div class="dialog pause-dialog"><span class="eyebrow">TAKE YOUR TIME</span><h2>GAME PAUSED</h2><p>Your round is right where you left it.</p><button id="resume-button" class="primary">BACK TO THE ACTION <span>↗</span></button><button id="pause-loadout" class="secondary">CHANGE LOADOUT</button><button class="secondary settings-open">SETTINGS</button><button id="quit-button" class="text-button">End round & return to armory</button></div></section>
+  <section id="pause-screen" class="modal-screen" hidden><div class="dialog pause-dialog"><span class="eyebrow">TAKE YOUR TIME</span><h2>GAME PAUSED</h2><p>Your round is right where you left it.</p><button id="resume-button" class="primary">BACK TO THE ACTION <span>↗</span></button><button id="pause-loadout" class="secondary">CHANGE LOADOUT</button><button class="secondary settings-open">SETTINGS</button><button id="pause-home" class="secondary">HOME</button><button id="quit-button" class="text-button">End round & return Home</button></div></section>
+  <section id="confirm-home-screen" class="modal-screen" role="dialog" aria-modal="true" aria-labelledby="confirm-home-title" hidden><div class="dialog"><span class="eyebrow">RETURN HOME</span><h2 id="confirm-home-title">END THIS ROUND?</h2><p id="confirm-home-message">Your current solo round will end.</p><button id="confirm-home" class="primary">RETURN HOME <span>↗</span></button><button id="cancel-home" class="secondary">KEEP PLAYING</button></div></section>
   <section id="settings-screen" class="modal-screen" hidden><div class="dialog settings-dialog"><div class="dialog-heading"><div><span class="eyebrow">MAKE IT YOURS</span><h2>SETTINGS</h2></div><button id="close-settings" class="icon-button" aria-label="Close settings">×</button></div><label class="setting-row">Look sensitivity <output id="sensitivity-value"></output><input id="sensitivity" type="range" min="0.4" max="2" step="0.1"></label><label class="setting-row">Control size <output id="control-size-value"></output><input id="control-size" type="range" min="0.8" max="1.3" step="0.1"></label><label class="setting-row">Bot count <output id="bots-value"></output><input id="bots" type="range" min="1" max="8" step="1"></label><label class="setting-row">Bot difficulty<select id="difficulty"><option value="easy">Easy · relaxed warm-up</option><option value="normal">Normal · keep moving</option><option value="hard">Hard · stay sharp</option></select></label><label class="switch-row">Game sound<input id="sound" type="checkbox"></label><p class="setting-note">Bot count and difficulty apply to your next round.<br>Desktop: WASD move · drag to aim · F fire · R reload · Space jump · E aim · Esc pause.</p><button id="settings-done" class="primary">DONE <span>✓</span></button></div></section>
-  <section id="results-screen" class="modal-screen" hidden><div class="dialog results-dialog"><span class="eyebrow">ROUND COMPLETE</span><h2 id="result-title">NICE SHOOTING.</h2><p>Another round. Another chance to beat your best.</p><div class="result-stats"><div><strong id="result-kills">0</strong><span>ELIMINATIONS</span></div><div><strong id="result-deaths">0</strong><span>DEATHS</span></div></div><button id="again-button" class="primary">PLAY AGAIN <span>↗</span></button><button id="results-loadout" class="secondary">CHANGE LOADOUT</button></div></section>
+  <section id="results-screen" class="modal-screen" hidden><div class="dialog results-dialog"><span id="result-mode" class="eyebrow">ROUND COMPLETE</span><h2 id="result-title">NICE SHOOTING.</h2><p>Another round. Another chance to beat your best.</p><div class="result-stats"><div><strong id="result-kills">0</strong><span>ELIMINATIONS</span></div><div><strong id="result-deaths">0</strong><span>DEATHS</span></div></div><button id="again-button" class="primary">PLAY AGAIN <span>↗</span></button><button id="results-loadout" class="secondary">CHANGE LOADOUT</button><button id="results-home" class="secondary">HOME</button></div></section>
   <section id="fatal-screen" class="modal-screen" hidden><div class="dialog"><h2>CAN’T START THE ARENA</h2><p id="fatal-message">This display needs a working WebGL-capable Android System WebView.</p><button id="retry-button" class="primary">TRY AGAIN</button></div></section>
 </body>
 </html>

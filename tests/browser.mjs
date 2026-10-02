@@ -11,6 +11,7 @@ const errors = [];
 page.on('pageerror', error => errors.push(error.message));
 try {
   await page.goto('http://127.0.0.1:4178');
+  await page.locator('#home-armory').click();
   await page.waitForSelector('#play-button', { timeout: 5000 });
   assert.equal(await page.locator('#selected-name').textContent(), 'M4A1');
   for (const id of ['assault', 'smg', 'shotgun', 'sniper', 'marksman', 'lmg', 'sidearm']) {
@@ -21,6 +22,7 @@ try {
   await page.locator('[data-weapon="awp"]').click();
   assert.equal(await page.locator('#selected-name').textContent(), 'AWP');
   await page.reload();
+  await page.locator('#home-armory').click();
   await page.waitForSelector('#play-button');
   assert.equal(await page.locator('#selected-name').textContent(), 'AWP', 'loadout persists');
   await mkdir('artifacts', { recursive: true });
@@ -36,7 +38,7 @@ try {
   await page.waitForTimeout(300);
   assert.ok(Number(await page.locator('#ammo-count').textContent()) < 30, 'firing consumes ammo');
   await page.keyboard.press('r');
-  await page.waitForTimeout(2700);
+  await page.waitForFunction(() => document.getElementById('ammo-count').textContent === '30' && document.getElementById('reload-status').textContent === '', null, { timeout: 15000 });
   assert.equal(await page.locator('#ammo-count').textContent(), '30', 'reload refills magazine');
   await page.locator('#pause-button').click();
   assert.equal(await page.locator('body').getAttribute('data-mode'), 'paused');
