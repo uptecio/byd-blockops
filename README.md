@@ -6,6 +6,8 @@ A playable Android prototype for the BYD Shark 6: a colourful original block-sty
 
 The built APK is `artifacts/block-ops-debug.apk` (v0.3.0, Android version code 3). It is signed with an Android **debug** certificate for personal testing. Android 8.0 or later and a WebGL-capable Android System WebView are required. It contains no native CPU-specific libraries. The only Android permission is INTERNET, for optional multiplayer.
 
+Verified release APK SHA-256: `f675052600bad71d41e58b87a3ffe6b55f7158d3f7cafbe434ff93b56c3b1b8f`.
+
 Transfer the APK using an installation method supported by your vehicle. Whether a particular Shark 6 firmware allows APK installation needs to be checked on that vehicle. This app has not been tested on a physical BYD head unit. Play while parked; the app does not detect the vehicle's motion.
 
 Start at **Home**: preview your character, select a map, match mode and skin, then tap **Solo** or **Online Friends**. **Armory** offers weapon classes and loadouts; **Settings** adjusts controls and bots. Home choices, gun and settings save on the device. All skins have identical movement, health and hitboxes; team markers remain visible regardless of skin.
@@ -29,7 +31,7 @@ Prototype browser link: https://heat-graphic-pubmed-culture.trycloudflare.com
 
 The host chooses the map/mode outside active rounds; guests see the authoritative choices. Skins can be requested in a room and take effect at the next spawn. No fake players or bots are added to online rooms. Friends can join an ongoing match. If the host disconnects, hosting transfers to the next player. Leaving and rejoining creates a new player; scores are not recovered. Anyone with the room code can join: this is a small friends-only prototype, not an authenticated competitive service.
 
-Online play uses **protocol 2**. All players must reload the current browser game or install the v0.3 APK, and the server must also support version 2. Old clients are rejected with an update message. At this predeployment checkpoint the public link still serves v0.2; public promotion and native online acceptance remain pending.
+Online play uses **protocol 2**. All players must reload the current browser game or install the v0.3 APK, and the server must also support version 2. Old clients are rejected with an update message. The public link serves the verified v0.3 release; real public browser multiplayer and Android emulator online checks passed on 2026-10-02.
 
 **The current internet link is temporary.** This computer's Node server and Cloudflare tunnel must remain running and connected. Stopping/restarting the tunnel can change the URL. The APK includes this address; **Online Friends → Server settings** lets you replace it without reinstalling. Solo mode keeps working without the server or internet. Stable always-on hosting has not been configured.
 

@@ -1,6 +1,6 @@
 # Home Maps Skins and Game Modes Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **Execution status:** Approved and executed on 2026-10-02 with task-scoped independent reviews. The original unchecked steps below are preserved as the historical implementation instructions, not outstanding work; the final execution evidence and coverage qualification at the end supersede the planning checklist.
 
 **Goal:** Ship an updated APK with a character-preview Home screen, eight maps, eight skins, and Free-for-All, Team Deathmatch and Capture the Flag against offline bots or online friends.
 
@@ -205,4 +205,21 @@ DOM IDs: `home-screen`, `character-preview`, `home-solo`, `home-online`, `home-a
 
 ## Execution handoff
 
-The written design is approved; this implementation plan awaits user review and an execution-method choice. Recommended: subagent-driven implementation with independent task reviews, because shared map/rule/protocol interfaces must stay consistent across bots, browser peers and the Android APK. Native implementation in the current session with one final independent review is also available with less review overhead. No product code, server process or APK has changed during planning.
+The user approved the design and execution. Tasks 1–9 were implemented and independently reviewed, with follow-up fixes verified rather than bypassed. Final reviewed product source is `5220996`; native network-readiness harness fix is `ad5af6e`. The release code commit is `ac190bc`, followed by scoped cleanup/compact-Home verification `0c86fe1` and the reviewed follow-ups. The final deployment and acceptance below replace the earlier predeployment handoff.
+
+### Final release evidence — 2026-10-02
+
+- Isolated web build: `BUILD_DIR=.superpowers/sdd/2026-10-02-home-maps-skins-modes/release-dist npm run build` passed. No release build wrote directly to the live `dist` directory.
+- Final `npm test`: 238 passed, zero failures or skipped tests (22.97 seconds). `npm audit`: zero vulnerabilities. `git diff --check`: passed.
+- All final staged browser, Home, touch, local multiplayer, configuration and real-room cleanup suites passed sequentially. The configuration suite launched 24 solo and 24 independent two-browser map/mode cases. Actual held-finger Home cancel/confirm/new-round checks passed, as did the compact 853/854×480 Home bounds and rendered v0.3 footer/guest Armory settings regressions.
+- Coverage qualification: the solo browser matrix does not independently prove the rendered map identity for every case; this remains explicit browser-layer coverage debt. Production-method offline map/navigation/spawn tests and authoritative online map tests independently verify those configurations. Launch counts are not presented as stronger map-render evidence.
+- Real staged APK build: `DIST_DIR=.superpowers/sdd/2026-10-02-home-maps-skins-modes/release-dist bash scripts/build-apk.sh --offline lintDebug` passed (15 seconds). Lint reported zero errors and five baseline warnings: UnusedAttribute, DiscouragedApi, SetJavaScriptEnabled, DataExtractionRules and SetTextI18n. All flagged native source lines are unchanged from baseline `df09f2b`; Gradle also warns about future Gradle 9 compatibility, not the current 8.14.3 build.
+- `apksigner verify --verbose` passed: one signer, v2 signature valid. Package `au.local.blockops`, version 0.3.0/code 3, minimum API 26/target 36, INTERNET permission only. All four packaged web files matched the staged bytes exactly: index.html 13,646; game.js 755,977; styles.css 27,046; THREE-LICENSE.txt 1,081 bytes.
+- Final `artifacts/block-ops-debug.apk` and identical `artifacts/block-ops-v0.3.0-debug.apk` SHA-256: `f675052600bad71d41e58b87a3ffe6b55f7158d3f7cafbe434ff93b56c3b1b8f`. Preserved v0.2 archive SHA-256: `c259bdef3e3fd6f86ab7b7dfd0d1ab84b1c4991654c14b1276d323eb1782070c`.
+- Actual final APK offline smoke passed on explicitly owned `BlockOpsTask9` / emulator-5582: nondefault Space Station/Space Guard, all modes, Home/persistence/preview, physical Solo tap and compact control bounds, 500 rounds, Android Back/background/foreground paused/explicit Resume/fresh Solo. With networking disabled, there were no external HTTP requests or WebSockets.
+- Controller independently verified the final APK and promoted the exact four staged assets without restarting the compatible protocol-2 server. Public assets fetched through HTTPS matched the tested bytes. Server PID 738735 and tunnel PID 621773 were preserved; controller observed zero rooms before and after promotion. No occupied room was cleared for this final asset-only promotion.
+- `TEST_GAME_URL=https://heat-graphic-pubmed-culture.trycloudflare.com npm run test:multiplayer` passed against the final public assets, including guest Armory/version checks and wire-ordered held-input cancellation.
+- Actual installed final APK online smoke passed through public WSS with an independent real peer: all three modes, map/skin/team agreement, movement/fire, CTF steal/carry/capture/reset, Home cancel/leave, shared live clock, incompatible-client rejection and verified cleanup. Actual Android guest-lobby background → independent host remote start → foreground paused/neutral → physical explicit Resume passed in every mode. Screenshots are retained in `artifacts/android-home.png`, `artifacts/android-gameplay.png` and `artifacts/android-online-*.png`.
+- Cleanup stopped only the owned app after verifying room departure before peer/socket/forward removal. The disposable emulator and its exact owned temporary AVD are removed after acceptance; user AVDs, shared adb daemon and the public server/tunnel are preserved.
+
+Physical BYD Shark 6/head-unit installation and performance remain untested. The APK uses a debug certificate and the public Cloudflare URL is temporary, not permanent hosting.
