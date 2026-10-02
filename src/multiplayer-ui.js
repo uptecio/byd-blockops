@@ -8,8 +8,8 @@ import { renderMatchResults } from './match-ui.js';
 
 const $ = id => document.getElementById(id);
 export class MultiplayerUI {
-  constructor({ getGame, getSettings, getSelected, getSelection, onSkin, onConfiguration, onHome, onMode, onLoadout, onToast }) {
-    Object.assign(this, { getGame, getSettings, getSelected, getSelection, onSkin, onConfiguration, onHome, onMode, onLoadout, onToast });
+  constructor({ getGame, getSettings, getSelected, getSelection, onSkin, onConfiguration, onRoomSettings, onHome, onMode, onLoadout, onToast }) {
+    Object.assign(this, { getGame, getSettings, getSelected, getSelection, onSkin, onConfiguration, onRoomSettings, onHome, onMode, onLoadout, onToast });
     this.arena = null; this.room = null; this.busy = false;
     this.client = new RoomClient({ onRoom: room => this.receive(room), onError: message => this.status(message, true), onDisconnect: () => this.disconnected() });
     $('room-map').innerHTML = MAPS.map(map => `<option value="${map.id}">${map.name}</option>`).join('');
@@ -65,6 +65,7 @@ export class MultiplayerUI {
   receive(room) {
     const previous = this.room;
     this.room = room; this.renderRoom();
+    if (!previous || previous.mapId !== room.mapId || previous.modeId !== room.modeId) this.onRoomSettings?.();
     if (room.hostId === this.client.id && (!previous || previous.hostId !== room.hostId || previous.mapId !== room.mapId || previous.modeId !== room.modeId)) this.onConfiguration({ mapId: room.mapId, modeId: room.modeId });
     $('mode-badge').textContent = `ONLINE / ${room.code}`;
     $('online-setup').hidden = true; $('room-lobby').hidden = false;

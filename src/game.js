@@ -23,6 +23,8 @@ export function disposeModel(model) {
 }
 
 const DIFFICULTY = { easy: { speed: 1.6, interval: 1.2, accuracy: .34, damage: 6 }, normal: { speed: 2.1, interval: .95, accuracy: .45, damage: 8 }, hard: { speed: 2.7, interval: .72, accuracy: .62, damage: 11 } };
+const BOT_RADIUS = .4;
+const PLAYER_RADIUS = .34;
 export class ArenaGame {
   constructor(canvas, input, audio, events) {
     this.input = input; this.audio = audio; this.events = events;
@@ -66,7 +68,7 @@ export class ArenaGame {
     this.bots = []; this.clearEffects(); this.objectives?.dispose();
     this.navigation?.clearCache(); this.world?.dispose();
     this.world = createWorld(THREE, this.scene, map.id);
-    this.navigation = createNavigation(map);
+    this.navigation = createNavigation(map, { radius: BOT_RADIUS });
     this.objectives = new ObjectiveView(THREE, this.scene, map);
     this.scene.background = new THREE.Color(map.environment.sky);
     this.scene.fog = new THREE.Fog(map.environment.fog, 42, 95);
@@ -90,7 +92,8 @@ export class ArenaGame {
       const bot = { id: botId, name: `Bot ${i + 1}`, teamId, lifeId: 0, pendingSkinId: skinId,
         cooldown: 2 + i * .3, respawn: 0, phase: i * 2.3, waypoint: null, intentTimer: 0, pathTimer: 0,
         role: assigned.has(teamId) ? 'defend' : 'attack' };
-      assigned.add(teamId); this.bots.push(bot); this.spawnBot(bot, i);
+      const spawnIndex = teamId === null ? i : this.bots.filter(other => other.teamId === teamId).length + Number(teamId === this.player.teamId);
+      assigned.add(teamId); this.bots.push(bot); this.spawnBot(bot, spawnIndex);
       bot.cooldown = 2 + i * .3;
     }
     this.refreshMatchView(); this.input.clear(); this.resume();
@@ -176,7 +179,7 @@ export class ArenaGame {
       const speed = (this.weapon.classId === 'lmg' ? 4.4 : this.weapon.classId === 'sidearm' || this.weapon.classId === 'smg' ? 6 : 5.3) * (zoom ? .65 : 1);
       const dx = (Math.cos(this.yaw) * input.x - Math.sin(this.yaw) * input.y) * speed * dt;
       const dz = (-Math.sin(this.yaw) * input.x - Math.cos(this.yaw) * input.y) * speed * dt;
-      const moved = moveCircle(this.player, dx, dz, .34, this.world.solids);
+      const moved = moveCircle(this.player, dx, dz, PLAYER_RADIUS, this.world.solids);
       this.player.x = moved.x; this.player.z = moved.z;
       if (input.jump && this.player.jump === 0) this.player.velocity = 4.3;
       this.player.velocity -= 13 * dt;
@@ -226,7 +229,11 @@ export class ArenaGame {
         bot.intentTimer = .25; bot.pathTimer = 0;
       }
       if (bot.pathTimer <= 0 || (bot.waypoint && Math.hypot(bot.waypoint.x - actor.x, bot.waypoint.z - actor.z) < .06)) {
-        bot.waypoint = bot.intent.goal ? this.navigation.nextWaypoint(actor, bot.intent.goal) : null;
+        const goal = bot.intent.goal;
+        const pursuingHuman = goal && this.player.health > 0 && this.player.dead <= 0 && goal.x === this.player.x && goal.z === this.player.z;
+        bot.waypoint = !goal ? null : pursuingHuman
+          ? this.navigation.nextApproachWaypoint(actor, goal, PLAYER_RADIUS)
+          : this.navigation.nextWaypoint(actor, goal);
         bot.pathTimer = .15;
       }
       const position = bot.model.position;
@@ -234,7 +241,7 @@ export class ArenaGame {
         const dx = bot.waypoint.x - position.x, dz = bot.waypoint.z - position.z, length = Math.hypot(dx, dz);
         const step = Math.min(length, this.botTuning.speed * dt);
         if (length > .001) {
-          const moved = moveCircle(position, dx / length * step, dz / length * step, .4, this.world.solids);
+          const moved = moveCircle(position, dx / length * step, dz / length * step, BOT_RADIUS, this.world.solids);
           position.x = moved.x; position.z = moved.z;
           bot.model.rotation.y = Math.atan2(dx, dz);
           position.y = Math.sin(this.time * 8 + bot.phase) * .025;

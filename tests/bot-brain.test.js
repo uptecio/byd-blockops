@@ -81,6 +81,21 @@ test('a thin wall between adjacent grid cells cannot be crossed', () => {
   assert.equal(nav.nextWaypoint({ x: -.5, z: 0 }, { x: 0, z: 0 }), null);
 });
 
+test('smaller-actor approach stays on the target side of thin walls and rejects invalid footprints', () => {
+  const map = arena([{ x: 0, z: 0, w: .01, d: 8, height: 3 }], { min: -4, max: 4 });
+  const nav = createNavigation(map, { radius: .4 });
+  const goal = { x: .35, z: 0 };
+  assert.equal(canOccupy(goal.x, goal.z, .34, map.solids), true);
+  assert.equal(nav.nextWaypoint({ x: 2, z: 0 }, goal), null, 'strict API still rejects bot-blocked target');
+  assert.equal(nav.reachable({ x: 2, z: 0 }, goal), false);
+  assert.ok(nav.nextApproachWaypoint({ x: 2, z: 0 }, goal, .34));
+  assert.equal(nav.nextApproachWaypoint({ x: -2, z: 0 }, goal, .34), null, 'cannot project target through a thin dividing wall');
+  for (const invalid of [{ x: .2, z: 0 }, { x: 4, z: 0 }, { x: NaN, z: 0 }]) {
+    assert.equal(nav.nextApproachWaypoint({ x: 2, z: 0 }, invalid, .34), null);
+  }
+  for (const radius of [0, -.1, NaN, .5]) assert.equal(nav.nextApproachWaypoint({ x: 2, z: 0 }, goal, radius), null);
+});
+
 test('diagonally touching chambers cannot cut through their shared corner', () => {
   const map = arena([
     { x: -1, z: 1, w: 2, d: 2, height: 3 },

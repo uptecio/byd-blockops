@@ -16,6 +16,19 @@ const base = hosted || 'http://127.0.0.1:4186';
 const browser = await chromium.launch({ headless: true, args: ['--no-sandbox', '--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader'] });
 const contexts = await Promise.all([browser.newContext({ viewport: { width: 1200, height: 700 } }), browser.newContext({ viewport: { width: 1200, height: 700 } })]);
 const pages = await Promise.all(contexts.map(context => context.newPage()));
+// Test-local access to the real wire, only to issue the normal ping barrier.
+// No production state, input packets or simulation positions are injected.
+await Promise.all(pages.map(page => page.addInitScript(() => {
+  const NativeWebSocket = window.WebSocket;
+  window.WebSocket = class extends NativeWebSocket {
+    constructor(...args) { super(...args); window.__testRoomSocket = this; }
+    send(data) {
+      const packet = JSON.parse(data);
+      if (packet.type === 'input') window.__testLastInput = packet;
+      super.send(data);
+    }
+  };
+})));
 const errors = [], snapshots = [null, null];
 pages.forEach((page, index) => {
   page.on('pageerror', error => errors.push(error.message));
@@ -28,6 +41,20 @@ const waitFor = async (predicate, message, timeout = 12000) => {
   while (Date.now() < until) { if (await predicate()) return; await new Promise(resolve => setTimeout(resolve, 60)); }
   assert.fail(message);
 };
+const roomAfterInputBarrier = page => page.evaluate(() => new Promise((resolve, reject) => {
+  const socket = window.__testRoomSocket, marker = `input-barrier-${performance.now()}`;
+  let acknowledged = false;
+  const timer = setTimeout(() => { socket.removeEventListener('message', receive); reject(new Error('Input ordering barrier timed out')); }, 12000);
+  function receive(event) {
+    const packet = JSON.parse(event.data);
+    if (packet.type === 'pong' && packet.at === marker) acknowledged = true;
+    else if (acknowledged && packet.room) {
+      clearTimeout(timer); socket.removeEventListener('message', receive); resolve(packet.room);
+    }
+  }
+  socket.addEventListener('message', receive);
+  socket.send(JSON.stringify({ type: 'ping', at: marker }));
+}));
 try {
   for (let i = 0; i < 2; i++) {
     const page = pages[i];
@@ -60,10 +87,22 @@ try {
   await waitFor(async () => (await pages[0].locator('#room-roster .roster-player').count()) === 2, 'two real players reach lobby');
   assert.equal(await pages[1].locator('#start-online').isDisabled(), true, 'only host starts');
   assert.equal(await pages[1].locator('#room-map').isDisabled(), true, 'guest cannot configure room');
+  const guestSelection = await pages[1].evaluate(() => JSON.parse(localStorage.getItem('block-ops-v1'))?.selection || null);
+  await pages[1].locator('#room-loadout').click();
+  await pages[1].locator('[data-class="sniper"]').click();
   await pages[0].locator('#room-map').selectOption('neon-city');
+  await pages[0].locator('#room-mode').selectOption('ctf');
   await waitFor(async () => snapshots.every(room => room.mapId === 'neon-city') && await pages[1].locator('#room-map').inputValue() === 'neon-city', 'guests see authoritative host map');
+  await waitFor(async () => await pages[1].locator('#armory-map').textContent() === 'NEON CITY'
+    && await pages[1].locator('#armory-mode').textContent() === 'CAPTURE THE FLAG · ONLINE FRIENDS'
+    && await pages[1].locator('#session-target').textContent() === '3 CAPTURES', 'guest Armory labels follow authoritative host changes while open');
+  assert.equal(await pages[1].locator('body').getAttribute('data-mode'), 'armory');
+  assert.equal(await pages[1].locator('[data-class="sniper"]').getAttribute('aria-pressed'), 'true', 'room updates preserve the open loadout menu');
+  assert.deepEqual(await pages[1].evaluate(() => JSON.parse(localStorage.getItem('block-ops-v1'))?.selection || null), guestSelection, 'room updates preserve independent guest Home choices');
+  await pages[1].locator('#play-button').click();
   await pages[0].locator('#room-map').selectOption('courtyard');
-  await waitFor(() => snapshots.every(room => room.mapId === 'courtyard'), 'host restores map before combat');
+  await pages[0].locator('#room-mode').selectOption('ffa');
+  await waitFor(() => snapshots.every(room => room.mapId === 'courtyard' && room.modeId === 'ffa'), 'host restores map and mode before combat');
   assert.equal(await pages[0].evaluate(() => JSON.parse(localStorage.getItem('block-ops-v1')).selection.mapId), 'courtyard', 'host room map persists locally');
   await mkdir('artifacts', { recursive: true });
   await pages[0].screenshot({ path: 'artifacts/online-lobby.png' });
@@ -111,13 +150,23 @@ try {
   finally { await pages[0].keyboard.up('KeyF'); }
   await waitFor(() => snapshots.every(room => room.players.find(player => player.name === 'Host').kills === 1), 'both independent clients converge on attacker kill credit');
   await waitFor(() => snapshots[1].players.find(player => player.name === 'Friend').health === 100, 'eliminated real player respawns');
+  const beforeHeld = { ...snapshots[0].players.find(player => player.name === 'Host') };
   await pages[0].keyboard.down('KeyW');
   await pages[0].keyboard.down('KeyF');
+  await waitFor(() => {
+    const host = snapshots[0].players.find(player => player.name === 'Host');
+    return Math.abs(host.z - beforeHeld.z) > .1 && host.ammo < beforeHeld.ammo;
+  }, 'held movement and fire reach the authority before Home');
   await pages[0].locator('#home-button').click();
-  await pages[0].keyboard.up('KeyW'); await pages[0].keyboard.up('KeyF');
-  await pages[0].waitForTimeout(250);
-  const stopped = { ...snapshots[0].players.find(player => player.name === 'Host') };
-  const confirmTime = snapshots[1].timeLeft;
+  assert.deepEqual(await pages[0].evaluate(() => {
+    const { x, y, fire, firePressed } = window.__testLastInput; return { x, y, fire, firePressed };
+  }), { x: 0, y: 0, fire: false, firePressed: false }, 'Home sends neutral input while the keys remain held');
+  // WebSocket processing is ordered: this pong follows the real neutral
+  // input; the next state follows the pong. A fixed delay can read old state
+  // on a public connection and cannot order two independent peer streams.
+  const stoppedRoom = await roomAfterInputBarrier(pages[0]);
+  const stopped = { ...stoppedRoom.players.find(player => player.name === 'Host') };
+  const confirmTime = stoppedRoom.timeLeft;
   const confirmDisplayTime = await pages[0].locator('#timer').textContent();
   await waitFor(() => snapshots[1].timeLeft < confirmTime - 1, 'online Home confirmation keeps shared clock live');
   await waitFor(async () => await pages[0].locator('#timer').textContent() !== confirmDisplayTime, 'online HUD clock continues updating under Home confirmation');
@@ -126,8 +175,12 @@ try {
   assert.equal(inConfirmation.ammo, stopped.ammo, 'Home confirmation stops held fire');
   await pages[0].locator('#cancel-home').click();
   await pages[0].waitForSelector('body[data-mode="playing"]');
-  await pages[0].waitForTimeout(400);
+  const cancelTime = snapshots[1].timeLeft;
+  await waitFor(() => snapshots[1].timeLeft < cancelTime - 1, 'peer observes continued play after Cancel');
   assert.equal(snapshots[1].players.find(player => player.name === 'Host').ammo, stopped.ammo, 'cancel cannot revive held fire');
+  const afterCancel = snapshots[1].players.find(player => player.name === 'Host');
+  assert.ok(Math.hypot(afterCancel.x - stopped.x, afterCancel.z - stopped.z) < .05, 'cancel cannot revive held movement');
+  await pages[0].keyboard.up('KeyW'); await pages[0].keyboard.up('KeyF');
   await pages[0].locator('#pause-button').click();
   const pausedTime = snapshots[0].timeLeft;
   await waitFor(() => snapshots[1].timeLeft < pausedTime - 1, 'one player menu does not pause the shared match');

@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import * as THREE from 'three';
 import { MAPS } from '../src/maps.js';
-import { canOccupy } from '../src/collision.js';
+import { canOccupy, moveCircle } from '../src/collision.js';
 import { ObjectiveView } from '../src/objectives.js';
 import { tickMode } from '../src/modes.js';
 import { createHeadlessGame, cleanupGame } from './helpers/game-fixture.js';
@@ -130,10 +130,10 @@ test('unreachable goals throttle navigation retries instead of recalculating eac
   // Player is inside an existing courtyard building; genuine navigation rejects it.
   game.player.x = 15; game.player.z = 14;
   let recalculations = 0;
-  const nextWaypoint = game.navigation.nextWaypoint;
-  context.mock.method(game.navigation, 'nextWaypoint', (...args) => { recalculations++; return nextWaypoint(...args); });
+  const nextApproachWaypoint = game.navigation.nextApproachWaypoint.bind(game.navigation);
+  context.mock.method(game.navigation, 'nextApproachWaypoint', (...args) => { recalculations++; return nextApproachWaypoint(...args); });
   for (let i = 0; i < 50; i++) game.update(.01);
-  assert.equal(game.bots[0].waypoint, null); assert.ok(recalculations <= 6, `recalculated ${recalculations} times in half a second`);
+  assert.equal(game.bots[0].waypoint, null); assert.ok(recalculations > 0 && recalculations <= 6, `recalculated ${recalculations} times in half a second`);
   cleanupGame(game);
 });
 
@@ -159,5 +159,62 @@ test('FFA bots start in the bot spawn pool without overlapping the human spawn',
         assert.ok(map.spawns.some(point => point.x === x && point.z === z));
       }
     }
+  } finally { cleanupGame(game); }
+});
+
+test('bots pursue a human at legal bot-radius wall contact through production updates', () => {
+  const game = createHeadlessGame();
+  try {
+    game.start('m4a1', { bots: 1, modeId: 'ffa', mapId: 'courtyard' });
+    game.player.x = game.player.z = 0;
+    for (let i = 0; i < 100; i++) Object.assign(game.player, moveCircle(game.player, -.1, 0, .4, game.world.solids));
+    assert.ok(Math.abs(game.player.x + 6.5) < 1e-8, 'collision movement reaches central wall');
+    assert.ok(canOccupy(game.player.x, game.player.z, .4, game.world.solids));
+    assert.equal(canOccupy(game.player.x, game.player.z, .42, game.world.solids), false);
+    const bot = game.bots[0]; bot.model.position.set(-10, 0, 0);
+    for (let i = 0; i < 40; i++) {
+      game.update(.05);
+      assert.ok(canOccupy(bot.model.position.x, bot.model.position.z, .4, game.world.solids));
+    }
+    assert.ok(Math.hypot(bot.model.position.x + 10, bot.model.position.z) > 1, 'bot follows its real pursuit route around cover');
+    assert.deepEqual(bot.intent.goal, { x: game.player.x, z: game.player.z });
+  } finally { cleanupGame(game); }
+});
+
+test('initial team spawns stay distinct for every supported bot count, map and team mode', () => {
+  const game = createHeadlessGame();
+  try {
+    for (const map of MAPS) for (const modeId of ['tdm', 'ctf']) for (let bots = 1; bots <= 8; bots++) {
+      game.start('m4a1', { bots, modeId, mapId: map.id });
+      const occupied = new Set();
+      for (const actor of game.getActors()) {
+        const key = `${actor.x},${actor.z}`;
+        assert.ok(!occupied.has(key), `${map.id}/${modeId}/${bots} bots: ${actor.id} overlaps another actor`);
+        occupied.add(key);
+        assert.ok(map.teamSpawns[actor.teamId].some(point => point.x === actor.x && point.z === actor.z));
+      }
+    }
+  } finally { cleanupGame(game); }
+});
+
+test('bots pursue actual human-radius wall contact reached by live player controls', () => {
+  const game = createHeadlessGame();
+  try {
+    game.start('m4a1', { bots: 1, modeId: 'ffa', mapId: 'courtyard' });
+    game.player.x = game.player.z = 0;
+    game.input.keys.add('KeyA');
+    // Keep the bot out of this setup without bypassing player simulation.
+    game.bots[0].respawn = 100;
+    for (let i = 0; i < 160; i++) game.update(.01);
+    game.input.clear();
+    assert.ok(canOccupy(game.player.x, game.player.z, .34, game.world.solids));
+    assert.equal(canOccupy(game.player.x, game.player.z, .4, game.world.solids), false);
+    const bot = game.bots[0]; bot.respawn = 0; bot.model.position.set(-10, 0, 0);
+    game.botTuning = { ...game.botTuning, accuracy: 0 };
+    for (let i = 0; i < 240; i++) {
+      game.update(.05);
+      assert.ok(canOccupy(bot.model.position.x, bot.model.position.z, .4, game.world.solids));
+    }
+    assert.ok(Math.hypot(bot.model.position.x - game.player.x, bot.model.position.z - game.player.z) < .8, 'bot routes around cover to a safe nearby approach');
   } finally { cleanupGame(game); }
 });

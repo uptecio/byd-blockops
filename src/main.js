@@ -138,6 +138,9 @@ $('weapon-grid').addEventListener('click', event => {
 });
 function showArmory() {
   setMode('armory'); activeClass = selected.classId; renderSelected();
+  renderArmorySession();
+}
+function renderArmorySession() {
   const mapId = multiplayer?.isConnected() ? multiplayer.room.mapId : selection.mapId;
   const modeId = multiplayer?.isConnected() ? multiplayer.room.modeId : selection.modeId;
   $('armory-map').textContent = getMap(mapId).name.toUpperCase();
@@ -240,7 +243,7 @@ try {
     onToast: message => { $('toast').textContent = message; toastUntil = performance.now() + 1900; },
     onFatal: showFatal,
   });
-  multiplayer = new MultiplayerUI({ getGame: () => game, getSettings: () => settings, getSelected: () => selected, getSelection: () => selection, onSkin: skinId => selectConfiguration({ ...selection, skinId }), onConfiguration: next => { selection = validateSelection({ ...selection, ...next }); persist(); home.render(); }, onHome: requestHome, onMode: setMode, onLoadout: showArmory, onToast: message => { $('toast').textContent = message; toastUntil = performance.now() + 1900; } });
+  multiplayer = new MultiplayerUI({ getGame: () => game, getSettings: () => settings, getSelected: () => selected, getSelection: () => selection, onSkin: skinId => selectConfiguration({ ...selection, skinId }), onConfiguration: next => { selection = validateSelection({ ...selection, ...next }); persist(); home.render(); }, onRoomSettings: () => { if (mode === 'armory') renderArmorySession(); }, onHome: requestHome, onMode: setMode, onLoadout: showArmory, onToast: message => { $('toast').textContent = message; toastUntil = performance.now() + 1900; } });
   home = new HomeUI({ getSelection: () => selection, onSelection: selectConfiguration, onSolo: () => deploy(), onOnline: () => multiplayer.open(), onArmory: showArmory, onSettings: openSettings });
   preview = new WeaponPreview($('weapon-preview'));
   let previous = performance.now();
