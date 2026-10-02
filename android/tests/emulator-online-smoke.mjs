@@ -35,11 +35,21 @@ const opened = socket => new Promise((resolve, reject) => {
   socket.addEventListener('error', () => { clearTimeout(timeout); reject(new Error('WebSocket open failed')); }, { once: true });
 });
 let socket, peer, incompatible, forwarded = false, evaluate, verifyDeparture, originalError, ownedApp = false;
+const transportErrors = [];
 try {
   const avdName = (await command('emu', 'avd', 'name')).stdout.trim().split('\n')[0].trim();
   assert.equal(avdName, process.env.ANDROID_TEST_AVD || 'BlockOpsTask9', 'Native smoke must use its explicitly owned disposable AVD');
   ownedApp = true;
   await shell('svc', 'wifi', 'enable');
+  await until(async () => (await shell('dumpsys', 'connectivity')).stdout,
+    value => /Active default network:\s*\d+/.test(value) && /ni\{WIFI CONNECTED/.test(value),
+    'Owned emulator Wi-Fi has a default route after offline smoke');
+  // Android can publish the Wi-Fi route before its DNS resolver is usable.
+  // A resolved ping header is enough; the destination need not answer ICMP.
+  await until(async () => {
+    try { return (await shell('ping', '-c', '1', '-W', '1', new URL(server).hostname)).stdout; }
+    catch (error) { return error.stdout || ''; }
+  }, value => /^PING .*\([0-9a-f:.]+\)/mi.test(value), 'Owned emulator resolves the configured public server');
   await shell('settings', 'put', 'secure', 'immersive_mode_confirmations', 'confirmed');
   await shell('am', 'start', '-W', '-n', 'au.local.blockops/.MainActivity');
   const pid = (await shell('pidof', 'au.local.blockops')).stdout.trim();
@@ -65,7 +75,8 @@ try {
     else if (message.method === 'Log.entryAdded' && message.params.entry.level === 'error') {
       const entry = message.params.entry;
       if (!(entry.source === 'network' && entry.url === 'https://appassets.androidplatform.net/favicon.ico')) errors.push(JSON.stringify(entry));
-    } else if (message.method === 'Network.webSocketCreated') sockets.push(message.params.url);
+    } else if (message.method === 'Network.webSocketFrameError') transportErrors.push(message.params.errorMessage);
+    else if (message.method === 'Network.webSocketCreated') sockets.push(message.params.url);
     else if (message.method === 'Network.requestWillBeSent' && !message.params.request.url.startsWith('https://appassets.androidplatform.net/')) remote.push(message.params.request.url);
   };
   const send = (method, params = {}) => new Promise((resolve, reject) => {
@@ -273,6 +284,7 @@ try {
   assert.deepEqual(remote, [], 'No remote HTTP assets or requests');
 } catch (error) {
   originalError = error;
+  if (transportErrors.length) console.error(`Native WebSocket transport errors: ${JSON.stringify(transportErrors)}`);
   throw error;
 } finally {
   await cleanupOwnedOnlineSession({
