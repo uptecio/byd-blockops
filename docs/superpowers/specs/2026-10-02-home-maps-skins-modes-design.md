@@ -1,8 +1,8 @@
-# Draft Block Ops home maps skins and game modes
+# Block Ops home maps skins and game modes
 
 This design extends the existing touch-controlled Android game with a Home screen, eight original block-style maps, selectable character skins, and Free-for-All, Team Deathmatch and Capture the Flag. The user confirmed that all modes must support both offline bots and online friends. The update preserves the 28 guns, 500 starting rounds per gun, and internet room codes.
 
-The feature scope is confirmed. The specific map themes, skin names, match rules and Home behaviour below are proposed defaults for review. This document does not represent a completed implementation or a new APK.
+The user approved this written design on 2026-10-02. The map themes, skin names, match rules and Home behaviour below are the implementation requirements. This document does not represent a completed implementation or a new APK.
 
 ## Home and navigation
 
@@ -109,4 +109,4 @@ The existing public link remains temporary; this update does not create permanen
 
 ## Review status
 
-This is the written design for user review. After approval, the next step is a separate implementation plan and execution-method choice required by the Superpowers architectural workflow. Product code, the live server and the APK are unchanged by this design step.
+The written design is approved. The next step is review of the implementation plan and an execution-method choice required by the Superpowers architectural workflow. Product code, the live server and the APK are unchanged by this design step.
