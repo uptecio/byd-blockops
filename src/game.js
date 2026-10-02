@@ -1,8 +1,14 @@
 import * as THREE from 'three';
-import { createWorld, createBotModel, createWeaponModel } from './world.js';
-import { canOccupy, moveCircle, hasLineOfSight } from './collision.js';
+import { createWorld, createWeaponModel } from './world.js';
+import { moveCircle, hasLineOfSight } from './collision.js';
 import { getWeapon, createWeaponState, tickWeapon, tryFire, startReload } from './weapons.js';
-import { createMatch, tickMatch, recordKill, recordDeath } from './match.js';
+import { assignTeams, createModeState, tickMode, recordElimination, getModeSnapshot, areEnemies } from './modes.js';
+import { getMap, DEFAULT_MAP_ID } from './maps.js';
+import { getSkin, SKINS, DEFAULT_SKIN_ID } from './skins.js';
+import { createAvatarModel } from './avatar.js';
+import { createNavigation } from './navigation.js';
+import { chooseBotIntent } from './bot-brain.js';
+import { ObjectiveView } from './objectives.js';
 
 export function disposeModel(model) {
   if (!model) return;
@@ -31,16 +37,12 @@ export class ArenaGame {
     this.camera = new THREE.PerspectiveCamera(75, 1, .05, 180);
     this.camera.rotation.order = 'YXZ'; this.scene.add(this.camera);
     this.world = createWorld(THREE, this.scene);
-    this.player = { ...this.world.playerSpawn, health: 100, jump: 0, velocity: 0, dead: 0, protected: 2 };
+    this.player = { ...this.world.playerSpawn, id: 'local', name: 'You', lifeId: 0, skinId: DEFAULT_SKIN_ID, pendingSkinId: DEFAULT_SKIN_ID, health: 100, jump: 0, velocity: 0, dead: 0, protected: 2 };
     this.yaw = 0; this.pitch = 0; this.time = 0; this.recoil = 0;
     this.active = false; this.hasRound = false; this.bots = []; this.effects = [];
     this.inventory = new Map(); this.weapon = getWeapon('m4a1');
     this.setWeapon(this.weapon.id);
-    this.match = createMatch(); this.settings = { sensitivity: 1, bots: 5, difficulty: 'normal' };
-    this.navSize = 45; this.navOrigin = -22; this.navTimer = 0;
-    this.walkable = new Uint8Array(this.navSize * this.navSize);
-    this.distances = new Int16Array(this.walkable.length);
-    for (let z = 0; z < this.navSize; z++) for (let x = 0; x < this.navSize; x++) this.walkable[z * this.navSize + x] = canOccupy(x - 22, z - 22, .42, this.world.solids) ? 1 : 0;
+    this.match = { timeLeft: 180, kills: 0, deaths: 0, ended: false }; this.settings = { sensitivity: 1, bots: 5, difficulty: 'normal' };
     this.muzzle = new THREE.Mesh(new THREE.OctahedronGeometry(.09), new THREE.MeshBasicMaterial({ color: '#fff0a0', transparent: true, opacity: .9, depthTest: false }));
     this.muzzle.position.set(.28, -.18, -1.1); this.muzzle.visible = false; this.camera.add(this.muzzle);
     this.shotFlash = 0; this.damageFlash = 0; this.hitFlash = 0; this.hudTimer = 0; this.lastFire = false;
@@ -58,33 +60,85 @@ export class ArenaGame {
     this.weaponModel.position.set(.28, -.27, -.5); this.camera.add(this.weaponModel);
     this.lastFire = false; this.recoil = 0;
   }
-  start(id, settings) {
+  loadMap(mapId) {
+    const map = getMap(mapId);
     for (const bot of this.bots) disposeModel(bot.model);
-    this.bots = []; this.clearEffects(); this.inventory.clear(); this.setWeapon(id);
-    this.settings = { ...settings }; this.botTuning = DIFFICULTY[settings.difficulty] || DIFFICULTY.normal;
-    this.match = createMatch(); this.hasRound = true;
+    this.bots = []; this.clearEffects(); this.objectives?.dispose();
+    this.navigation?.clearCache(); this.world?.dispose();
+    this.world = createWorld(THREE, this.scene, map.id);
+    this.navigation = createNavigation(map);
+    this.objectives = new ObjectiveView(THREE, this.scene, map);
+    this.scene.background = new THREE.Color(map.environment.sky);
+    this.scene.fog = new THREE.Fog(map.environment.fog, 42, 95);
+  }
+  start(id, settings = {}) {
+    this.settings = { sensitivity: 1, bots: 5, difficulty: 'normal', mapId: DEFAULT_MAP_ID, modeId: 'ffa', skinId: DEFAULT_SKIN_ID, ...settings };
+    const count = Math.max(0, Math.min(8, Math.trunc(this.settings.bots) || 0)); // zero reserved for online adapter
+    getSkin(this.settings.skinId);
+    const ids = ['local', ...Array.from({ length: count }, (_, i) => `bot-${i}`)];
+    const teams = assignTeams(ids, this.settings.modeId);
+    this.modeState = createModeState({ modeId: this.settings.modeId, map: getMap(this.settings.mapId), participants: ids.map(id => ({ id, teamId: teams[id] })) });
+    this.loadMap(this.settings.mapId); this.inventory.clear(); this.setWeapon(id);
+    this.botTuning = DIFFICULTY[this.settings.difficulty] || DIFFICULTY.normal;
+    Object.assign(this.player, { id: 'local', name: 'You', teamId: teams.local, lifeId: 0, pendingSkinId: this.settings.skinId });
+    this.hasRound = true; this.endReported = false;
     this.resetPlayer(true);
-    for (let i = 0; i < settings.bots; i++) {
-      const model = createBotModel(THREE, [0xeb744f, 0xe8a446, 0xc9725a, 0xd95151][i % 4]);
-      const bar = new THREE.Mesh(new THREE.PlaneGeometry(.9, .09), new THREE.MeshBasicMaterial({ color: 0xf45b4f, side: THREE.DoubleSide }));
-      bar.position.y = 2.13; model.add(bar);
-      this.world.botGroup.add(model);
-      const bot = { model, bar, health: 100, cooldown: 2 + i * .3, respawn: 0, phase: i * 2.3, waypoint: null };
-      const point = this.world.spawns[i % this.world.spawns.length];
-      model.position.set(point.x, 0, point.z); this.bots.push(bot);
+    const assigned = new Set();
+    for (let i = 0; i < count; i++) {
+      const botId = `bot-${i}`, teamId = teams[botId];
+      const skinId = SKINS[i % SKINS.length].id;
+      const bot = { id: botId, name: `Bot ${i + 1}`, teamId, lifeId: 0, pendingSkinId: skinId,
+        cooldown: 2 + i * .3, respawn: 0, phase: i * 2.3, waypoint: null, intentTimer: 0, pathTimer: 0,
+        role: assigned.has(teamId) ? 'defend' : 'attack' };
+      assigned.add(teamId); this.bots.push(bot); this.spawnBot(bot, i);
+      bot.cooldown = 2 + i * .3;
     }
-    this.navTimer = 0; this.input.clear(); this.resume();
+    this.refreshMatchView(); this.input.clear(); this.resume();
+  }
+  spawnPoints(teamId) {
+    const map = this.world.definition;
+    return teamId === null ? [map.playerSpawn, ...map.spawns] : map.teamSpawns[teamId];
+  }
+  spawnBot(bot, index = this.bots.indexOf(bot)) {
+    const points = bot.teamId === null ? this.world.definition.spawns : this.spawnPoints(bot.teamId);
+    const spawn = points[index % points.length];
+    disposeModel(bot.model); bot.skinId = bot.pendingSkinId; bot.lifeId++;
+    bot.model = createAvatarModel(THREE, { skinId: bot.skinId, teamId: bot.teamId });
+    bot.bar = new THREE.Mesh(new THREE.PlaneGeometry(.9, .09), new THREE.MeshBasicMaterial({ color: '#f45b4f', side: THREE.DoubleSide }));
+    bot.bar.position.y = 2.13; bot.model.add(bot.bar); this.world.botGroup.add(bot.model);
+    bot.model.position.set(spawn.x, 0, spawn.z);
+    Object.assign(bot, { health: 100, respawn: 0, protected: 2.5, cooldown: 1.5, intentTimer: 0, pathTimer: 0, waypoint: null, intent: null, weaponState: createWeaponState('m4a1') });
+  }
+  setPendingSkin(skinId) { getSkin(skinId); this.player.pendingSkinId = skinId; }
+  getActors() {
+    return [{ id: this.player.id, name: this.player.name, teamId: this.player.teamId, x: this.player.x, y: this.player.jump, z: this.player.z,
+      alive: this.player.health > 0 && this.player.dead <= 0, protectedRemaining: this.player.protected, lifeId: this.player.lifeId, skinId: this.player.skinId },
+    ...this.bots.map(bot => ({ id: bot.id, name: bot.name, teamId: bot.teamId, x: bot.model.position.x, y: bot.model.position.y, z: bot.model.position.z,
+      alive: bot.health > 0 && bot.respawn <= 0, protectedRemaining: bot.protected, lifeId: bot.lifeId, skinId: bot.skinId }))];
+  }
+  refreshMatchView() {
+    this.matchView = { ...getModeSnapshot(this.modeState), players: this.getActors().map(actor => ({ id: actor.id, name: actor.name, teamId: actor.teamId,
+      kills: this.modeState.stats[actor.id].kills, deaths: this.modeState.stats[actor.id].deaths, skinId: actor.skinId })) };
+    const own = this.modeState.stats.local;
+    Object.assign(this.match, { timeLeft: this.modeState.timeLeft, kills: own.kills, deaths: own.deaths, ended: this.modeState.ended });
+    this.objectives.update({ flags: this.matchView.flags, actors: this.getActors(), viewerId: 'local' });
+  }
+  getMatchView() { return this.matchView; }
+  finishRound() {
+    if (!this.modeState.ended || this.endReported) return;
+    this.refreshMatchView(); this.endReported = true; this.pause(); this.events.onEnd(this.match);
   }
   resetPlayer(initial = false) {
-    let spawn = this.world.playerSpawn;
+    const points = this.spawnPoints(this.player.teamId);
+    let spawn = points[0];
     if (!initial && this.bots.length) {
-      const points = [this.world.playerSpawn, ...this.world.spawns];
       spawn = points.reduce((best, point) => {
         const distance = Math.min(...this.bots.filter(bot => bot.respawn <= 0).map(bot => Math.hypot(bot.model.position.x - point.x, bot.model.position.z - point.z)));
         return distance > best.distance ? { ...point, distance } : best;
       }, { ...spawn, distance: -1 });
     }
-    Object.assign(this.player, { x: spawn.x, z: spawn.z, health: 100, dead: 0, jump: 0, velocity: 0, protected: 2.5 });
+    Object.assign(this.player, { x: spawn.x, z: spawn.z, health: 100, dead: 0, jump: 0, velocity: 0, protected: 2.5, skinId: this.player.pendingSkinId });
+    this.player.lifeId++;
     this.yaw = initial ? 0 : Math.atan2(spawn.x, spawn.z); this.pitch = 0; this.recoil = 0;
     this.inventory.clear(); this.setWeapon(this.weapon.id); this.input.clear(); this.placeCamera();
   }
@@ -97,17 +151,18 @@ export class ArenaGame {
     this.camera.rotation.set(this.pitch + this.recoil, this.yaw, 0, 'YXZ');
   }
   update(dt) {
+    if (!Number.isFinite(dt) || dt <= 0) return;
     this.time += dt;
     if (this.active) {
-      tickMatch(this.match, dt);
-      if (this.match.ended) { this.pause(); this.events.onEnd(this.match); }
-      else this.simulate(dt);
+      this.simulate(Math.min(dt, this.modeState.timeLeft));
+      tickMode(this.modeState, dt, this.getActors()); this.refreshMatchView(); this.finishRound();
     }
     this.hudTimer -= dt;
     if (this.hudTimer <= 0) { this.events.onHud(this); this.hudTimer = .045; }
     this.renderer.render(this.scene, this.camera);
   }
   simulate(dt) {
+    if (this.modeState.ended) return;
     const input = this.input.read();
     this.player.protected = Math.max(0, this.player.protected - dt);
     if (this.player.dead > 0) {
@@ -143,8 +198,6 @@ export class ArenaGame {
       this.weaponModel.rotation.z = reload ? Math.sin(this.time * 6) * .15 - .3 : 0;
     }
     this.recoil *= Math.exp(-dt * 13);
-    this.navTimer -= dt;
-    if (this.navTimer <= 0) { this.updateNavigation(); this.navTimer = .7; }
     this.updateBots(dt);
     this.shotFlash = Math.max(0, this.shotFlash - dt); this.muzzle.visible = this.shotFlash > 0 && this.weaponModel.visible;
     this.hitFlash = Math.max(0, this.hitFlash - dt); this.damageFlash = Math.max(0, this.damageFlash - dt);
@@ -155,93 +208,88 @@ export class ArenaGame {
       return true;
     });
   }
-  updateNavigation() {
-    const size = this.navSize;
-    const px = Math.round(this.player.x) + 22, pz = Math.round(this.player.z) + 22;
-    let start = pz * size + px;
-    if (!this.walkable[start]) {
-      let best = Infinity;
-      for (let i = 0; i < this.walkable.length; i++) if (this.walkable[i]) {
-        const distance = Math.abs(i % size - px) + Math.abs(Math.floor(i / size) - pz);
-        if (distance < best) { start = i; best = distance; }
-      }
-    }
-    this.distances.fill(-1); this.distances[start] = 0;
-    const queue = new Int16Array(this.walkable.length); let read = 0, write = 1; queue[0] = start;
-    while (read < write) {
-      const index = queue[read++], x = index % size, z = Math.floor(index / size);
-      for (const [nx, nz] of [[x - 1, z], [x + 1, z], [x, z - 1], [x, z + 1]]) {
-        if (nx < 0 || nz < 0 || nx >= size || nz >= size) continue;
-        const next = nz * size + nx;
-        if (this.walkable[next] && this.distances[next] === -1) { this.distances[next] = this.distances[index] + 1; queue[write++] = next; }
-      }
-    }
-  }
   updateBots(dt) {
-    const playerTarget = { x: this.player.x, y: 1.25 + this.player.jump, z: this.player.z };
+    if (this.modeState.ended) return;
     for (const bot of this.bots) {
+      if (this.modeState.ended) break;
       if (bot.respawn > 0) {
         bot.respawn -= dt;
-        if (bot.respawn <= 0) {
-          const choices = this.world.spawns.filter(point => Math.hypot(point.x - this.player.x, point.z - this.player.z) > 9);
-          const spawn = choices[Math.floor(Math.random() * choices.length)] || this.world.spawns[0];
-          bot.model.position.set(spawn.x, 0, spawn.z); bot.health = 100; bot.bar.scale.x = 1; bot.model.visible = true; bot.cooldown = 1.5;
-        }
+        if (bot.respawn <= 0) this.spawnBot(bot);
         continue;
       }
-      const position = bot.model.position;
-      const dx = this.player.x - position.x, dz = this.player.z - position.z;
-      const distance = Math.hypot(dx, dz);
-      const visible = hasLineOfSight({ x: position.x, y: 1.35, z: position.z }, playerTarget, this.world.solids);
-      let vx = 0, vz = 0;
-      if (visible) {
-        const approach = distance > 10 ? 1 : distance < 5 ? -.7 : 0;
-        const strafe = Math.sin(this.time * .7 + bot.phase) * .6;
-        vx = (dx * approach - dz * strafe) / Math.max(distance, .1);
-        vz = (dz * approach + dx * strafe) / Math.max(distance, .1);
-      } else {
-        const cx = Math.round(position.x) + 22, cz = Math.round(position.z) + 22;
-        let best = Infinity, target = null;
-        for (let oz = -1; oz <= 1; oz++) for (let ox = -1; ox <= 1; ox++) {
-          const nx = cx + ox, nz = cz + oz;
-          if (nx < 0 || nz < 0 || nx >= this.navSize || nz >= this.navSize) continue;
-          const index = nz * this.navSize + nx, score = this.distances[index];
-          const point = { x: nx - 22, z: nz - 22 };
-          if (score >= 0 && score < best && hasLineOfSight(position, point, this.world.solids)) { best = score; target = point; }
-        }
-        if (target) { const length = Math.hypot(target.x - position.x, target.z - position.z); if (length > .05) { vx = (target.x - position.x) / length; vz = (target.z - position.z) / length; } }
+      bot.protected = Math.max(0, bot.protected - dt);
+      tickWeapon(bot.weaponState, dt);
+      bot.cooldown -= dt; bot.intentTimer -= dt; bot.pathTimer -= dt;
+      const actors = this.getActors(), actor = actors.find(actor => actor.id === bot.id);
+      if (bot.intentTimer <= 0) {
+        bot.intent = chooseBotIntent(actor, { actors, state: this.modeState, map: this.world.definition, role: bot.role });
+        bot.intentTimer = .25; bot.pathTimer = 0;
       }
-      const moved = moveCircle(position, vx * this.botTuning.speed * dt, vz * this.botTuning.speed * dt, .4, this.world.solids);
-      position.x = moved.x; position.z = moved.z;
-      bot.model.rotation.y = Math.atan2(dx, dz);
-      bot.model.position.y = Math.sin(this.time * 8 + bot.phase) * .025 * Math.hypot(vx, vz);
-      bot.bar.rotation.y = this.yaw - bot.model.rotation.y;
-      bot.cooldown -= dt;
-      if (visible && distance < 31 && bot.cooldown <= 0 && this.player.dead <= 0) {
-        bot.cooldown = this.botTuning.interval * (.85 + Math.random() * .6);
-        this.tracer(new THREE.Vector3(position.x, 1.2, position.z), new THREE.Vector3(this.player.x + (Math.random() - .5), 1.1 + this.player.jump, this.player.z), '#ffb66d');
-        const moving = Math.hypot(this.input.move.x, this.input.move.y) > .2 || ['KeyW', 'KeyA', 'KeyS', 'KeyD', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].some(key => this.input.keys.has(key));
-        if (this.player.protected <= 0 && Math.random() < this.botTuning.accuracy * (moving ? .65 : 1)) {
-          this.player.health = Math.max(0, this.player.health - this.botTuning.damage); this.damageFlash = .3;
-          if (this.player.health === 0) { recordDeath(this.match); this.player.dead = 2.5; this.input.clear(); this.events.onToast('ELIMINATED · RESPAWNING'); }
+      if (bot.pathTimer <= 0 || (bot.waypoint && Math.hypot(bot.waypoint.x - actor.x, bot.waypoint.z - actor.z) < .06)) {
+        bot.waypoint = bot.intent.goal ? this.navigation.nextWaypoint(actor, bot.intent.goal) : null;
+        bot.pathTimer = .15;
+      }
+      const position = bot.model.position;
+      if (bot.waypoint) {
+        const dx = bot.waypoint.x - position.x, dz = bot.waypoint.z - position.z, length = Math.hypot(dx, dz);
+        const step = Math.min(length, this.botTuning.speed * dt);
+        if (length > .001) {
+          const moved = moveCircle(position, dx / length * step, dz / length * step, .4, this.world.solids);
+          position.x = moved.x; position.z = moved.z;
+          bot.model.rotation.y = Math.atan2(dx, dz);
+          position.y = Math.sin(this.time * 8 + bot.phase) * .025;
         }
+      }
+      bot.bar.rotation.y = this.yaw - bot.model.rotation.y;
+      const target = this.getActors().find(actor => actor.id === bot.intent.targetId);
+      if (!target || !target.alive || target.protectedRemaining > 0 || !areEnemies(this.modeState, bot.id, target.id)) continue;
+      const from = { x: position.x, y: position.y + 1.35, z: position.z };
+      const to = { x: target.x, y: target.y + 1.35, z: target.z };
+      if (Math.hypot(target.x - position.x, target.z - position.z) >= 31 || !hasLineOfSight(from, to, this.world.solids) || bot.cooldown > 0) continue;
+      if (bot.weaponState.ammo === 0) { startReload(bot.weaponState); continue; }
+      if (!tryFire(bot.weaponState)) continue;
+      bot.cooldown = this.botTuning.interval * (.85 + Math.random() * .6);
+      this.tracer(new THREE.Vector3(from.x, from.y, from.z), new THREE.Vector3(to.x, to.y, to.z), '#ffb66d');
+      const moving = target.id === 'local' && (Math.hypot(this.input.move.x, this.input.move.y) > .2
+        || ['KeyW', 'KeyA', 'KeyS', 'KeyD', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].some(key => this.input.keys.has(key)));
+      if (Math.random() < this.botTuning.accuracy * (moving ? .65 : 1)) {
+        const victim = target.id === 'local' ? this.player : this.bots.find(bot => bot.id === target.id);
+        this.damageActor(bot.id, victim, this.botTuning.damage);
       }
     }
+    this.refreshMatchView();
+  }
+  damageActor(attackerId, victim, damage) {
+    if (this.modeState.ended || !areEnemies(this.modeState, attackerId, victim.id) || victim.health <= 0
+      || (victim.dead ?? victim.respawn) > 0 || victim.protected > 0) return false;
+    victim.health = Math.max(0, victim.health - damage);
+    if (victim.id === 'local') this.damageFlash = .3;
+    else victim.bar.scale.x = victim.health / 100;
+    if (victim.health === 0) {
+      const position = victim.id === 'local' ? victim : victim.model.position;
+      recordElimination(this.modeState, { killerId: attackerId, victimId: victim.id, position, lifeId: victim.lifeId });
+      if (victim.id === 'local') { victim.dead = 2.5; this.input.clear(); this.events.onToast('ELIMINATED · RESPAWNING'); }
+      else { victim.respawn = 2.5; victim.model.visible = false; }
+      this.refreshMatchView(); this.finishRound();
+    }
+    return true;
   }
   shoot(zoom) {
+    if (this.modeState.ended) return;
     this.audio.shoot(this.weapon); this.shotFlash = .055;
     this.camera.updateMatrixWorld(true);
     const origin = this.camera.getWorldPosition(new THREE.Vector3());
     let landed = false, killed = false;
     for (let pellet = 0; pellet < this.weapon.pellets; pellet++) {
+      if (this.modeState.ended) break;
       const spread = this.weapon.spread * (zoom ? .35 : 1);
       const direction = new THREE.Vector3((Math.random() - .5) * spread * 2, (Math.random() - .5) * spread * 2, -1).normalize().applyQuaternion(this.camera.quaternion);
       const ray = new THREE.Ray(origin, direction);
       let closest = this.weapon.range, victim = null, hitPoint = null;
       for (const bot of this.bots) {
-        if (bot.respawn > 0) continue;
+        if (bot.respawn > 0 || bot.protected > 0 || !areEnemies(this.modeState, 'local', bot.id)) continue;
         const p = bot.model.position;
-        const box = new THREE.Box3(new THREE.Vector3(p.x - .43, .05, p.z - .43), new THREE.Vector3(p.x + .43, 1.87, p.z + .43));
+        const box = new THREE.Box3(new THREE.Vector3(p.x - .32, p.y + .05, p.z - .32), new THREE.Vector3(p.x + .32, p.y + 1.84, p.z + .32));
         const hit = ray.intersectBox(box, new THREE.Vector3());
         if (!hit) continue;
         const distance = origin.distanceTo(hit);
@@ -249,12 +297,8 @@ export class ArenaGame {
       }
       if (victim) {
         const falloff = this.weapon.classId === 'shotgun' || this.weapon.classId === 'smg' ? Math.max(.35, 1 - closest / this.weapon.range * .6) : 1;
-        victim.health -= this.weapon.damage * falloff * (hitPoint.y > 1.48 ? 1.5 : 1);
-        victim.bar.scale.x = Math.max(0, victim.health / 100); landed = true;
-        if (victim.health <= 0) {
-          victim.respawn = 2.5; victim.model.visible = false; recordKill(this.match); killed = true;
-          this.events.onToast(`+1 ELIMINATION · ${this.match.kills} / 15`);
-        }
+        landed = this.damageActor('local', victim, this.weapon.damage * falloff * (hitPoint.y > victim.model.position.y + 1.48 ? 1.5 : 1)) || landed;
+        if (victim.health <= 0) { killed = true; this.events.onToast(`+1 ELIMINATION · ${this.match.kills}`); }
       }
       if (pellet === 0) {
         const end = hitPoint || origin.clone().addScaledVector(direction, Math.min(35, this.weapon.range));

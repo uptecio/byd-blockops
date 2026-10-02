@@ -2,7 +2,7 @@ import http from 'node:http';
 import { readFile } from 'node:fs/promises';
 import { resolve, extname, sep } from 'node:path';
 
-const root = resolve('dist');
+const root = resolve(process.env.DIST_DIR || 'dist');
 const mime = { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css', '.png': 'image/png', '.svg': 'image/svg+xml' };
 const server = http.createServer(async (req, res) => {
   try {
