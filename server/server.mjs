@@ -5,6 +5,7 @@ import { pathToFileURL } from 'node:url';
 import { randomUUID } from 'node:crypto';
 import { WebSocketServer, WebSocket } from 'ws';
 import { RoomManager } from './rooms.js';
+import { PROTOCOL_VERSION } from '../src/protocol.js';
 
 const FILES = new Map([
   ['/', ['index.html', 'text/html; charset=utf-8']],
@@ -48,7 +49,7 @@ export async function startServer({ port = 0, host = '127.0.0.1', distDir = 'dis
   };
   const broadcast = room => {
     if (!room || !room.players.size) return;
-    const packet = { type: 'state', room: manager.snapshot(room) };
+    const packet = { type: 'state', protocol: PROTOCOL_VERSION, room: manager.snapshot(room) };
     for (const id of room.players.keys()) { const connection = connections.get(id); if (connection) send(connection.socket, packet); }
   };
   wss.on('connection', socket => {
@@ -68,9 +69,12 @@ export async function startServer({ port = 0, host = '127.0.0.1', distDir = 'dis
         if (!packet || typeof packet !== 'object' || Array.isArray(packet) || typeof packet.type !== 'string') throw new Error('Invalid message.');
         switch (packet.type) {
           case 'create': case 'join': {
-            const room = packet.type === 'create' ? manager.create(id, packet.name, packet.weaponId) : manager.join(id, packet.code, packet.name, packet.weaponId);
-            send(socket, { type: 'welcome', id, room: manager.snapshot(room, false) }); broadcast(room); break;
+            if (packet.protocol !== PROTOCOL_VERSION) throw new Error('Update required: install the latest Block Ops APK or reload the game.');
+            const room = packet.type === 'create' ? manager.create(id, packet.name, packet.weaponId, { mapId: packet.mapId, modeId: packet.modeId, skinId: packet.skinId }) : manager.join(id, packet.code, packet.name, packet.weaponId, { skinId: packet.skinId });
+            send(socket, { type: 'welcome', protocol: PROTOCOL_VERSION, id, room: manager.snapshot(room, false) }); broadcast(room); break;
           }
+          case 'configure': broadcast(manager.configure(id, { mapId: packet.mapId, modeId: packet.modeId })); break;
+          case 'skin': broadcast(manager.setSkin(id, packet.skinId)); break;
           case 'start': broadcast(manager.start(id)); break;
           case 'input': manager.input(id, packet); break;
           case 'equip': manager.equip(id, packet.weaponId); broadcast(manager.roomFor(id)); break;

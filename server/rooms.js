@@ -1,17 +1,22 @@
 import { randomInt } from 'node:crypto';
 import * as THREE from 'three';
-import { createWorld } from '../src/world.js';
+import { getMap } from '../src/maps.js';
+import { getSkin } from '../src/skins.js';
+import { getMode, assignTeams, createModeState, addParticipant, areEnemies, recordElimination, tickMode, removeParticipant, getModeSnapshot } from '../src/modes.js';
 import { moveCircle } from '../src/collision.js';
 import { WEAPONS, getWeapon, createWeaponState, tickWeapon, tryFire, startReload } from '../src/weapons.js';
 
-const world = createWorld(THREE, new THREE.Scene());
-const SOLIDS = world.solids.map(solid => ({ ...solid }));
-const SPAWNS = [{ ...world.playerSpawn }, ...world.spawns.map(spawn => ({ ...spawn }))];
-world.dispose();
-const WALL_BOXES = SOLIDS.map(s => new THREE.Box3(
-  new THREE.Vector3(s.x - s.w / 2, 0, s.z - s.d / 2),
-  new THREE.Vector3(s.x + s.w / 2, s.height, s.z + s.d / 2),
-));
+const mapPhysics = new Map();
+function physicsFor(map) {
+  if (!mapPhysics.has(map.id)) {
+    const wallBoxes = Object.freeze(map.solids.map(s => Object.freeze(new THREE.Box3(
+      Object.freeze(new THREE.Vector3(s.x - s.w / 2, 0, s.z - s.d / 2)),
+      Object.freeze(new THREE.Vector3(s.x + s.w / 2, s.height, s.z + s.d / 2)),
+    ))));
+    mapPhysics.set(map.id, Object.freeze({ solids: map.solids, wallBoxes }));
+  }
+  return mapPhysics.get(map.id);
+}
 const WEAPON_IDS = new Set(WEAPONS.map(weapon => weapon.id));
 const ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
 const emptyInput = () => ({ x: 0, y: 0, yaw: 0, pitch: 0, fire: false, firePressed: false, jump: false, reload: false, zoom: false });
@@ -37,45 +42,53 @@ export class RoomManager {
 
   roomFor(id) { return this.sessions.get(id); }
 
-  create(id, name, weaponId = 'm4a1') {
+  create(id, name, weaponId = 'm4a1', { mapId = 'courtyard', modeId = 'ffa', skinId = 'ranger' } = {}) {
     validWeapon(weaponId);
+    const map = getMap(mapId); getMode(modeId); getSkin(skinId);
     if (this.sessions.has(id)) throw new Error('Leave your current room first.');
     if (this.rooms.size >= this.maxRooms) throw new Error('Server room limit reached.');
     let code;
     do { code = Array.from({ length: 6 }, () => ALPHABET[randomInt(ALPHABET.length)]).join(''); } while (this.rooms.has(code));
-    const room = { code, hostId: id, phase: 'lobby', timeLeft: 180, winnerId: null, players: new Map(), events: [], nextEventId: 1 };
+    const room = { code, hostId: id, phase: 'lobby', timeLeft: 180, winnerId: null, winnerTeamId: null, mapId, modeId, map, physics: physicsFor(map), players: new Map(), lifeCounters: new Map(), events: [], nextEventId: 1,
+      modeState: createModeState({ modeId, map, participants: [] }) };
+    this.addPlayer(room, id, name, weaponId, skinId);
     this.rooms.set(code, room);
-    this.addPlayer(room, id, name, weaponId);
     return room;
   }
 
-  join(id, code, name, weaponId = 'm4a1') {
+  join(id, code, name, weaponId = 'm4a1', { skinId = 'ranger' } = {}) {
     validWeapon(weaponId);
+    getSkin(skinId);
     if (this.sessions.has(id)) throw new Error('Leave your current room first.');
     if (typeof code !== 'string' || code.length > 32) throw new Error('Room not found.');
     const room = this.rooms.get(code.trim().toUpperCase());
     if (!room) throw new Error('Room not found.');
     if (room.players.size >= 8) throw new Error('Room is full (eight players).');
-    this.addPlayer(room, id, name, weaponId);
+    this.addPlayer(room, id, name, weaponId, skinId);
     return room;
   }
 
-  addPlayer(room, id, name, weaponId) {
-    const player = { id, name: sanitizeName(name), weaponId, kills: 0, deaths: 0, inventory: new Map(), input: emptyInput(), inputAt: -Infinity };
+  addPlayer(room, id, name, weaponId, skinId) {
+    const teamId = addParticipant(room.modeState, { id });
+    const player = { id, name: sanitizeName(name), weaponId, teamId, skinId, pendingSkinId: null, kills: 0, deaths: 0, inventory: new Map(), input: emptyInput(), inputAt: -Infinity };
     room.players.set(id, player);
     this.sessions.set(id, room);
     this.spawn(room, player);
   }
 
   spawn(room, player) {
+    const spawns = player.teamId ? room.map.teamSpawns[player.teamId] : [room.map.playerSpawn, ...room.map.spawns];
     const others = [...room.players.values()].filter(other => other !== player && other.health > 0);
-    let spawn = SPAWNS[0];
+    let spawn = spawns[0];
     let bestDistance = -1;
-    for (const candidate of SPAWNS) {
+    for (const candidate of spawns) {
       const distance = others.length ? Math.min(...others.map(other => Math.hypot(candidate.x - other.x, candidate.z - other.z))) : Infinity;
       if (distance > bestDistance) { bestDistance = distance; spawn = candidate; }
     }
     Object.assign(player, spawn, { y: 0, velocityY: 0, yaw: Math.atan2(spawn.x, spawn.z), pitch: 0, health: 100, respawnRemaining: 0, protectedRemaining: 2, input: emptyInput(), inputAt: -Infinity });
+    player.lifeId = (room.lifeCounters.get(player.id) || 0) + 1;
+    room.lifeCounters.set(player.id, player.lifeId);
+    if (player.pendingSkinId !== null) { player.skinId = player.pendingSkinId; player.pendingSkinId = null; }
     player.inventory = new Map(WEAPONS.map(weapon => [weapon.id, createWeaponState(weapon.id)]));
   }
 
@@ -85,15 +98,37 @@ export class RoomManager {
     return { room, player: room.players.get(id) };
   }
 
+  rebuildMode(room, map, modeId) {
+    const assignments = assignTeams([...room.players.keys()], modeId);
+    const modeState = createModeState({ modeId, map, participants: [...room.players.keys()].map(id => ({ id, teamId: assignments[id] })) });
+    Object.assign(room, { map, mapId: map.id, modeId, physics: physicsFor(map), modeState, timeLeft: 180, winnerId: null, winnerTeamId: null, events: [] });
+    for (const player of room.players.values()) Object.assign(player, { health: 0, teamId: assignments[player.id], kills: 0, deaths: 0 });
+    for (const player of room.players.values()) this.spawn(room, player);
+  }
+
+  configure(id, { mapId, modeId }) {
+    const map = getMap(mapId); getMode(modeId);
+    const { room } = this.requirePlayer(id);
+    if (room.hostId !== id) throw new Error('Only the host can configure.');
+    if (room.phase === 'playing') throw new Error('Match already in progress.');
+    this.rebuildMode(room, map, modeId); room.phase = 'lobby';
+    return room;
+  }
+
+  setSkin(id, skinId) {
+    getSkin(skinId);
+    const { room, player } = this.requirePlayer(id);
+    if (room.phase === 'playing') player.pendingSkinId = skinId;
+    else { player.skinId = skinId; player.pendingSkinId = null; }
+    return room;
+  }
+
   start(id) {
     const { room } = this.requirePlayer(id);
     if (room.hostId !== id) throw new Error('Only the host can start.');
     if (room.players.size < 2) throw new Error('At least two players are required.');
     if (room.phase === 'playing') throw new Error('Match already in progress.');
-    room.phase = 'playing'; room.timeLeft = 180; room.winnerId = null; room.events = [];
-    // Clear all old positions before distributing the new round's spawns.
-    for (const player of room.players.values()) { player.health = 0; player.kills = 0; player.deaths = 0; }
-    for (const player of room.players.values()) this.spawn(room, player);
+    this.rebuildMode(room, room.map, room.modeId); room.phase = 'playing';
     return room;
   }
 
@@ -123,6 +158,7 @@ export class RoomManager {
   leave(id) {
     const room = this.sessions.get(id);
     if (!room) return null;
+    for (const event of removeParticipant(room.modeState, id, room.players.get(id))) this.event(room, event);
     room.players.delete(id); this.sessions.delete(id);
     if (!room.players.size) this.rooms.delete(room.code);
     else if (room.hostId === id) room.hostId = room.players.keys().next().value;
@@ -148,11 +184,11 @@ export class RoomManager {
       const point = new THREE.Vector3();
       let distance = weapon.range;
       let target = null;
-      for (const box of WALL_BOXES) {
+      for (const box of room.physics.wallBoxes) {
         if (ray.intersectBox(box, point)) distance = Math.min(distance, origin.distanceTo(point));
       }
       for (const player of room.players.values()) {
-        if (player === shooter || player.health <= 0) continue;
+        if (player.health <= 0 || !areEnemies(room.modeState, shooter.id, player.id)) continue;
         const bounds = new THREE.Box3(new THREE.Vector3(player.x - 0.32, player.y, player.z - 0.32), new THREE.Vector3(player.x + 0.32, player.y + 1.84, player.z + 0.32));
         if (ray.intersectBox(bounds, point)) {
           const hitDistance = origin.distanceTo(point);
@@ -167,12 +203,12 @@ export class RoomManager {
       target.health = Math.max(0, target.health - amount);
       this.event(room, { type: 'hit', playerId: shooter.id, targetId: target.id });
       if (target.health === 0) {
-        shooter.kills++; target.deaths++; target.respawnRemaining = 2.5; target.input = emptyInput(); target.inputAt = -Infinity;
+        const events = recordElimination(room.modeState, { killerId: shooter.id, victimId: target.id, position: target, lifeId: target.lifeId });
+        target.respawnRemaining = 2.5; target.input = emptyInput(); target.inputAt = -Infinity;
         this.event(room, { type: 'kill', playerId: shooter.id, targetId: target.id });
-        if (shooter.kills >= 15) {
-          room.phase = 'ended'; room.winnerId = shooter.id;
-          break;
-        }
+        for (const event of events) this.event(room, event);
+        this.syncMode(room);
+        if (room.phase === 'ended') break;
       }
     }
   }
@@ -188,7 +224,6 @@ export class RoomManager {
 
   tickRoom(room, dt) {
     if (room.phase !== 'playing') return;
-    room.timeLeft = Math.max(0, room.timeLeft - dt);
     for (const player of room.players.values()) {
       if (room.phase !== 'playing') break;
       if (player.health <= 0) {
@@ -204,7 +239,7 @@ export class RoomManager {
       const state = player.inventory.get(player.weaponId);
       if (this.now - player.inputAt <= 0.3 + 1e-9) { player.yaw = input.yaw; player.pitch = input.pitch; }
       const speed = (weapon.classId === 'lmg' ? 4.4 : /sidearm|smg/.test(weapon.classId) ? 6 : 5.3) * (input.zoom ? 0.65 : 1);
-      const moved = moveCircle(player, (Math.cos(player.yaw) * input.x - Math.sin(player.yaw) * input.y) * speed * dt, (-Math.sin(player.yaw) * input.x - Math.cos(player.yaw) * input.y) * speed * dt, 0.4, SOLIDS);
+      const moved = moveCircle(player, (Math.cos(player.yaw) * input.x - Math.sin(player.yaw) * input.y) * speed * dt, (-Math.sin(player.yaw) * input.x - Math.cos(player.yaw) * input.y) * speed * dt, 0.4, room.physics.solids);
       player.x = moved.x; player.z = moved.z;
       if (input.jump && player.y === 0) player.velocityY = 4.3;
       player.velocityY -= 12 * dt; player.y = Math.max(0, player.y + player.velocityY * dt);
@@ -213,19 +248,28 @@ export class RoomManager {
       if ((weapon.automatic ? input.fire || input.firePressed : input.firePressed) && tryFire(state)) this.shoot(room, player, weapon);
       input.firePressed = false; input.jump = false; input.reload = false;
     }
-    if (room.phase === 'playing' && room.timeLeft <= 1e-8) {
-      room.timeLeft = 0; room.phase = 'ended';
-      room.winnerId = [...room.players.values()].sort((a, b) => b.kills - a.kills || a.deaths - b.deaths)[0]?.id || null;
+    const actors = [...room.players.values()].map(player => ({ id: player.id, teamId: player.teamId, x: player.x, y: player.y, z: player.z, alive: player.health > 0, protectedRemaining: player.protectedRemaining, lifeId: player.lifeId }));
+    for (const event of tickMode(room.modeState, dt, actors)) this.event(room, event);
+    this.syncMode(room);
+  }
+
+  syncMode(room) {
+    const state = room.modeState;
+    room.timeLeft = state.timeLeft; room.winnerId = state.winnerId; room.winnerTeamId = state.winnerTeamId;
+    if (state.ended) room.phase = 'ended';
+    for (const player of room.players.values()) {
+      const stats = state.stats[player.id]; player.kills = stats.kills; player.deaths = stats.deaths;
     }
   }
 
   snapshot(room, consumeEvents = true) {
-    const events = room.events.slice(); if (consumeEvents) room.events = [];
-    return { code: room.code, hostId: room.hostId, phase: room.phase, timeLeft: room.timeLeft, winnerId: room.winnerId, events,
+    const events = structuredClone(room.events); if (consumeEvents) room.events = [];
+    const { mapId, modeId, teamScores, flags, winnerTeamId } = getModeSnapshot(room.modeState);
+    return { code: room.code, hostId: room.hostId, phase: room.phase, timeLeft: room.timeLeft, winnerId: room.winnerId, mapId, modeId, teamScores, winnerTeamId, flags, events,
       players: [...room.players.values()].map(player => {
         const state = player.inventory.get(player.weaponId);
-        const { id, name, x, z, y, yaw, pitch, health, kills, deaths, weaponId, respawnRemaining, protectedRemaining } = player;
-        return { id, name, x, z, y, yaw, pitch, health, kills, deaths, weaponId, ammo: state.ammo, reserve: state.reserve, reloadRemaining: state.reloadRemaining, respawnRemaining, protectedRemaining };
+        const { id, name, x, z, y, yaw, pitch, health, kills, deaths, weaponId, respawnRemaining, protectedRemaining, teamId, skinId, pendingSkinId } = player;
+        return { id, name, x, z, y, yaw, pitch, health, kills, deaths, weaponId, teamId, skinId, pendingSkinId, ammo: state.ammo, reserve: state.reserve, reloadRemaining: state.reloadRemaining, respawnRemaining, protectedRemaining };
       }),
     };
   }

@@ -95,9 +95,11 @@ test('arena cover and spawn protection prevent damage', () => {
 test('timeout and fifteen kills end the round and host can restart', () => {
   const { manager, room, a, b } = pair(); manager.start('a');
   a.kills=2; b.kills=2; a.deaths=1; b.deaths=3;
-  manager.tick(180); assert.equal(room.phase,'ended'); assert.equal(room.winnerId,'a');
+  Object.assign(room.modeState.stats.a,{kills:2,deaths:1});Object.assign(room.modeState.stats.b,{kills:2,deaths:3});
+  manager.tick(180); assert.equal(room.phase,'ended'); assert.equal(room.winnerId,null);
   manager.start('a'); assert.equal(a.kills,0);
   Object.assign(a,{x:0,z:5,y:0,kills:14,protectedRemaining:0});
+  room.modeState.stats.a.kills=14;
   Object.assign(b,{x:0,z:-5,y:0,protectedRemaining:0});
   manager.input('a',{x:0,y:0,yaw:0,pitch:0,firePressed:true}); manager.tick(0.1);
   assert.equal(room.phase,'ended'); assert.equal(room.winnerId,'a');
@@ -139,6 +141,7 @@ test('a multi-target shotgun blast stops damage at the fifteenth elimination', (
   manager.start('a');
   const a = room.players.get('a'), b = room.players.get('b'), c = room.players.get('c');
   Object.assign(a, { x: 0, z: 3, y: 0, kills: 14, protectedRemaining: 0 });
+  room.modeState.stats.a.kills = 14;
   Object.assign(b, { x: -0.45, z: -3, y: 0, health: 1, protectedRemaining: 0 });
   Object.assign(c, { x: 0.45, z: -3, y: 0, health: 1, protectedRemaining: 0 });
   manager.input('a', { x: 0, y: 0, yaw: 0, pitch: 0, firePressed: true });
