@@ -1,0 +1,177 @@
+import * as THREE from 'three';
+import { WEAPONS, WEAPON_CLASSES, getWeapon } from './weapons.js';
+import { createWeaponModel } from './world.js';
+import { ArenaGame, disposeModel } from './game.js';
+import { Input } from './input.js';
+import { GameAudio } from './audio.js';
+
+const $ = id => document.getElementById(id);
+const storageKey = 'block-ops-v1';
+const defaults = { sensitivity: 1, controlSize: 1, bots: 5, difficulty: 'normal', sound: true };
+let saved = {};
+try { saved = JSON.parse(localStorage.getItem(storageKey) || '{}') || {}; } catch { /* Corrupt/unavailable storage uses defaults. */ }
+const rawSettings = saved.settings || {};
+const bounded = (value, fallback, min, max) => Number.isFinite(value) ? Math.max(min, Math.min(max, value)) : fallback;
+const settings = {
+  sensitivity: bounded(rawSettings.sensitivity, 1, .4, 2),
+  controlSize: bounded(rawSettings.controlSize, 1, .8, 1.3),
+  bots: Math.round(bounded(rawSettings.bots, 5, 1, 8)),
+  difficulty: ['easy', 'normal', 'hard'].includes(rawSettings.difficulty) ? rawSettings.difficulty : 'normal',
+  sound: typeof rawSettings.sound === 'boolean' ? rawSettings.sound : true,
+};
+let selected = getWeapon(saved.weaponId), activeClass = selected.classId;
+let mode = 'armory', settingsOrigin = 'armory', game, preview, toastUntil = 0;
+const audio = new GameAudio();
+const input = new Input(() => pauseGame());
+const classNames = { assault: 'ASSAULT', smg: 'SMG', shotgun: 'SHOTGUN', sniper: 'SNIPER', marksman: 'MARKSMAN', lmg: 'LMG', sidearm: 'SIDEARM' };
+const traits = { assault: 'Versatile. Reliable. Ready for anything.', smg: 'Fast hands. Close quarters. No hesitation.', shotgun: 'Get close. Make every shot count.', sniper: 'One sightline. One perfect shot.', marksman: 'Precision at your own pace.', lmg: 'Big magazines. Keep the pressure on.', sidearm: 'Travel light. Hit above your weight.' };
+function persist() { try { localStorage.setItem(storageKey, JSON.stringify({ weaponId: selected.id, settings })); } catch { /* Play remains available without storage. */ } }
+function setMode(next) {
+  mode = next; document.body.dataset.mode = next;
+  $('armory').hidden = next !== 'armory';
+  $('game-ui').hidden = !['playing', 'paused', 'results'].includes(next);
+  $('pause-screen').hidden = next !== 'paused';
+  $('results-screen').hidden = next !== 'results';
+  if (next !== 'playing' && game) game.pause();
+}
+function pauseGame() {
+  if (mode === 'playing') { setMode('paused'); $('resume-button').focus({ preventScroll: true }); }
+}
+window.pauseGame = pauseGame;
+document.addEventListener('visibilitychange', () => { if (document.hidden) pauseGame(); });
+window.addEventListener('blur', pauseGame);
+
+function silhouette(weapon) {
+  const colour = '#' + weapon.colour.toString(16).padStart(6, '0');
+  const pistol = weapon.classId === 'sidearm', bullpup = ['famas', 'p90', 'vector'].includes(weapon.id);
+  const heavy = weapon.classId === 'lmg';
+  const barrel = ['sniper', 'marksman', 'shotgun'].includes(weapon.classId) ? 200 : pistol ? 125 : 174;
+  const scope = ['sniper', 'marksman'].includes(weapon.classId);
+  return `<svg viewBox="0 0 240 80" aria-hidden="true"><g transform="rotate(-8 120 40)"><path d="M${pistol ? 65 : 48} 30H145V48H${pistol ? 65 : 48}Z" fill="#84929b"/><path d="M65 31H139V41H65Z" fill="${colour}"/><path d="M135 34H${barrel}V41H135Z" fill="#596a78"/><path d="M${barrel - 5} 32H${barrel + 10}V43H${barrel - 5}Z" fill="#7e8c95"/><path d="M${pistol ? 74 : 87} 43L${pistol ? 70 : 80} 64H${pistol ? 91 : 96}L${pistol ? 100 : 105} 44Z" fill="#495b69"/>${!pistol ? `<path d="M48 34H20L12 55H29L51 43Z" fill="${colour}"/><path d="M${bullpup ? 53 : 110} 45V${heavy ? 66 : 62}H${bullpup ? 70 : heavy ? 139 : 125}V45Z" fill="#607483"/>` : ''}${scope ? '<path d="M80 21H137V29H80Z" fill="#4b5c68"/><path d="M78 17H93V31H78ZM127 16H144V32H127Z" fill="#8ba0aa"/>' : '<path d="M91 26H116V31H91Z" fill="#5c7180"/>'}<path d="M61 30V26H68V30" fill="#a8bdc7"/></g></svg>`;
+}
+function renderTabs() {
+  $('class-tabs').innerHTML = WEAPON_CLASSES.map(item => `<button class="class-tab ${item.id === activeClass ? 'active' : ''}" data-class="${item.id}" aria-pressed="${item.id === activeClass}">${classNames[item.id]}</button>`).join('');
+  $('class-description').textContent = WEAPON_CLASSES.find(item => item.id === activeClass).label.toUpperCase();
+  $('weapon-grid').innerHTML = WEAPONS.filter(weapon => weapon.classId === activeClass).map(weapon => `<button class="weapon-card ${weapon.id === selected.id ? 'selected' : ''}" data-weapon="${weapon.id}" aria-pressed="${weapon.id === selected.id}" aria-label="Equip ${weapon.name}">${silhouette(weapon)}<span class="weapon-name">${weapon.name}</span><span class="weapon-type">${weapon.automatic ? 'AUTOMATIC' : 'SEMI / SINGLE'} · ${weapon.magazine} ROUNDS</span><span class="selection-indicator">✓</span></button>`).join('');
+}
+function renderSelected() {
+  $('selected-name').textContent = selected.name;
+  $('selected-class').textContent = classNames[selected.classId];
+  $('selected-description').textContent = traits[selected.classId];
+  document.querySelector('.loadout-number').textContent = String(WEAPONS.indexOf(selected) + 1).padStart(2, '0');
+  const power = Math.min(100, Math.round(selected.damage * Math.sqrt(selected.pellets)));
+  const rate = Math.min(100, Math.round(.05 / selected.fireInterval * 100));
+  const accuracy = Math.round(Math.max(10, 100 - selected.spread * 600));
+  $('weapon-stats').innerHTML = [['POWER', power], ['FIRE RATE', rate], ['ACCURACY', accuracy]].map(([label, amount]) => `<div><div class="stat-label"><span>${label}</span><span>${amount}</span></div><div class="stat-track"><i style="width:${amount}%"></i></div></div>`).join('') + `<div class="gun-meta"><span><b>${selected.magazine}</b> ROUNDS</span><span><b>${selected.reloadTime.toFixed(1)}s</b> RELOAD</span><span><b>${Math.round(60 / selected.fireInterval)}</b> RPM</span></div>`;
+  renderTabs();
+  if (preview) preview.equip(selected);
+}
+$('class-tabs').addEventListener('click', event => { const button = event.target.closest('[data-class]'); if (button) { activeClass = button.dataset.class; renderTabs(); } });
+$('weapon-grid').addEventListener('click', event => {
+  const button = event.target.closest('[data-weapon]'); if (!button) return;
+  selected = getWeapon(button.dataset.weapon); renderSelected(); persist();
+});
+function showArmory() {
+  setMode('armory'); activeClass = selected.classId; renderSelected();
+  $('play-button').innerHTML = game && game.hasRound && !game.match.ended ? 'RETURN TO MATCH <span>↗</span>' : 'DEPLOY <span>↗</span>';
+}
+function deploy(forceNew = false) {
+  if (!game) return;
+  audio.unlock();
+  if (forceNew || !game.hasRound || game.match.ended) game.start(selected.id, settings);
+  else { game.setWeapon(selected.id); game.resume(); }
+  setMode('playing'); game.events.onHud(game); document.activeElement.blur();
+}
+$('play-button').addEventListener('click', () => deploy());
+$('again-button').addEventListener('click', () => deploy(true));
+$('pause-button').addEventListener('click', pauseGame);
+$('resume-button').addEventListener('click', () => { audio.unlock(); game.resume(); setMode('playing'); document.activeElement.blur(); });
+for (const id of ['loadout-button', 'pause-loadout', 'results-loadout']) $(id).addEventListener('click', showArmory);
+$('quit-button').addEventListener('click', () => { game.quit(); showArmory(); });
+$('retry-button').addEventListener('click', () => location.reload());
+function updateSettings() {
+  audio.enabled = settings.sound;
+  $('game-ui').style.setProperty('--control-scale', settings.controlSize);
+  $('bot-count-label').textContent = `${settings.bots} BOT${settings.bots === 1 ? '' : 'S'}`;
+  if (game) game.settings.sensitivity = settings.sensitivity;
+  $('sensitivity-value').textContent = settings.sensitivity.toFixed(1) + '×';
+  $('control-size-value').textContent = Math.round(settings.controlSize * 100) + '%';
+  $('bots-value').textContent = settings.bots;
+  $('sensitivity').value = settings.sensitivity; $('control-size').value = settings.controlSize;
+  $('bots').value = settings.bots; $('difficulty').value = settings.difficulty; $('sound').checked = settings.sound;
+}
+function openSettings() { settingsOrigin = mode; pauseGame(); $('settings-screen').hidden = false; updateSettings(); }
+function closeSettings() { $('settings-screen').hidden = true; if (settingsOrigin === 'armory') showArmory(); }
+document.querySelectorAll('.settings-open').forEach(button => button.addEventListener('click', openSettings));
+$('close-settings').addEventListener('click', closeSettings); $('settings-done').addEventListener('click', closeSettings);
+for (const [id, key] of [['sensitivity', 'sensitivity'], ['control-size', 'controlSize'], ['bots', 'bots']]) $(id).addEventListener('input', () => { settings[key] = Number($(id).value); updateSettings(); persist(); });
+$('difficulty').addEventListener('change', () => { settings.difficulty = $('difficulty').value; persist(); });
+$('sound').addEventListener('change', () => { settings.sound = $('sound').checked; updateSettings(); persist(); if (settings.sound) audio.unlock(); });
+
+class WeaponPreview {
+  constructor(canvas) {
+    this.canvas = canvas;
+    this.renderer = new THREE.WebGLRenderer({ canvas, alpha: true, antialias: true, powerPreference: 'low-power' });
+    this.renderer.setPixelRatio(Math.min(devicePixelRatio || 1, 1.5));
+    this.renderer.outputColorSpace = THREE.SRGBColorSpace;
+    this.scene = new THREE.Scene(); this.scene.add(new THREE.HemisphereLight('#e1f7ff', '#32445b', 3));
+    const light = new THREE.DirectionalLight('#fff7d1', 3.5); light.position.set(-2, 5, 3); this.scene.add(light);
+    this.camera = new THREE.PerspectiveCamera(34, 1, .01, 20); this.camera.position.set(0, .18, 1.65); this.camera.lookAt(0, 0, 0);
+    this.pivot = new THREE.Group(); this.scene.add(this.pivot);
+    this.equip(selected);
+  }
+  equip(weapon) {
+    disposeModel(this.model); this.model = createWeaponModel(THREE, weapon);
+    const bounds = new THREE.Box3().setFromObject(this.model), centre = bounds.getCenter(new THREE.Vector3());
+    this.model.position.sub(centre); this.pivot.add(this.model);
+    const size = bounds.getSize(new THREE.Vector3());
+    this.pivot.scale.setScalar(1 / Math.max(size.x, size.z, .55));
+  }
+  render(time) {
+    const w = this.canvas.clientWidth, h = this.canvas.clientHeight;
+    if (!w || !h) return;
+    if (w !== this.width || h !== this.height) { this.width = w; this.height = h; this.renderer.setSize(w, h, false); this.camera.aspect = w / h; this.camera.updateProjectionMatrix(); }
+    this.pivot.rotation.set(-.13, -1.15 + Math.sin(time * .35) * .13, -.14);
+    this.renderer.render(this.scene, this.camera);
+  }
+}
+function onHud(current) {
+  const remaining = Math.ceil(current.match.timeLeft);
+  $('timer').textContent = `${String(Math.floor(remaining / 60)).padStart(2, '0')}:${String(remaining % 60).padStart(2, '0')}`;
+  $('kills').textContent = current.match.kills;
+  $('health-count').textContent = Math.ceil(current.player.health);
+  $('health-bar').style.width = `${current.player.health}%`;
+  $('health-bar').style.background = current.player.health < 30 ? '#ff7665' : '#46ec88';
+  $('hud-weapon').textContent = current.weapon.name;
+  $('ammo-count').textContent = current.weaponState.ammo;
+  $('reserve-count').textContent = current.weaponState.reserve;
+  $('reload-status').textContent = current.weaponState.reloadRemaining > 0 ? `RELOADING ${current.weaponState.reloadRemaining.toFixed(1)}s` : current.weaponState.ammo === 0 ? 'TAP RELOAD' : '';
+  $('hit-marker').style.opacity = current.hitFlash > 0 ? 1 : 0;
+  $('damage-flash').style.opacity = Math.min(1, current.damageFlash * 4);
+  $('scope-overlay').hidden = !(input.zoom && current.weapon.classId === 'sniper');
+  $('zoom-button').classList.toggle('active', input.zoom);
+  $('respawn-banner').hidden = current.player.dead <= 0;
+  $('respawn-count').textContent = Math.ceil(current.player.dead);
+  if (performance.now() > toastUntil) $('toast').textContent = '';
+}
+function showFatal(message) { if (game) game.pause(); $('fatal-message').textContent = message; $('fatal-screen').hidden = false; }
+renderSelected(); updateSettings();
+try {
+  game = new ArenaGame($('arena'), input, audio, {
+    onHud,
+    onEnd: round => { $('result-kills').textContent = round.kills; $('result-deaths').textContent = round.deaths; $('result-title').textContent = round.kills >= 15 ? 'ARENA CLEARED.' : 'ROUND COMPLETE.'; setMode('results'); },
+    onToast: message => { $('toast').textContent = message; toastUntil = performance.now() + 1900; },
+    onFatal: showFatal,
+  });
+  preview = new WeaponPreview($('weapon-preview'));
+  let previous = performance.now();
+  function frame(now) {
+    const dt = Math.min(.05, (now - previous) / 1000); previous = now;
+    if (!document.hidden) {
+      if (mode === 'playing') game.update(dt);
+      else if (mode === 'armory') preview.render(now / 1000);
+    }
+    requestAnimationFrame(frame);
+  }
+  requestAnimationFrame(frame);
+} catch (error) { console.error(error); showFatal('The arena could not initialise. This device needs a working WebGL-capable Android System WebView. Try reloading the game.'); }

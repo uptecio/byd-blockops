@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+  <meta name="theme-color" content="#111a26">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'none'; object-src 'none'; base-uri 'none'">
+  <title>Block Ops · Offline Arena</title>
+  <link rel="stylesheet" href="styles.css">
+  <script defer src="game.js"></script>
+</head>
+<body data-mode="armory">
+  <canvas id="arena" aria-label="First-person block arena"></canvas>
+  <section id="armory" class="screen armory">
+    <header class="topbar">
+      <div class="brand"><span class="brand-mark" aria-hidden="true">B<span>O</span></span><div>BLOCK OPS<small>OFFLINE ARENA</small></div></div>
+      <div class="topbar-right"><span class="online-badge"><i></i> SOLO / OFFLINE</span><button class="icon-button settings-open" aria-label="Settings">⚙</button></div>
+    </header>
+    <main class="armory-layout">
+      <div class="arsenal">
+        <div class="eyebrow"><span class="tiny-square"></span> THE ARSENAL <span class="muted">/ 28 WEAPONS</span></div>
+        <h1>YOUR GAME.<br><span>YOUR LOADOUT.</span></h1>
+        <p class="intro">Pick your class. Find your favourite. Own the arena.</p>
+        <nav id="class-tabs" class="class-tabs" aria-label="Weapon classes"></nav>
+        <div class="roster-heading"><span id="class-description"></span><span>ALL UNLOCKED <span class="unlock">↗</span></span></div>
+        <div id="weapon-grid" class="weapon-grid" aria-label="Weapons"></div>
+        <div class="session-info"><div><span class="info-icon">◷</span><strong>3 MIN</strong><small>QUICK ROUNDS</small></div><div><span class="info-icon">⌖</span><strong>15 KILLS</strong><small>TO WIN</small></div><div><span class="info-icon">▧</span><strong id="bot-count-label">5 BOTS</strong><small>ZERO INTERNET</small></div></div>
+      </div>
+      <section class="loadout-panel" aria-label="Selected weapon">
+        <div class="panel-top"><span class="eyebrow">EQUIPPED / <span id="selected-class">ASSAULT RIFLE</span></span><span class="loadout-number">01</span></div>
+        <h2 id="selected-name">M4A1</h2><p id="selected-description">A versatile all-rounder.</p>
+        <div class="preview-stage"><div class="preview-ring"></div><canvas id="weapon-preview" aria-label="Rotating 3D model of selected gun"></canvas><span class="preview-caption">FIELD READY <i></i></span></div>
+        <div id="weapon-stats" class="weapon-stats"></div>
+        <div class="loadout-footer"><div><span class="map-dot"></span><strong>COURTYARD</strong><small>FREE-FOR-ALL · SOLO VS BOTS</small></div><button id="play-button" class="primary">DEPLOY <span>↗</span></button></div>
+      </section>
+    </main>
+    <footer class="app-footer"><span>BUILT FOR A GOOD BREAK. <b>PLAY WHILE PARKED.</b></span><span>TOUCH CONTROLS <span class="footer-divider">/</span> v0.1 PROTOTYPE</span></footer>
+  </section>
+  <section id="game-ui" hidden aria-label="Game controls">
+    <div id="aim-zone" aria-label="Drag to look around"></div>
+    <div class="hud-top"><div class="health-panel"><span class="eyebrow">SOLO / BOTS</span><div class="health-row"><span>✚</span><strong id="health-count">100</strong><div class="health-track"><i id="health-bar"></i></div></div></div><div class="score-panel"><strong><span id="kills">0</span><span class="score-target"> / 15</span></strong><span id="timer">03:00</span></div><div class="hud-actions"><button id="loadout-button" class="hud-button" aria-label="Change weapon">▤ <span>LOADOUT</span></button><button id="pause-button" class="hud-button" aria-label="Pause">Ⅱ</button></div></div>
+    <div id="reticle"><i></i><i></i><i></i><i></i></div><div id="hit-marker">×</div><div id="damage-flash"></div>
+    <div id="scope-overlay" hidden><div></div></div>
+    <div id="respawn-banner" hidden><strong>BACK IN THE FIGHT</strong><span id="respawn-count">3</span></div>
+    <div class="move-control"><div id="joystick" role="button" aria-label="Movement joystick"><span class="joystick-guides">✛</span><div id="joystick-knob"></div></div><span class="control-label">MOVE</span></div>
+    <div class="combat-controls"><button id="zoom-button" class="touch-button small" aria-label="Aim down sights"><span>⌕</span><small>AIM</small></button><button id="jump-button" class="touch-button small" aria-label="Jump"><span>↑</span><small>JUMP</small></button><button id="reload-button" class="touch-button small" aria-label="Reload"><span>⟳</span><small>RELOAD</small></button><button id="fire-button" class="touch-button fire" aria-label="Fire weapon"><span>⌖</span><small>FIRE</small></button></div>
+    <div class="ammo-panel"><span id="hud-weapon">M4A1</span><strong><span id="ammo-count">30</span><small> / <span id="reserve-count">150</span></small></strong><span id="reload-status"></span></div>
+    <div id="game-hint">DRAG TO AIM <span>·</span> HOLD FIRE TO SHOOT</div><div id="toast" role="status"></div>
+  </section>
+  <section id="pause-screen" class="modal-screen" hidden><div class="dialog pause-dialog"><span class="eyebrow">TAKE YOUR TIME</span><h2>GAME PAUSED</h2><p>Your round is right where you left it.</p><button id="resume-button" class="primary">BACK TO THE ACTION <span>↗</span></button><button id="pause-loadout" class="secondary">CHANGE LOADOUT</button><button class="secondary settings-open">SETTINGS</button><button id="quit-button" class="text-button">End round & return to armory</button></div></section>
+  <section id="settings-screen" class="modal-screen" hidden><div class="dialog settings-dialog"><div class="dialog-heading"><div><span class="eyebrow">MAKE IT YOURS</span><h2>SETTINGS</h2></div><button id="close-settings" class="icon-button" aria-label="Close settings">×</button></div><label class="setting-row">Look sensitivity <output id="sensitivity-value"></output><input id="sensitivity" type="range" min="0.4" max="2" step="0.1"></label><label class="setting-row">Control size <output id="control-size-value"></output><input id="control-size" type="range" min="0.8" max="1.3" step="0.1"></label><label class="setting-row">Bot count <output id="bots-value"></output><input id="bots" type="range" min="1" max="8" step="1"></label><label class="setting-row">Bot difficulty<select id="difficulty"><option value="easy">Easy · relaxed warm-up</option><option value="normal">Normal · keep moving</option><option value="hard">Hard · stay sharp</option></select></label><label class="switch-row">Game sound<input id="sound" type="checkbox"></label><p class="setting-note">Bot count and difficulty apply to your next round.<br>Desktop: WASD move · drag to aim · F fire · R reload · Space jump · E aim · Esc pause.</p><button id="settings-done" class="primary">DONE <span>✓</span></button></div></section>
+  <section id="results-screen" class="modal-screen" hidden><div class="dialog results-dialog"><span class="eyebrow">ROUND COMPLETE</span><h2 id="result-title">NICE SHOOTING.</h2><p>Another round. Another chance to beat your best.</p><div class="result-stats"><div><strong id="result-kills">0</strong><span>ELIMINATIONS</span></div><div><strong id="result-deaths">0</strong><span>DEATHS</span></div></div><button id="again-button" class="primary">PLAY AGAIN <span>↗</span></button><button id="results-loadout" class="secondary">CHANGE LOADOUT</button></div></section>
+  <section id="fatal-screen" class="modal-screen" hidden><div class="dialog"><h2>CAN’T START THE ARENA</h2><p id="fatal-message">This display needs a working WebGL-capable Android System WebView.</p><button id="retry-button" class="primary">TRY AGAIN</button></div></section>
+</body>
+</html>
