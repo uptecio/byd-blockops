@@ -5,6 +5,8 @@ import { canOccupy } from '../src/collision.js';
 import { createModeState, recordElimination, tickMode } from '../src/modes.js';
 import { createNavigation } from '../src/navigation.js';
 import { chooseBotIntent } from '../src/bot-brain.js';
+import * as brain from '../src/bot-brain.js';
+import { createEquipment, pickupEquipment } from '../src/equipment.js';
 
 const arena = (solids = [], bounds = { min: -12, max: 12 }) => ({
   id: 'fixture', bounds, solids, bases: { red: { x: -8, z: 0 }, blue: { x: 8, z: 0 } },
@@ -292,4 +294,53 @@ test('decisions are pure and returned goals do not alias actor, map or flag obje
   const intent = decide(context); intent.goal.x = 999;
   assert.deepEqual(context, before);
   assert.deepEqual(decide(context).goal, { x: 8, z: 0 });
+});
+
+for (const impairment of ['smoke', 'flash']) test(`${impairment} concealment denies targets and pursuit of current enemy coordinates`, () => {
+  const context = setup('ffa', arena(), [actor('bot-0', null, -8), actor('bot-1', null, 8)]);
+  const bot = context.actors[0], enemy = context.actors[1];
+  context.smokes = impairment === 'smoke' ? [{ x: 0, y: 1.35, z: 0, radius: 4, remaining: 8 }] : [];
+  bot.flashRemaining = impairment === 'flash' ? 1 : 0;
+  context.lastKnownTargets = new Map([[enemy.id, { x: 5, z: 2, lifeId: enemy.lifeId }]]);
+  assert.deepEqual(decide(context), { goal: { x: 5, z: 2 }, targetId: null });
+  enemy.x = 10; enemy.z = 3;
+  assert.deepEqual(decide(context), { goal: { x: 5, z: 2 }, targetId: null });
+  context.lastKnownTargets.clear(); assert.deepEqual(decide(context), { goal: null, targetId: null });
+});
+
+test('blinded CTF bots keep objective routes without tracking concealed carriers or intruders', () => {
+  const context = setup(); context.actors[0].flashRemaining = 2;
+  assert.deepEqual(decide(context), { goal: { x: 8, z: 0 }, targetId: null });
+  tickMode(context.state, .01, [{ ...context.actors[1], x: -8 }]);
+  context.actors[1].x = -3; context.actors[1].z = 4;
+  assert.deepEqual(decide(context, 'defend'), { goal: { x: -8, z: 0 }, targetId: null });
+  context.lastKnownTargets = new Map([['bot-1', { x: -5, z: 1, lifeId: 0 }]]);
+  assert.deepEqual(decide(context, 'defend'), { goal: { x: -5, z: 1 }, targetId: null });
+});
+
+test('equipment decisions use owned guns and knife range without creating inventory', () => {
+  const bot = actor('bot-0', null, 0, 0, { equipment: createEquipment('m4a1') });
+  const enemy = actor('local', null, 0, -40);
+  const context = { actors: [bot, enemy], intent: { targetId: enemy.id }, smokes: [], solids: [], now: 0 };
+  assert.equal(brain.chooseBotEquipment(bot, context), null);
+  pickupEquipment(bot.equipment, { kind: 'gun', weaponId: 'awp', ammo: 5, reserve: 495 });
+  assert.deepEqual(brain.chooseBotEquipment(bot, context), { kind: 'equip-gun', weaponId: 'awp', source: 'inventory' });
+  pickupEquipment(bot.equipment, { kind: 'knife' }); enemy.z = -1;
+  assert.deepEqual(brain.chooseBotEquipment(bot, context), { kind: 'held-item', heldItem: 'knife' });
+  assert.equal(bot.equipment.activeGunId, 'm4a1');
+});
+
+test('grenade decisions require ownership, visibility and six seconds between attempts', () => {
+  const bot = actor('bot-0', null, 0, 0, { equipment: createEquipment('m4a1'), health: 100, lastGrenadeAttempt: 10 });
+  const enemy = actor('local', null, 0, -8);
+  const context = { actors: [bot, enemy], intent: { targetId: enemy.id }, smokes: [], solids: [], now: 16 };
+  assert.equal(brain.chooseBotEquipment(bot, context), null);
+  bot.equipment.grenades.frag = 1;
+  assert.deepEqual(brain.chooseBotEquipment(bot, context), { kind: 'throw', grenadeType: 'frag' });
+  context.now = 15.99; assert.equal(brain.chooseBotEquipment(bot, context), null);
+  context.now = 16; context.smokes = [{ x: 0, y: 1.35, z: -4, radius: 2, remaining: 8 }];
+  assert.equal(brain.chooseBotEquipment(bot, context), null);
+  context.smokes = []; bot.flashRemaining = 1; assert.equal(brain.chooseBotEquipment(bot, context), null);
+  bot.flashRemaining = 0; bot.equipment.grenades = { frag: 0, flash: 0, smoke: 1 }; bot.carryingFlag = true;
+  assert.deepEqual(brain.chooseBotEquipment(bot, context), { kind: 'throw', grenadeType: 'smoke' });
 });

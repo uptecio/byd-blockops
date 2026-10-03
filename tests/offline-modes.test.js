@@ -18,6 +18,11 @@ test('all 24 combinations start cleanly on one reused production game', () => {
       assert.equal(game.getMatchView().modeId, modeId);
       assert.equal(game.getMatchView().players.length, 5);
       assert.equal(game.effects.length, 0);
+      assert.equal(game.lootState.slots.length, 16);
+      assert.equal(game.lootState.drops.length, 0);
+      assert.equal(game.gearCombatState.projectiles.length, 0);
+      assert.equal(game.gearCombatState.smokes.length, 0);
+      assert.equal(game.player.equipment.startingGunId, 'm4a1');
       assert.equal(game.world.botGroup.children.length, 4);
       assert.ok(oldBots.every(bot => bot.model.parent === null));
       assert.notEqual(game.navigation, oldNavigation);
@@ -26,6 +31,8 @@ test('all 24 combinations start cleanly on one reused production game', () => {
         assert.ok(game.navigation.reachable(actor, map.bases.red));
         assert.ok(game.navigation.reachable(actor, map.bases.blue));
         assert.equal(actor.lifeId, 1);
+        assert.equal(actor.equipment.activeGunId, 'm4a1');
+        assert.equal(actor.flashRemaining, 0);
       }
       assert.equal(game.objectives.group.children.length, modeId === 'ctf' ? 4 : 0);
       game.update(.1); assert.ok(Math.abs(game.match.timeLeft - 179.9) < 1e-8);

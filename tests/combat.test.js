@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import * as THREE from 'three';
 import { getWeapon, createWeaponState } from '../src/weapons.js';
 import { recordElimination } from '../src/modes.js';
-import { createHeadlessGame } from './helpers/game-fixture.js';
+import { createHeadlessGame, cleanupGame } from './helpers/game-fixture.js';
 
 // Headless combat fixture uses real Three.js geometry/rays and production game
 // methods; only audio/DOM event sinks and GPU rendering are omitted.
@@ -121,4 +121,49 @@ test('bot fire and reload conserve the 500-round supply', context => {
   enemy.cooldown = 100; game.updateBots(4);
   assert.equal(enemy.weaponState.ammo, 30); assert.equal(enemy.weaponState.reserve, 440);
   assert.equal(enemy.weaponState.ammo + enemy.weaponState.reserve, 470); game.clearEffects();
+});
+
+for (const impairment of ['smoke', 'flash']) test(`bots recheck ${impairment} before firing and retain last seen pursuit positions`, context => {
+  context.mock.method(Math, 'random', () => .5);
+  const game = arena('ffa', 1), bot = game.bots[0]; context.after(() => cleanupGame(game));
+  game.updateBots(.1); assert.equal(game.player.health, 92);
+  if (impairment === 'smoke') game.gearCombatState.smokes.push({ x: 0, y: 1.35, z: 5, radius: 4, remaining: 8 });
+  else bot.flashRemaining = 2;
+  game.player.x = 2; bot.cooldown = 0; game.updateBots(.1);
+  assert.equal(game.player.health, 92); assert.deepEqual(bot.intent.goal, { x: 0, z: 10 });
+  game.player.x = 4; bot.intentTimer = 0; game.updateBots(.1);
+  assert.equal(game.player.health, 92); assert.deepEqual(bot.intent.goal, { x: 0, z: 10 });
+});
+
+test('bots spend collected grenades at most once per six seconds and spare teammates', context => {
+  context.mock.method(Math, 'random', () => .5);
+  const game = arena('tdm', 3), [bot, enemy, ally] = game.bots; context.after(() => cleanupGame(game));
+  enemy.model.position.set(20, 0, 0); enemy.cooldown = 100;
+  bot.equipment.grenades.frag = 3; ally.cooldown = 100;
+  game.player.health = 100; game.updateBots(.1);
+  assert.equal(bot.equipment.grenades.frag, 2); assert.equal(game.gearCombatState.projectiles.length, 1);
+  game.updateBots(1); assert.equal(bot.equipment.grenades.frag, 2);
+  const projectile = game.gearCombatState.projectiles[0];
+  Object.assign(projectile, { x: ally.model.position.x, y: .12, z: ally.model.position.z, vx: 0, vy: 0, vz: 0, fuseRemaining: .01 });
+  game.update(.02); assert.equal(ally.health, 100);
+});
+
+test('a collected sniper extends bot engagement range while preserving difficulty damage', context => {
+  context.mock.method(Math, 'random', () => .5);
+  const game = arena('ffa', 1), bot = game.bots[0]; context.after(() => cleanupGame(game));
+  game.world.definition = { ...game.world.definition, solids: [] };
+  game.player.z = 20; bot.model.position.set(0, 0, -20);
+  bot.equipment.owned.set('awp', createWeaponState('awp'));
+  game.updateBots(.1);
+  assert.equal(bot.equipment.activeGunId, 'awp'); assert.equal(bot.weaponState.ammo, 4);
+  assert.equal(game.player.health, 92);
+});
+
+test('bot knife selection cannot redirect a visible swing into a concealed nearer enemy', context => {
+  const game = arena('ffa', 2), [bot, visible] = game.bots; context.after(() => cleanupGame(game));
+  Object.assign(game.player, { x: 0, z: 1.05 }); visible.model.position.set(.55, 0, 1.2); visible.cooldown = 100;
+  bot.equipment.knife = true;
+  game.gearCombatState.smokes.push({ x: 0, y: 1.6, z: 1.05, radius: .3, remaining: 8 });
+  game.updateBots(.01);
+  assert.equal(game.player.health, 100); assert.equal(visible.health, 50);
 });

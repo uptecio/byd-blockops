@@ -17,7 +17,7 @@ export function createHeadlessGame() {
     renderer: { render() {} }, audio: { shoot() {}, reload() {}, hit() {}, kill() {} },
     events: { onToast() {}, onHud() {}, onEnd() {} },
     player: { id: 'local', lifeId: 0, jump: 0, health: 100, dead: 0, protected: 0 },
-    bots: [], effects: [], inventory: new Map(), weapon: getWeapon('m4a1'),
+    active: false, hasRound: false, bots: [], effects: [], inventory: new Map(), weapon: getWeapon('m4a1'),
     match: {}, settings: {}, time: 0, yaw: 0, pitch: 0, recoil: 0,
     muzzle: new THREE.Group(), shotFlash: 0, hitFlash: 0, damageFlash: 0, hudTimer: 0,
   });
