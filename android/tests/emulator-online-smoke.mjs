@@ -8,10 +8,12 @@ import { cleanupOwnedOnlineSession } from './online-cleanup.mjs';
 // Run after installing the debug APK on a disposable emulator. Uses the real
 // public WSS server, a second independent peer, and raw WebView CDP (no focus
 // emulation, injected game state, or production-only test hooks).
-const serial = process.env.ANDROID_TEST_SERIAL || 'emulator-5582';
+const serial = process.env.ANDROID_TEST_SERIAL;
+assert.ok(serial && process.env.ANDROID_TEST_AVD, 'Explicit task-owned emulator serial and AVD name are required');
 assert.match(serial, /^emulator-\d+$/, 'Only disposable emulators are in scope');
 const configuration = JSON.parse(await readFile('game-server.json', 'utf8'));
-const server = process.env.GAME_SERVER_URL || configuration.url;
+const bundledServer = process.env.GAME_SERVER_URL || configuration.url;
+const server = process.env.GAME_TEST_SERVER_URL || bundledServer;
 assert.equal(new URL(server).protocol, 'https:', 'Native multiplayer requires TLS');
 const wsURL = `${server.replace(/^https:/, 'wss:').replace(/\/$/, '')}/ws`;
 const sdk = process.env.ANDROID_SDK_ROOT || process.env.ANDROID_HOME || `${process.env.HOME}/Android/Sdk`;
@@ -38,7 +40,7 @@ let socket, peer, incompatible, forwarded = false, evaluate, verifyDeparture, or
 const transportErrors = [];
 try {
   const avdName = (await command('emu', 'avd', 'name')).stdout.trim().split('\n')[0].trim();
-  assert.equal(avdName, process.env.ANDROID_TEST_AVD || 'BlockOpsTask9', 'Native smoke must use its explicitly owned disposable AVD');
+  assert.equal(avdName, process.env.ANDROID_TEST_AVD, 'Native smoke must use its explicitly owned disposable AVD');
   ownedApp = true;
   await shell('svc', 'wifi', 'enable');
   await until(async () => (await shell('dumpsys', 'connectivity')).stdout,
@@ -62,7 +64,7 @@ try {
   socket = new WebSocket(target.webSocketDebuggerUrl);
   await opened(socket);
   let next = 0, pageLoaded;
-  const pending = new Map(), errors = [], sockets = [], remote = [];
+  const pending = new Map(), errors = [], sockets = [], remote = [], nativePackets = [], nativeSent = [];
   socket.onmessage = event => {
     const message = JSON.parse(event.data);
     if (message.id) {
@@ -76,6 +78,12 @@ try {
       const entry = message.params.entry;
       if (!(entry.source === 'network' && entry.url === 'https://appassets.androidplatform.net/favicon.ico')) errors.push(JSON.stringify(entry));
     } else if (message.method === 'Network.webSocketFrameError') transportErrors.push(message.params.errorMessage);
+    else if (message.method === 'Network.webSocketFrameReceived') {
+      try { nativePackets.push(JSON.parse(message.params.response.payloadData)); } catch {}
+    }
+    else if (message.method === 'Network.webSocketFrameSent') {
+      try { nativeSent.push(JSON.parse(message.params.response.payloadData)); } catch {}
+    }
     else if (message.method === 'Network.webSocketCreated') sockets.push(message.params.url);
     else if (message.method === 'Network.requestWillBeSent' && !message.params.request.url.startsWith('https://appassets.androidplatform.net/')) remote.push(message.params.request.url);
   };
@@ -105,21 +113,59 @@ try {
   };
   const state = () => evaluate('document.getElementById("room-code") ? ({mode:document.body.dataset.mode,hidden:document.hidden,code:document.getElementById("room-code").textContent,players:document.querySelectorAll(".roster-player").length,status:document.getElementById("connection-status").textContent,ammo:Number(document.getElementById("ammo-count").textContent),reserve:Number(document.getElementById("reserve-count").textContent),pauseTitle:document.querySelector("#pause-screen h2").textContent}) : ({mode:"loading"})');
   const key = (type, code, key) => send('Input.dispatchKeyEvent', { type, code, key, windowsVirtualKeyCode: key.charCodeAt(0) });
+  const roomAfterInputBarrier = async () => {
+    await until(() => nativeSent.findLast(packet => packet.type === 'input'),
+      input => input && input.x === 0 && input.y === 0 && !input.fire && !input.firePressed,
+      'Actual native UI sends neutral input before the ordering barrier');
+    const marker = `native-input-barrier-${Date.now()}`;
+    await evaluate(`window.__nativeRoomSocket.send(JSON.stringify({type:'ping',at:${JSON.stringify(marker)}}))`);
+    await until(() => nativePackets.findIndex(packet => packet.type === 'pong' && packet.at === marker),
+      index => index >= 0, 'Native server acknowledges the ordinary ping after neutral input');
+    const index = nativePackets.findIndex(packet => packet.type === 'pong' && packet.at === marker);
+    return (await until(() => nativePackets.slice(index + 1).find(packet => packet.room),
+      packet => Boolean(packet?.room), 'Native receives authoritative state after the neutral-input pong')).room;
+  };
   const screenshot = async name => {
-    await mkdir('artifacts', { recursive: true });
+    await mkdir('artifacts/loot-review', { recursive: true });
     const shot = await run(adb, ['-s', serial, 'exec-out', 'screencap', '-p'], { encoding: 'buffer', maxBuffer: 10000000, timeout: 10000 });
-    await writeFile(`artifacts/${name}`, shot.stdout);
+    await writeFile(`artifacts/loot-review/${name}`, shot.stdout);
   };
   await send('Runtime.enable'); await send('Log.enable'); await send('Network.enable'); await send('Page.enable');
+  // Test-local access to the real wire for an ordinary ping, as in browser
+  // acceptance. No gameplay state, position or input packets are injected.
+  await send('Page.addScriptToEvaluateOnNewDocument', { source: `(() => {
+    const NativeWebSocket=window.WebSocket;
+    window.WebSocket=class extends NativeWebSocket {
+      constructor(...args){super(...args);window.__nativeRoomSocket=this;}
+    };
+  })()` });
+  if (process.env.GAME_TEST_SERVER_URL && server !== bundledServer) {
+    await evaluate('localStorage.removeItem("block-ops-online")'); await reload();
+    await until(state, current => current.mode === 'home', 'Bundled default check loads Home');
+    await click('home-online');
+    assert.equal(await evaluate('document.getElementById("server-address").value'), bundledServer, 'Candidate retains the validated live origin as bundled default');
+    const health = await (await fetch(`${bundledServer}/health`, { signal: AbortSignal.timeout(10000) })).json();
+    assert.equal(health.ok, true, 'Bundled default remains available before coordinated rollout');
+    await click('create-room');
+    await until(state, current => /update required/i.test(current.status), 'Protocol-2 live default accurately rejects protocol-3 candidate before rollout');
+    await click('online-back');
+    console.log('PASS bundled default: live HTTPS health available; real APK protocol-3 request gets update-required from protocol-2 release.');
+  }
   for (const modeId of ['ffa', 'tdm', 'ctf']) {
   verifyDeparture = undefined;
   await evaluate('localStorage.removeItem("block-ops-online")');
   await reload();
   await until(state, current => current.mode === 'home', 'Home loaded');
   await until(() => evaluate('document.getElementById("server-address")?.value'), value => Boolean(value), 'Multiplayer UI initialized');
-  await evaluate(`document.querySelector('[data-map=space-station]').click(); document.querySelector('[data-mode-id=${modeId}]').click(); document.querySelector('[data-skin=space-guard]').click()`);
+  const mapId = modeId === 'ffa' ? 'courtyard' : 'space-station';
+  await evaluate(`document.querySelector('[data-map=${mapId}]').click(); document.querySelector('[data-mode-id=${modeId}]').click(); document.querySelector('[data-skin=space-guard]').click()`);
   await click('home-online');
-  assert.equal(await evaluate('document.getElementById("server-address").value'), server, 'Bundled default server must be current');
+  assert.equal(await evaluate('document.getElementById("server-address").value'), bundledServer, 'Bundled default server must be current');
+  if (server !== bundledServer) {
+    await evaluate('document.querySelector(".server-settings").open=true');
+    await tap('server-address');
+    await evaluate(`document.getElementById('server-address').value=${JSON.stringify(server)}; document.getElementById('server-address').dispatchEvent(new Event('input',{bubbles:true}))`);
+  }
   await evaluate('document.getElementById("player-name").value="NativeHost"');
   await click('create-room');
   const lobby = await until(state, current => /^[A-Z0-9]{6}$/.test(current.code) && current.players === 1, 'Native WSS room create');
@@ -136,11 +182,12 @@ try {
   };
   await opened(peer);
   const peerSend = packet => peer.send(JSON.stringify(packet));
-  peerSend({ type: 'join', protocol: 2, code: lobby.code, name: 'SocketFriend', weaponId: 'm4a1', skinId: 'robo-unit' });
+  peerSend({ type: 'join', protocol: 3, code: lobby.code, name: 'SocketFriend', weaponId: 'm4a1', skinId: 'robo-unit' });
   await until(() => latest, room => room?.players.length === 2, 'Independent real peer joins');
   const hostNativeId = latest.players.find(player => player.id !== peerId).id;
   verifyDeparture = () => until(() => latest, room => room?.code === lobby.code && !room.players.some(player => player.id === hostNativeId), 'Observer verifies owned native host departure before teardown');
-  assert.equal(latest.mapId, 'space-station'); assert.equal(latest.modeId, modeId);
+  assert.equal(latest.mapId, mapId); assert.equal(latest.modeId, modeId);
+  assert.ok(nativePackets.some(packet => packet.type === 'welcome' && packet.protocol === 3), 'Real native client completes protocol-3 handshake');
   assert.equal(latest.players.find(player => player.id === peerId).skinId, 'robo-unit');
   assert.equal(latest.players.find(player => player.id !== peerId).skinId, 'space-guard');
   await until(state, current => current.players === 2, 'Native roster reflects peer');
@@ -151,13 +198,47 @@ try {
   const native = () => latest.players.find(player => player.id !== peerId);
   assert.equal(native().teamId, modeId === 'ffa' ? null : 'red');
   assert.equal(latest.players.find(player => player.id === peerId).teamId, modeId === 'ffa' ? null : 'blue');
-  assert.equal(await evaluate('document.getElementById("room-map").value'), 'space-station');
+  assert.equal(await evaluate('document.getElementById("room-map").value'), mapId);
   assert.equal(await evaluate('document.getElementById("room-mode").value'), modeId);
   if (modeId === 'ctf') {
     assert.equal(latest.flags.red.status, 'home'); assert.equal(latest.flags.blue.status, 'home');
     assert.match(await evaluate('document.getElementById("objective-status").textContent'), /RED FLAG: HOME.*BLUE FLAG: HOME/);
   }
   const before = { ...native() };
+  if (modeId === 'ffa') {
+    const equipment = () => nativePackets.findLast(packet => packet.equipment?.equipment)?.equipment.equipment;
+    const events = [];
+    const receive = event => { const packet = JSON.parse(event.data); if (packet.room?.events) events.push(...packet.room.events); };
+    peer.addEventListener('message', receive);
+    const drive = async (axis, target, positive, negative) => {
+      // Remote snapshots lag real native inputs. Short pulses, followed by
+      // neutral settling, bound overshoot without injecting actor positions.
+      const deadline = Date.now() + 30000;
+      while (Math.abs(target - native()[axis]) > .6 && Date.now() < deadline) {
+        const difference = target - native()[axis];
+        const code = difference > 0 ? positive : negative;
+        await key('keyDown', code, code.slice(-1).toLowerCase());
+        try { await delay(Math.min(300, Math.abs(difference) / 5.3 * 1000)); }
+        finally { await key('keyUp', code, code.slice(-1).toLowerCase()); }
+        await delay(650);
+      }
+      assert.ok(Math.abs(target - native()[axis]) <= .6, `Native real walk settles at ${axis}=${target}: ${JSON.stringify(native())}`);
+    };
+    await drive('z', 12, 'KeyS', 'KeyW'); await drive('x', -6, 'KeyD', 'KeyA');
+    await until(equipment, value => value?.grenades.frag === 1, 'Native real walk receives authoritative grenade inventory');
+    await until(() => events, value => value.some(event => event.type === 'pickup' && event.playerId === hostNativeId && event.itemId === 'map:courtyard:frag:1'), 'Independent peer observes identical native pickup');
+    assert.ok(!latest.gear.loot.some(item => item.id === 'map:courtyard:frag:1'), 'Independent authoritative state removes collected pickup');
+    await tap('throw-button');
+    await until(equipment, value => value?.grenades.frag === 0, 'Real native Throw control consumes collected grenade once');
+    await until(() => events, value => value.some(event => event.type === 'grenade-throw' && event.playerId === hostNativeId), 'Independent peer observes native equipment action');
+    await until(() => latest.gear.projectiles, value => value.some(item => item.ownerId === hostNativeId), 'Independent peer observes authoritative native projectile');
+    await drive('x', -3, 'KeyD', 'KeyA'); await drive('z', 0, 'KeyS', 'KeyW');
+    await until(equipment, value => value?.knife, 'Native real walk collects knife');
+    await tap('knife-button'); await until(native, value => value.heldItem === 'knife', 'Independent peer sees native held knife');
+    await tap('knife-button'); await until(native, value => value.heldItem === 'gun', 'Native returns to its gun');
+    peer.removeEventListener('message', receive);
+    console.log('PASS native protocol-3 pickup, Throw/knife controls and independent authoritative pickup/projectile/held-item state.');
+  }
   await key('keyDown', 'KeyW', 'w'); await delay(700); await key('keyUp', 'KeyW', 'w');
   await until(native, player => Math.hypot(player.x - before.x, player.z - before.z) > .4, 'Native input moves authoritative player');
   await key('keyDown', 'KeyF', 'f'); await delay(300); await key('keyUp', 'KeyF', 'f');
@@ -166,8 +247,10 @@ try {
   await screenshot(`android-online-${modeId}-gameplay.png`);
 
   await key('keyDown', 'KeyW', 'w');
-  await click('home-button'); await key('keyUp', 'KeyW', 'w'); await delay(250);
-  const confirming = { ...native() }, confirmationTime = latest.timeLeft;
+  await click('home-button');
+  const confirmationRoom = await roomAfterInputBarrier();
+  await key('keyUp', 'KeyW', 'w');
+  const confirming = { ...confirmationRoom.players.find(player => player.id === hostNativeId) }, confirmationTime = confirmationRoom.timeLeft;
   await delay(1200);
   assert.ok(latest.timeLeft < confirmationTime - .8, 'Online Home confirmation leaves server clock running');
   assert.ok(Math.hypot(native().x - confirming.x, native().z - confirming.z) < .1, 'Home confirmation stops movement');
@@ -205,8 +288,9 @@ try {
   await shell('input', 'keyevent', 'KEYCODE_BACK');
   await until(state, current => current.mode === 'paused', 'Native back pauses local controls');
   assert.equal((await state()).pauseTitle, 'MATCH STILL LIVE');
-  await key('keyUp', 'KeyW', 'w'); await delay(250);
-  const paused = { ...native() }, pausedTime = latest.timeLeft;
+  await key('keyUp', 'KeyW', 'w');
+  const pauseRoom = await roomAfterInputBarrier();
+  const paused = { ...pauseRoom.players.find(player => player.id === hostNativeId) }, pausedTime = pauseRoom.timeLeft;
   await delay(1700);
   assert.ok(latest.timeLeft < pausedTime - 1, 'Online room clock continues during local pause');
   assert.ok(Math.hypot(native().x - paused.x, native().z - paused.z) < .1, 'Paused local movement stops');
@@ -225,7 +309,7 @@ try {
   await until(() => latest, room => room?.players.length === 1, 'Peer observes native departure');
 
   peerSend({ type: 'leave' }); latest = undefined; peerCode = null; verifyDeparture = undefined;
-  peerSend({ type: 'create', protocol: 2, name: 'SocketHost', weaponId: 'm4a1', mapId: 'space-station', modeId, skinId: 'robo-unit' });
+  peerSend({ type: 'create', protocol: 3, name: 'SocketHost', weaponId: 'm4a1', mapId: 'space-station', modeId, skinId: 'robo-unit' });
   const friendRoom = await until(() => latest, room => room?.players.length === 1 && room.phase === 'lobby' && room.code !== lobby.code, 'Peer creates independent room');
   await click('home-online');
   await evaluate(`document.getElementById("room-code-input").value=${JSON.stringify(friendRoom.code)}`);
@@ -271,16 +355,17 @@ try {
   await until(() => latest, room => room?.code === friendRoom.code && room.players.length === 1, 'Independent host observes guest departure');
   peer.close(); peer = undefined;
   assert.deepEqual(peerErrors, []);
-  console.log(`Native online configuration passed: space-station/${modeId}, distinct skins/teams, real peer, input and lifecycle.`);
+  console.log(`Native online configuration passed: ${mapId}/${modeId}, distinct skins/teams, real peer, input and lifecycle.`);
   }
   incompatible = new WebSocket(wsURL);
   let rejection;
   incompatible.onmessage = event => { const packet = JSON.parse(event.data); if (packet.type === 'error') rejection = packet.message; };
   await opened(incompatible);
-  incompatible.send(JSON.stringify({ type: 'create', protocol: 1, name: 'Outdated', weaponId: 'm4a1' }));
+  incompatible.send(JSON.stringify({ type: 'create', protocol: 2, name: 'Outdated', weaponId: 'm4a1' }));
   await until(() => rejection, value => /update required/i.test(value || ''), 'Old client must be rejected clearly');
   assert.deepEqual(errors, [], 'No JavaScript or CSP errors');
-  assert.ok(sockets.length >= 2 && sockets.every(url => url === wsURL), 'Only configured secure WebSockets are opened');
+  const defaultWsURL = `${bundledServer.replace(/^https:/, 'wss:').replace(/\/$/, '')}/ws`;
+  assert.ok(sockets.length >= 2 && sockets.every(url => url === wsURL || url === defaultWsURL), 'Only bundled-default and explicitly staged secure WebSockets are opened');
   assert.deepEqual(remote, [], 'No remote HTTP assets or requests');
 } catch (error) {
   originalError = error;
@@ -304,4 +389,4 @@ try {
     originalError,
   });
 }
-console.log('Native online smoke passed: protocol 2 WSS, all modes, nondefault map/skins, teams/flags, create/join, authoritative input, Home cancel/leave, live lifecycle clock, incompatible client rejection and verified owned cleanup.');
+console.log('Native online smoke passed: protocol 3 WSS, real pickups/equipment actions/shared peer state, all modes, teams/flags, create/join, authoritative input, Home cancel/leave, live lifecycle clock, incompatible client rejection and verified owned cleanup.');

@@ -4,6 +4,8 @@ import { pickupEquipment } from '../src/equipment.js';
 import { lootDTO } from '../src/loot.js';
 import { tickMode, recordElimination } from '../src/modes.js';
 import { createHeadlessGame, cleanupGame } from './helpers/game-fixture.js';
+import * as THREE from 'three';
+import { AVATAR_HITBOX } from '../src/avatar.js';
 
 function arena(t, { modeId = 'ffa', bots = 2, gun = 'ak47' } = {}) {
   const game = createHeadlessGame(); t.after(() => cleanupGame(game));
@@ -13,6 +15,66 @@ function arena(t, { modeId = 'ffa', bots = 2, gun = 'ak47' } = {}) {
   game.bots.forEach((bot, i) => { bot.model.position.set(i * 2, 0, 0); bot.protected = 0; bot.cooldown = 100; });
   return game;
 }
+
+test('real Solo camera torso aim connects a close knife hit and shows local hit feedback', t => {
+  const game = arena(t, { bots: 1 }), victim = game.bots[0];
+  Object.assign(game.player, { x: 0, z: .8 });
+  pickupEquipment(game.player.equipment, { kind: 'knife' });
+  game.requestEquipment({ kind: 'held-item', heldItem: 'knife' });
+  game.pitch = Math.atan2(1.07 - 1.65, .8); game.placeCamera(); game.camera.updateMatrixWorld(true);
+  const ray = new THREE.Ray(game.camera.position, game.camera.getWorldDirection(new THREE.Vector3()));
+  const box = new THREE.Box3(new THREE.Vector3(-AVATAR_HITBOX.halfWidth, .05, -AVATAR_HITBOX.halfWidth), new THREE.Vector3(AVATAR_HITBOX.halfWidth, AVATAR_HITBOX.height, AVATAR_HITBOX.halfWidth));
+  assert.ok(ray.intersectBox(box, new THREE.Vector3()), 'Actual rendered center-camera ray intersects the existing avatar body');
+  const feedback = [];
+  game.audio.hit = () => feedback.push('hit'); game.audio.kill = () => feedback.push('kill');
+  const actors = game.getActors(); game.slash(actors[0], actors);
+  assert.equal(victim.health, 50, 'Crosshair on nearby torso must deal the approved 50 damage');
+  assert.equal(game.hitFlash, .18); assert.deepEqual(feedback, ['hit']);
+  assert.equal(game.player.equipment.meleeRemaining, .6);
+});
+
+test('Solo post-input torso aim and getActors preserve actual camera pitch for knife hits', t => {
+  const game = arena(t, { bots: 1 }); Object.assign(game.player, { x: 0, z: .8 });
+  pickupEquipment(game.player.equipment, { kind: 'knife' }); game.requestEquipment({ kind: 'held-item', heldItem: 'knife' });
+  const pitch = Math.atan2(1.07 - 1.65, .8);
+  game.input.look.y = -pitch / (.0026 * game.settings.sensitivity); game.input.fire = true;
+  game.update(.01);
+  assert.equal(game.bots[0].health, 50, 'Same-frame real aim input must drive the knife body ray');
+  assert.ok(Math.abs(game.getActors()[0].pitch - pitch) < 1e-10, 'Gear adapter uses the camera pitch sign');
+  assert.ok(game.camera.getWorldDirection(new THREE.Vector3()).y < 0);
+});
+
+for (const pitch of [-.5, .5]) test(`Solo camera pitch ${pitch} launches grenades in the same vertical direction`, t => {
+  const game = arena(t, { bots: 0 }); game.pitch = pitch; game.placeCamera(); game.camera.updateMatrixWorld(true);
+  pickupEquipment(game.player.equipment, { kind: 'grenade', grenadeType: 'frag' });
+  assert.equal(game.requestEquipment({ kind: 'throw', grenadeType: 'frag' }).ok, true);
+  const projectile = game.gearCombatState.projectiles[0];
+  const direction = game.camera.getWorldDirection(new THREE.Vector3());
+  assert.ok(Math.abs((projectile.vy - 3) / 12 - direction.y) < 1e-10, 'Thrown velocity uses actual camera elevation');
+});
+
+test('knife hit feedback marks only accepted local damage including an elimination', t => {
+  const game = arena(t, { bots: 1 }), victim = game.bots[0]; Object.assign(game.player, { x: 0, z: 1.2 });
+  pickupEquipment(game.player.equipment, { kind: 'knife' }); game.requestEquipment({ kind: 'held-item', heldItem: 'knife' });
+  const feedback = []; game.audio.hit = () => feedback.push('hit'); game.audio.kill = () => feedback.push('kill');
+  victim.health = 50; const actors = game.getActors(); game.slash(actors[0], actors);
+  assert.equal(victim.health, 0); assert.equal(game.hitFlash, .18); assert.deepEqual(feedback, ['kill']);
+  assert.equal(game.modeState.stats.local.kills, 1);
+});
+
+for (const rejected of ['miss', 'protected', 'friendly', 'bot-hit']) test(`knife ${rejected} never produces false local hit feedback`, t => {
+  const game = arena(t, { modeId: rejected === 'friendly' ? 'tdm' : 'ffa', bots: 1 });
+  const victim = game.bots[0]; Object.assign(game.player, { x: 0, z: rejected === 'miss' ? 5 : 1.2 });
+  const feedback = []; game.audio.hit = () => feedback.push('hit'); game.audio.kill = () => feedback.push('kill');
+  if (rejected === 'protected') victim.protected = 1;
+  if (rejected === 'friendly') { victim.teamId = game.player.teamId; game.modeState.stats[victim.id].teamId = game.player.teamId; }
+  const owner = rejected === 'bot-hit' ? victim : game.player;
+  pickupEquipment(owner.equipment, { kind: 'knife' }); owner.equipment.heldItem = 'knife';
+  if (rejected === 'bot-hit') victim.yaw = Math.PI;
+  const actors = game.getActors(); game.slash(actors.find(a => a.id === owner.id), actors);
+  assert.equal(game.hitFlash, 0); assert.deepEqual(feedback, []);
+  if (rejected === 'bot-hit') assert.equal(game.player.health, 50, 'Bot knife still damages the local player');
+});
 
 test('original gun is denied after a real replacement and restored only by walking over loot', t => {
   const game = arena(t, { bots: 0 });

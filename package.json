@@ -1,6 +1,6 @@
 {
   "name": "block-ops-offline",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "private": true,
   "type": "module",
   "scripts": {
@@ -15,7 +15,8 @@
     "test:configurations": "node tests/configurations.browser.mjs",
     "test:loot": "node tests/loot.browser.mjs",
     "test:loot:touch": "node tests/loot-touch.browser.mjs",
-    "apk": "npm run build && bash scripts/build-apk.sh"
+    "apk": "npm run build && bash scripts/build-apk.sh",
+    "test:apk": "node android/tests/package-smoke.mjs"
   },
   "dependencies": {
     "three": "0.160.1",

@@ -27,12 +27,12 @@ try {
   assert.match(await page.locator('[data-weapon="m4a1"]').textContent(), /Find this gun as loot/);
   await page.locator('#armory-cancel').click();
   await page.locator('#resume-button').click();
-  // Return along the central lane; the skipped duplicate original gun remains at (-2,12).
-  await walkSolo(page, 'KeyS', 12, 6);
-  await walkSolo(page, 'KeyD', 2, 6);
-  await walkSolo(page, 'KeyW', 2, 6);
-  await walkSolo(page, 'KeyA', 2, 6);
-  await walkSolo(page, 'KeyS', 2, 6);
+  // Recover the original gun in the rear left lane at (-10,18).
+  // Keep x=-3 through z=19 to pass the tree at (-8,17), then
+  // approach from the end lane above the building at (-15,14).
+  await walkSolo(page, 'KeyS', 19, 6);
+  await walkSolo(page, 'KeyA', 7, 6);
+  await walkSolo(page, 'KeyW', 1, 6);
   await page.locator('#loadout-button').click();
   await page.locator('[data-equipment-tab="carried"]').click();
   await page.locator('[data-carried-weapon="m4a1"]').waitFor();
@@ -102,22 +102,26 @@ async function online(f) {
   // Collect another authored grenade to prove death drops unspent equipment.
   await moveTo(page, peer, -2, 10);
   await until(() => peer.equipment.grenades.flash === 1, 'respawned authored flash can be collected again', 25000);
-  await moveTo(page, peer, 0, 0); await moveTo(targetPage, target, 0, -1.3);
-  await lookAt(page, peer, target); await lookAt(targetPage, target, peer);
+  await moveTo(page, peer, 0, 0); await moveTo(targetPage, target, 0, -.8);
+  const dx = target.player.x - peer.player.x, dz = target.player.z - peer.player.z;
+  await lookTo(page, peer, Math.atan2(-dx, -dz), Math.atan2(target.player.y + 1.07 - (peer.player.y + 1.65), Math.hypot(dx, dz)));
+  await lookAt(targetPage, target, peer);
   await page.locator('#knife-button').click();
   await until(() => peer.player.heldItem === 'knife', 'knife selection reaches server');
   const targetHealth = target.player.health;
   await page.locator('#fire-button').click();
-  await until(() => target.player.health === targetHealth - 50, 'real Slash applies exactly one 50 damage knife hit');
+  await until(() => target.player.health === targetHealth - 50, 'real close torso-aim Slash applies exactly one 50 damage knife hit');
   const oldLife = peer.player.lifeId, activeGun = peer.equipment.activeGunId;
   await lookAt(targetPage, target, peer);
   const drops = new Map(), dead = [];
-  await targetPage.keyboard.down('KeyF');
+  assert.equal(peer.player.health, 100, 'Headshot victim starts at full health');
+  const shotsBefore = target.events('shot').filter(event => event.playerId === target.id).length;
+  await targetPage.keyboard.press('KeyF');
   try {
     await until(() => {
       for (let i = 0; i < peers.length; i++) dead[i] ||= deadSnapshot(f.packets[i], peer.id, oldLife);
       return dead.every(Boolean) && dead.length === peers.length;
-    }, 'opponent gun eliminates knife holder');
+    }, 'one real-control headshot eliminates the full-health knife holder');
   } catch (error) {
     console.error('Death observation diagnostic:', JSON.stringify(peers.map((p, i) => ({
       player: p.player,
@@ -128,6 +132,7 @@ async function online(f) {
     }))));
     throw error;
   } finally { await targetPage.keyboard.up('KeyF'); }
+  assert.equal(target.events('shot').filter(event => event.playerId === target.id).length, shotsBefore + 1, 'One M4A1 shot suffices for the approved headshot kill');
   for (const messages of f.packets) for (const packet of messages) for (const item of packet.room?.gear?.loot || []) if (item.source === 'drop') drops.set(item.id, item);
   const deaths = dead.map(packet => packet.room.players.find(player => player.id === peer.id));
   for (const player of deaths) {

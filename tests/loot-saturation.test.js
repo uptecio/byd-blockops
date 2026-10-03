@@ -42,7 +42,8 @@ test('eight real sockets bound saturated inventories/packets and disconnect a st
   await until(() => clients.every(client => client.latest.equipment.equipment.owned.length === 27), 'all peers carry every non-starting catalog gun');
   assert.ok(clients.every(client => client.latest.room.players.length === 8));
   const host = clients[0];
-  for (const [x, z] of [[0, 12], [-2, 12]]) {
+  // Real inputs follow the end lane to the redistributed original gun.
+  for (const [x, z] of [[0, 19], [-10, 19], [-10, 18]]) {
     for (let step = 0; step < 100; step++) {
       const player = host.latest.room.players.find(player => player.id === host.id);
       const dx = x - player.x, dz = z - player.z, length = Math.hypot(dx, dz);

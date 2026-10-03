@@ -2,8 +2,8 @@ import { getSkin } from './skins.js';
 import { getWeapon } from './weapons.js';
 import { createWeaponModel } from './world.js';
 import { createKnifeModel } from './gear-view.js';
-
-export const AVATAR_HITBOX = Object.freeze({ halfWidth: .32, height: 1.84 });
+import { AVATAR_HITBOX } from './avatar-hitbox.js';
+export { AVATAR_HITBOX } from './avatar-hitbox.js';
 
 // All geometry/materials belong to one model so disposeModel can release them.
 export function createAvatarModel(THREE, { skinId, teamId = null, weaponId = 'm4a1', heldItem = 'gun' }) {

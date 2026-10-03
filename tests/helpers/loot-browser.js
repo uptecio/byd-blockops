@@ -91,7 +91,9 @@ export async function equip(page, classId, id) {
 
 export async function soloLoot(page) {
   // Hand-authored Courtyard route: (0,15) → (-6,12) → (6,12)
-  // → (-2,10) → (-3,0). The central lane avoids the wall at (-6,7).
+  // → (-2,10) → (-2,4) → (-3,0). Cross the spread gun's center
+  // at (-2,6), not the fragile edge of its 1.2-unit pickup radius,
+  // while the central lane avoids the wall at (-6,7).
   await walkSolo(page, 'KeyW', 3);
   await walkSolo(page, 'KeyA', 6);
   await until(async () => /1\/3/.test(await page.locator('#grenade-type-button').textContent()), 'walking onto authored explosive pickup grants one grenade');
@@ -100,8 +102,9 @@ export async function soloLoot(page) {
   await walkSolo(page, 'KeyA', 8);
   await walkSolo(page, 'KeyW', 2);
   await until(async () => /3\/3/.test(await page.locator('#grenade-type-button').textContent()), 'walking onto authored flash pickup fills shared capacity');
+  await walkSolo(page, 'KeyW', 6);
   await walkSolo(page, 'KeyA', 1);
-  await walkSolo(page, 'KeyW', 10);
+  await walkSolo(page, 'KeyW', 4);
   await until(async () => !await page.locator('#knife-button').isDisabled(), 'walking onto authored knife pickup enables knife');
 }
 

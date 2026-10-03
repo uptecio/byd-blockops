@@ -6,7 +6,8 @@ import { setTimeout as delay } from 'node:timers/promises';
 
 // Raw CDP avoids browser automation's artificial document visibility override.
 // Install the debug APK on a disposable emulator before running this test.
-const serial = process.env.ANDROID_TEST_SERIAL || 'emulator-5582';
+const serial = process.env.ANDROID_TEST_SERIAL;
+assert.ok(serial && process.env.ANDROID_TEST_AVD, 'Explicit task-owned emulator serial and AVD name are required');
 assert.match(serial, /^emulator-\d+$/, 'Only disposable emulators are in scope');
 const sdk = process.env.ANDROID_SDK_ROOT || process.env.ANDROID_HOME || `${process.env.HOME}/Android/Sdk`;
 const adb = process.env.ADB_BINARY || `${sdk}/platform-tools/adb`;
@@ -16,6 +17,8 @@ const shell = (...args) => command('shell', ...args);
 let socket, forwarded = false;
 
 try {
+  const avdName = (await command('emu', 'avd', 'name')).stdout.trim().split('\n')[0].trim();
+  assert.equal(avdName, process.env.ANDROID_TEST_AVD, 'Offline smoke must use its explicitly owned disposable AVD');
   await shell('svc', 'wifi', 'disable');
   await shell('svc', 'data', 'disable');
   // Fresh disposable AVDs otherwise show Android's first-run fullscreen
@@ -102,19 +105,46 @@ try {
     assert.ok(bounds.width >= 44 && bounds.height >= 44, `${id} remains a native touch target`);
     assert.ok(bounds.x >= 0 && bounds.y >= 0 && bounds.x + bounds.width <= bounds.viewportWidth && bounds.y + bounds.height <= Math.min(bounds.viewportHeight, bounds.footerTop), `${id} fits the actual native viewport above its footer`);
   }
-  await mkdir('artifacts', { recursive: true });
+  await mkdir('artifacts/loot-review', { recursive: true });
   const homeShot = await run(adb, ['-s', serial, 'exec-out', 'screencap', '-p'], { encoding: 'buffer', maxBuffer: 10000000, timeout: 10000 });
-  await writeFile('artifacts/android-home.png', homeShot.stdout);
+  await writeFile('artifacts/loot-review/android-home.png', homeShot.stdout);
   await evaluate('document.querySelector("[data-mode-id=ffa]").click(); document.getElementById("home-armory").click()');
   assert.equal(await evaluate('document.querySelectorAll(".weapon-card").length'), 4);
   await evaluate('document.getElementById("armory-home").click()');
   await wait(current => current.mode === 'home');
+  await evaluate(`document.querySelector('[data-map="courtyard"]').click(); document.getElementById('home-settings').click(); document.getElementById('bots').value='1'; document.getElementById('difficulty').value='easy'; document.getElementById('settings-done').click()`);
+  // Observe animation time only; inputs and equipment use the shipped UI.
+  await evaluate(`(() => { window.__nativeSeconds=0; const raf=window.requestAnimationFrame.bind(window); let previous; window.requestAnimationFrame=callback=>raf(now=>{ if(previous!==undefined && document.body.dataset.mode==='playing') window.__nativeSeconds+=Math.min(.05,(now-previous)/1000); previous=now; callback(now); }); })()`);
   await tap('home-solo');
   await wait(current => current.mode === 'playing' && current.timer !== '03:00');
   assert.equal(await evaluate('Number(document.getElementById("ammo-count").textContent)+Number(document.getElementById("reserve-count").textContent)'), 500, 'Solo starts with 500 total rounds');
-  await mkdir('artifacts', { recursive: true });
+  assert.equal(await evaluate('Boolean(document.getElementById("knife-button"))'), true, 'Candidate exposes the reviewed loot equipment controls');
+  assert.equal(await evaluate('document.getElementById("knife-button").disabled'), true, 'Fresh life has no knife');
+  const key = (type, code) => send('Input.dispatchKeyEvent', { type, code, key: code.slice(-1).toLowerCase(), windowsVirtualKeyCode: code.slice(-1).charCodeAt(0) });
+  const walk = async (code, distance) => {
+    const start = await evaluate('window.__nativeSeconds');
+    await key('keyDown', code);
+    try {
+      const deadline = Date.now() + 30000;
+      while (await evaluate('window.__nativeSeconds') - start < distance / 5.3) {
+        assert.ok(Date.now() < deadline, `Native ${code} movement progresses`); await delay(60);
+      }
+    } finally { await key('keyUp', code); }
+  };
+  await walk('KeyW', 3); await walk('KeyA', 6);
+  assert.match(await evaluate('document.getElementById("grenade-type-button").textContent'), /1\/3/, 'Real solo walk automatically picks up a grenade');
+  // Cross the gun's center at (-2,6), then approach the knife at (-3,0).
+  await walk('KeyD', 12); await walk('KeyA', 8); await walk('KeyW', 2); await walk('KeyW', 6); await walk('KeyA', 1); await walk('KeyW', 4);
+  assert.equal(await evaluate('document.getElementById("knife-button").disabled'), false, 'Real solo walk collects a knife');
+  await tap('knife-button');
+  assert.equal(await evaluate('document.querySelector("#fire-button small").textContent'), 'SLASH', 'Actual equipment control equips the collected knife');
+  await tap('knife-button');
+  await evaluate('document.getElementById("loadout-button").click(); document.querySelector(\'[data-equipment-tab="carried"]\').click()');
+  assert.ok(await evaluate('document.querySelectorAll("[data-carried-weapon]").length') > 1, 'Real solo walk collects a distinct gun');
+  await evaluate('document.getElementById("armory-cancel").click(); document.getElementById("resume-button").click()');
+  await mkdir('artifacts/loot-review', { recursive: true });
   const shot = await run(adb, ['-s', serial, 'exec-out', 'screencap', '-p'], { encoding: 'buffer', maxBuffer: 10000000, timeout: 10000 });
-  await writeFile('artifacts/android-gameplay.png', shot.stdout);
+  await writeFile('artifacts/loot-review/android-gameplay.png', shot.stdout);
   await shell('input', 'keyevent', 'KEYCODE_BACK');
   const paused = await wait(current => current.mode === 'paused' && current.pause);
   await delay(1500); assert.equal((await state()).timer, paused.timer, 'Back freezes combat');
@@ -149,7 +179,7 @@ try {
   assert.deepEqual(errors, [], 'No JavaScript or CSP errors');
   assert.deepEqual(remote, [], 'No external runtime requests');
   assert.deepEqual(webSockets, [], 'Offline Home/solo never opens a WebSocket');
-  console.log('Native emulator smoke passed: offline Home/persistence/preview, nondefault map/skin, all modes, Home cancel/confirm, 500 rounds, landscape, Back/background pause, no external requests or WebSockets.');
+  console.log('Native emulator smoke passed: offline Home/persistence/preview, authored gun/grenade/knife pickups and real knife equipment action, all modes, Home cancel/confirm, 500 rounds, landscape, Back/background pause, no external requests or WebSockets.');
 } finally {
   if (socket) socket.close();
   if (forwarded) await command('forward', '--remove', 'tcp:9228');

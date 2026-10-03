@@ -58,6 +58,29 @@ test('melee respects pitched aim and intervening cover', () => {
   assert.equal(meleeTarget(createGearActor('owner'), [createGearActor('foe', { z: -1 })], { ...options, solids }), null);
 });
 
+test('body-ray knife contact accepts close torso aim without widening center reach or cone', () => {
+  const owner = createGearActor('owner', { pitch: Math.atan2(1.07 - 1.6, .8) });
+  assert.equal(meleeTarget(owner, [createGearActor('foe', { z: -.8 })], options), 'foe');
+  for (const target of [{ z: -1.80001 }, { x: .8, z: -.3 }, { z: .8 }, { y: 2, z: -.8 }, { z: -.8, protectedRemaining: 1 }, { z: -.8, alive: false }]) {
+    assert.equal(meleeTarget(owner, [createGearActor('foe', target)], options), null, JSON.stringify(target));
+  }
+  assert.equal(meleeTarget(owner, [createGearActor('mate', { z: -.8 })], options), null);
+});
+
+test('close torso knife fallback checks cover to the actual body-ray contact', () => {
+  const owner = createGearActor('owner', { pitch: Math.atan2(.6 - 1.6, .8) }), foe = createGearActor('foe', { z: -.8 });
+  const wall = { x: 0, z: -.4, w: 2, d: .1, height: 1.4 };
+  assert.equal(meleeTarget(owner, [foe], { ...options, solids: [wall] }), null, 'Low cover blocks torso ray even when target eye is visible');
+  assert.equal(meleeTarget(owner, [foe], { ...options, solids: [{ ...wall, height: .5 }] }), 'foe', 'A body ray genuinely above low cover connects');
+});
+
+test('body-ray knife fallback preserves nearest target and stable ID ordering', () => {
+  const owner = createGearActor('owner', { pitch: Math.atan2(1.07 - 1.65, .8) });
+  const targets = [createGearActor('far', { z: -1.2 }), createGearActor('z', { z: -.8 }), createGearActor('a', { z: -.8 })];
+  assert.equal(meleeTarget(owner, targets, options), 'a');
+  assert.equal(meleeTarget(owner, targets.reverse(), options), 'a');
+});
+
 test('accepted throw consumes one item and starts both locks', () => {
   const state = createGearCombatState(), actor = createGearActor('a');
   pickupEquipment(actor.equipment, { kind: 'grenade', grenadeType: 'smoke' });

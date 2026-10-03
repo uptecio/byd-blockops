@@ -177,10 +177,17 @@ try {
   await pages[1].screenshot({ path: 'artifacts/loot-review/background-remote-paused.png' });
   await pages[1].locator('#resume-button').click();
   await pages[1].waitForSelector('body[data-mode="playing"]');
+  // This checks resumed input, not combat. Aim away through the real look
+  // control: the newly approved lethal headshot must not kill the still-
+  // untouched host before its independent initial-ammo assertion.
+  const guestAim = snapshots[1].players.find(player => player.name === 'Friend').yaw;
+  await pages[1].mouse.move(420, 280); await pages[1].mouse.down();
+  await pages[1].mouse.move(420 + (guestAim - Math.PI / 2) / .0026, 280); await pages[1].mouse.up();
+  await waitFor(() => Math.abs(snapshots[1].players.find(player => player.name === 'Friend').yaw - Math.PI / 2) < .05, 'resumed guest aims harmless input shot away from the host');
   await pages[1].keyboard.press('KeyF');
   await waitFor(() => snapshots[0].players.find(player => player.name === 'Friend').ammo < suspendedGuest.ammo, 'explicit Resume restores guest controls for a fresh input');
   assert.equal(await pages[0].locator('#room-map').isDisabled(), true, 'host settings lock in play');
-  assert.equal(snapshots[0].players.find(player => player.name === 'Host').ammo + snapshots[0].players.find(player => player.name === 'Host').reserve, 500);
+  assert.equal(snapshots[0].players.find(player => player.name === 'Host').ammo + snapshots[0].players.find(player => player.name === 'Host').reserve, 500, `Host initial ammo/life: ${JSON.stringify(snapshots[0].players.find(player => player.name === 'Host'))}`);
   const before = snapshots[0].players.find(player => player.name === 'Host').z;
   await pages[0].keyboard.down('KeyW');
   await pages[0].waitForTimeout(550);

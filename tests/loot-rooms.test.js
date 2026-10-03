@@ -12,6 +12,19 @@ function pair(modeId = 'ffa') {
 const action = (p, seq, fields) => ({ type: 'equipment-action', lifeId: p.lifeId, seq, ...fields });
 const put = (p, x, z) => Object.assign(p, { x, z, y: 0, yaw: 0, pitch: 0, protectedRemaining: 0 });
 
+test('authoritative server knife connects nearby torso aim once with unchanged cooldown and reach', () => {
+  const { manager, a, b } = pair();
+  put(a, 0, .8); put(b, 0, 0); pickupEquipment(a.equipment, { kind: 'knife' });
+  assert.equal(manager.equipmentAction(a.id, action(a, 1, { kind: 'held-item', heldItem: 'knife' })).ok, true);
+  const pitch = Math.atan2(1.07 - 1.6, .8);
+  manager.input(a.id, { lifeId: a.lifeId, x: 0, y: 0, yaw: 0, pitch, fire: true }); manager.tick(.01);
+  assert.equal(b.health, 50);
+  manager.tick(.1); assert.equal(b.health, 50, 'Holding slash cannot repeat before .6 seconds');
+  put(a, 0, 1.80001); a.equipment.meleeRemaining = 0;
+  manager.input(a.id, { lifeId: a.lifeId, x: 0, y: 0, yaw: 0, pitch: 0, fire: true }); manager.tick(.01);
+  assert.equal(b.health, 50, 'Body-box proximity never expands center reach');
+});
+
 test('duplicate equipment action cannot alter inventory', () => {
   const { manager, a } = pair();
   const packet = action(a, 1, { kind: 'equip-gun', weaponId: 'mp5', source: 'armory' });

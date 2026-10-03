@@ -1,6 +1,7 @@
 import { GEAR_BALANCE, GRENADE_TYPES } from './equipment-catalog.js';
 import { consumeGrenade } from './equipment.js';
 import { hasLineOfSight } from './collision.js';
+import { AVATAR_HITBOX } from './avatar-hitbox.js';
 
 const physics = GEAR_BALANCE.grenadePhysics;
 const axes = ['x', 'y', 'z'];
@@ -18,6 +19,26 @@ export function createGearCombatState() {
   return { projectiles: [], smokes: [], reservedSmoke: 0, nextId: 1, events: [] };
 }
 
+// Center aim may hit a nearby torso while the target eye is outside the cone.
+// Intersect the existing gun/avatar body box without expanding center reach.
+function bodyRayContact(origin, direction, target) {
+  const width = AVATAR_HITBOX.halfWidth;
+  const box = { x: [target.x - width, target.x + width],
+    y: [target.y + .05, target.y + AVATAR_HITBOX.height], z: [target.z - width, target.z + width] };
+  let enter = 0, leave = Infinity;
+  for (const axis of axes) {
+    const [low, high] = box[axis], speed = direction[axis];
+    if (Math.abs(speed) < epsilon) {
+      if (origin[axis] < low || origin[axis] > high) return null;
+    } else {
+      const a = (low - origin[axis]) / speed, b = (high - origin[axis]) / speed;
+      enter = Math.max(enter, Math.min(a, b)); leave = Math.min(leave, Math.max(a, b));
+      if (enter > leave) return null;
+    }
+  }
+  return { x: origin.x + direction.x * enter, y: origin.y + direction.y * enter, z: origin.z + direction.z * enter };
+}
+
 // Selection alone does not spend a swing: adapters call beginMelee once, even on a miss.
 export function meleeTarget(actor, actors, { solids, isEnemy }) {
   if (!finiteActor(actor) || !actor.alive) return null;
@@ -28,8 +49,15 @@ export function meleeTarget(actor, actors, { solids, isEnemy }) {
       || !isEnemy(actor.id, target.id)) continue;
     const position = eye(target), offset = difference(position, origin), distance = length(offset);
     if (distance > GEAR_BALANCE.knife.reach + epsilon) continue;
-    if (distance > epsilon && dot(direction, offset) / distance < Math.cos(GEAR_BALANCE.knife.halfAngle) - epsilon) continue;
-    if (hasLineOfSight(origin, position, solids)) candidates.push({ id: target.id, distance });
+    const inCone = distance <= epsilon || dot(direction, offset) / distance >= Math.cos(GEAR_BALANCE.knife.halfAngle) - epsilon;
+    if (inCone && hasLineOfSight(origin, position, solids)) candidates.push({ id: target.id, distance });
+    else {
+      // Solo camera and server gun rays start at 1.65; keep the original
+      // 1.6 eye-point cone/reach above and use the real ray for body contact.
+      const rayOrigin = { ...origin, y: actor.y + 1.65 };
+      const contact = bodyRayContact(rayOrigin, direction, target);
+      if (contact && hasLineOfSight(rayOrigin, contact, solids)) candidates.push({ id: target.id, distance });
+    }
   }
   candidates.sort((a, b) => a.distance - b.distance || compareId(a.id, b.id));
   return candidates[0]?.id ?? null;

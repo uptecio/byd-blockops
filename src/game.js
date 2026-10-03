@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { createWorld, createWeaponModel } from './world.js';
 import { moveCircle, hasLineOfSight } from './collision.js';
 import { getWeapon, createWeaponState, tryFire, startReload } from './weapons.js';
+import { gunHitDamage } from './gun-damage.js';
 import { assignTeams, createModeState, tickMode, recordElimination, getModeSnapshot, areEnemies } from './modes.js';
 import { getMap, DEFAULT_MAP_ID } from './maps.js';
 import { getSkin, SKINS, DEFAULT_SKIN_ID } from './skins.js';
@@ -167,7 +168,7 @@ export class ArenaGame {
   getActors() {
     return [{ id: this.player.id, name: this.player.name, teamId: this.player.teamId, x: this.player.x, y: this.player.jump, z: this.player.z,
       alive: this.player.health > 0 && this.player.dead <= 0, protectedRemaining: this.player.protected, lifeId: this.player.lifeId, skinId: this.player.skinId,
-      yaw: this.yaw, pitch: -this.pitch, flashRemaining: this.player.flashRemaining ?? 0, equipment: this.player.equipment, health: this.player.health },
+      yaw: this.yaw, pitch: this.pitch, flashRemaining: this.player.flashRemaining ?? 0, equipment: this.player.equipment, health: this.player.health },
     ...this.bots.map(bot => ({ id: bot.id, name: bot.name, teamId: bot.teamId, x: bot.model.position.x, y: bot.model.position.y, z: bot.model.position.z,
       alive: bot.health > 0 && bot.respawn <= 0, protectedRemaining: bot.protected, lifeId: bot.lifeId, skinId: bot.skinId,
       yaw: bot.yaw, pitch: 0, flashRemaining: bot.flashRemaining, equipment: bot.equipment, health: bot.health,
@@ -259,7 +260,7 @@ export class ArenaGame {
       this.player.velocity -= 13 * dt;
       this.player.jump = Math.max(0, this.player.jump + this.player.velocity * dt);
       if (this.player.jump === 0) this.player.velocity = 0;
-      Object.assign(playerActor, { x: this.player.x, y: this.player.jump, z: this.player.z, yaw: this.yaw, pitch: -this.pitch });
+      Object.assign(playerActor, { x: this.player.x, y: this.player.jump, z: this.player.z, yaw: this.yaw, pitch: this.pitch });
       if (input.throwPressed) {
         const result = this.requestEquipment({ kind: 'throw', grenadeType: this.player.equipment.selectedGrenade });
         if (!result.ok) this.events.onToast(result.reason);
@@ -356,7 +357,11 @@ export class ArenaGame {
       isEnemy: (sourceId, victimId) => areEnemies(this.modeState, sourceId, victimId) });
     if (targetId) {
       const victim = this.actorEntity(targetId);
-      this.damageActor(actor.id, victim, GEAR_BALANCE.knife.damage, actors);
+      const landed = this.damageActor(actor.id, victim, GEAR_BALANCE.knife.damage, actors);
+      if (landed && actor.id === 'local') {
+        this.hitFlash = .18;
+        victim.health <= 0 ? this.audio.kill() : this.audio.hit();
+      }
       if (victim.health <= 0) actors.find(other => other.id === targetId).alive = false;
     }
   }
@@ -505,7 +510,7 @@ export class ArenaGame {
       }
       if (victim) {
         const falloff = this.weapon.classId === 'shotgun' || this.weapon.classId === 'smg' ? Math.max(.35, 1 - closest / this.weapon.range * .6) : 1;
-        landed = this.damageActor('local', victim, this.weapon.damage * falloff * (hitPoint.y > victim.model.position.y + 1.48 ? 1.5 : 1), actors) || landed;
+        landed = this.damageActor('local', victim, gunHitDamage(this.weapon.damage * falloff, hitPoint.y, victim.model.position.y), actors) || landed;
         if (victim.health <= 0) { killed = true; this.events.onToast(`+1 ELIMINATION · ${this.match.kills}`); }
       }
       if (pellet === 0) {

@@ -5,6 +5,7 @@ import { getSkin } from '../src/skins.js';
 import { getMode, assignTeams, createModeState, addParticipant, areEnemies, recordElimination, tickMode, removeParticipant, getModeSnapshot } from '../src/modes.js';
 import { moveCircle } from '../src/collision.js';
 import { WEAPONS, getWeapon, tryFire, startReload } from '../src/weapons.js';
+import { gunHitDamage } from '../src/gun-damage.js';
 import { createEquipment, equipGun, setHeldItem, selectGrenade, tickEquipment, beginMelee, deathItems, clearEquipment, equipmentDTO } from '../src/equipment.js';
 import { createLootState, reconcileStartingGuns, tickLoot, collectLoot, addDeathDrops, lootDTO } from '../src/loot.js';
 import { createGearCombatState, meleeTarget, throwGrenade, stepGearCombat, gearCombatDTO } from '../src/gear-combat.js';
@@ -257,7 +258,7 @@ export class RoomManager {
       const ray = new THREE.Ray(origin, direction);
       const point = new THREE.Vector3();
       let distance = weapon.range;
-      let target = null;
+      let target = null, hitY = 0;
       for (const box of room.physics.wallBoxes) {
         if (ray.intersectBox(box, point)) distance = Math.min(distance, origin.distanceTo(point));
       }
@@ -266,11 +267,11 @@ export class RoomManager {
         const bounds = new THREE.Box3(new THREE.Vector3(player.x - 0.32, player.y, player.z - 0.32), new THREE.Vector3(player.x + 0.32, player.y + 1.84, player.z + 0.32));
         if (ray.intersectBox(bounds, point)) {
           const hitDistance = origin.distanceTo(point);
-          if (hitDistance < distance) { distance = hitDistance; target = player; }
+          if (hitDistance < distance) { distance = hitDistance; target = player; hitY = point.y; }
         }
       }
       if (pellet === 0) shotEnd = origin.clone().addScaledVector(direction, distance);
-      if (target && target.protectedRemaining <= 0) damage.set(target, (damage.get(target) || 0) + weapon.damage);
+      if (target && target.protectedRemaining <= 0) damage.set(target, (damage.get(target) || 0) + gunHitDamage(weapon.damage, hitY, target.y));
     }
     this.event(room, { type: 'shot', playerId: shooter.id, from: { x: origin.x, y: origin.y, z: origin.z }, to: { x: shotEnd.x, y: shotEnd.y, z: shotEnd.z } });
     for (const [target, amount] of damage) {
