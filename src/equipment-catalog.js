@@ -12,6 +12,12 @@ export const GEAR_BALANCE = Object.freeze({
   grenadeCapacity: 3,
   throwCooldown: 0.65,
   attackSuppression: 0.25,
+  eyeHeight: 1.6,
+  grenadePhysics: Object.freeze({
+    radius: 0.12, releaseDistance: 0.45, launchSpeed: 12, launchLift: 3,
+    gravity: 14, restitution: 0.35, tangentialMultiplier: 0.7,
+    maxStep: 1 / 120, restSpeed: 0.25, smokeHeight: 2,
+  }),
   pickupRadius: 1.2,
   pickupVerticalReach: 0.75,
   mapRespawn: 20,
