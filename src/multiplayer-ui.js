@@ -9,8 +9,8 @@ import { WEAPONS } from './weapons.js';
 
 const $ = id => document.getElementById(id);
 export class MultiplayerUI {
-  constructor({ getGame, getSettings, getSelected, getSelection, onSkin, onConfiguration, onRoomSettings, onHome, onMode, onLoadout, onToast }) {
-    Object.assign(this, { getGame, getSettings, getSelected, getSelection, onSkin, onConfiguration, onRoomSettings, onHome, onMode, onLoadout, onToast });
+  constructor({ getGame, getSettings, getSelected, getSelection, onSkin, onConfiguration, onRoomSettings, onRemoteStart, onHome, onMode, onLoadout, onToast }) {
+    Object.assign(this, { getGame, getSettings, getSelected, getSelection, onSkin, onConfiguration, onRoomSettings, onRemoteStart, onHome, onMode, onLoadout, onToast });
     this.arena = null; this.room = null; this.busy = false; this.pendingDeployment = null;
     this.client = new RoomClient({ onRoom: room => this.receive(room), onError: message => {
       this.pendingDeployment = null; this.status(message, true);
@@ -75,7 +75,7 @@ export class MultiplayerUI {
     $('online-setup').hidden = true; $('room-lobby').hidden = false;
     if (room.phase === 'playing' && (!this.arena || !previous || previous.phase !== 'playing')) {
       this.pendingDeployment = null;
-      const retainMenu = !['lobby', 'playing', undefined].includes(document.body.dataset.mode) || !$('settings-screen').hidden;
+      const retainMenu = !['lobby', 'playing', 'confirm-home', undefined].includes(document.body.dataset.mode) || !$('settings-screen').hidden;
       if (this.arena) this.arena.stop();
       const game = this.getGame();
       this.arena = new OnlineArena(game, this.client, {
@@ -85,6 +85,7 @@ export class MultiplayerUI {
       this.arena.start(room, this.client.id, this.getSettings());
       if (retainMenu) this.arena.pause();
       else { this.onMode('playing'); game.audio.unlock(); }
+      this.onRemoteStart?.();
     } else if (this.arena) this.arena.sync(room);
     if (this.pendingDeployment) {
       const pending = this.pendingDeployment, authoritative = room.selfEquipment;

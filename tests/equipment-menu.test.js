@@ -127,6 +127,27 @@ test('a remote start while lobby settings are open keeps that overlay and contro
   assert.equal(document.getElementById('settings-screen').hidden, false);
   assert.equal(ui.arena.suspended, true); assert.equal(game.input.enabled, false);
 });
+test('remote-start lifecycle reconciliation can close background overlays while keeping controls suspended', t => {
+  const { ui, game, manager, receive, body, modes } = fixture(t, 'armory'); receive();
+  document.getElementById('settings-screen').hidden = false;
+  ui.onRemoteStart = () => {
+    document.getElementById('settings-screen').hidden = true;
+    body.dataset.mode = 'paused'; ui.pause();
+  };
+  manager.start('p1'); receive();
+  assert.equal(body.dataset.mode, 'paused');
+  assert.equal(document.getElementById('settings-screen').hidden, true);
+  assert.equal(ui.arena.suspended, true); assert.equal(game.input.enabled, false);
+  assert.equal(modes.includes('playing'), false);
+  receive(); assert.equal(ui.arena.suspended, true, 'later snapshots cannot grant Resume');
+  ui.deploy(); assert.equal(ui.arena.suspended, false, 'explicit return restores controls');
+});
+test('a remote round start replaces an obsolete Home confirmation instead of retaining it as a menu', t => {
+  const { ui, game, manager, receive, body } = fixture(t, 'confirm-home'); receive();
+  manager.start('p1'); receive();
+  assert.equal(body.dataset.mode, 'playing');
+  assert.equal(ui.arena.suspended, false); assert.equal(game.input.enabled, true);
+});
 test('real online input queues knife and one throw, while T immediately sends neutral controls', t => {
   const { ui, game, manager, receive, sent } = fixture(t); manager.start('p1'); receive(); sent.length = 0;
   game.input.knifePressed = true; game.input.throwPressed = true; game.input.firePressed = true;
