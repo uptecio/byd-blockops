@@ -151,8 +151,8 @@ function burst(state, projectile, actors, options, elapsedAfterBurst, result) {
       z: position.z, radius: balance.radius, remaining });
     return;
   }
-  // An owner may be dead or in a later life; only absence means disconnected.
-  if (!actors.some(actor => actor.id === ownerId)) return;
+  // Death preserves eligibility; departure permanently disables existing throws.
+  if (projectile.visualOnly || !actors.some(actor => actor.id === ownerId)) return;
   for (const target of [...actors].sort((a, b) => compareId(a.id, b.id))) {
     if (target.id === ownerId || !target.alive || target.protectedRemaining > 0
       || !options.isEnemy(ownerId, target.id)) continue;
@@ -204,6 +204,6 @@ export function smokeBlocksSight(from, to, smokes) {
 }
 
 export function gearCombatDTO(state) {
-  return { projectiles: state.projectiles.map(projectile => ({ ...projectile })),
+  return { projectiles: state.projectiles.map(({ visualOnly, ...projectile }) => ({ ...projectile })),
     smokes: state.smokes.map(smoke => ({ ...smoke })) };
 }

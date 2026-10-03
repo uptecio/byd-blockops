@@ -191,6 +191,20 @@ test('dead and respawned owners retain old-life credit but disconnected owners c
   }
 });
 
+test('permanently visual-only grenades retain identities without harming rejoined owners opponents', () => {
+  for (const type of ['frag', 'flash', 'smoke']) {
+    const state = burstState(type, { visualOnly: true });
+    const dto = gearCombatDTO(state);
+    assert.equal(Object.hasOwn(dto.projectiles[0], 'visualOnly'), false);
+    assert.equal(dto.projectiles[0].ownerId, 'owner'); assert.equal(dto.projectiles[0].ownerLifeId, 1);
+    const actors = [createGearActor('owner', { lifeId: 2 }), createGearActor('foe')];
+    const result = stepGearCombat(state, actors, .1, options);
+    assert.deepEqual(result.damage, []); assert.deepEqual(result.flashes, []); assert.equal(result.events.length, 1);
+    assert.equal(state.smokes.length, type === 'smoke' ? 1 : 0);
+    stepGearCombat(state, actors, 8, options); assert.equal(state.smokes.length, 0);
+  }
+});
+
 test('smoke uses an elevated sphere, overlapping sight blockers and elapsed expiry', () => {
   const state = burstState('smoke', { y: .12 });
   stepGearCombat(state, [], .5, options);

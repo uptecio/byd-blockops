@@ -50,7 +50,7 @@ export async function startServer({ port = 0, host = '127.0.0.1', distDir = 'dis
   const broadcast = room => {
     if (!room || !room.players.size) return;
     const packet = { type: 'state', protocol: PROTOCOL_VERSION, room: manager.snapshot(room) };
-    for (const id of room.players.keys()) { const connection = connections.get(id); if (connection) send(connection.socket, packet); }
+    for (const id of room.players.keys()) { const connection = connections.get(id); if (connection) send(connection.socket, { ...packet, equipment: manager.equipmentSnapshot(id) }); }
   };
   wss.on('connection', socket => {
     const id = randomUUID();
@@ -71,20 +71,25 @@ export async function startServer({ port = 0, host = '127.0.0.1', distDir = 'dis
           case 'create': case 'join': {
             if (packet.protocol !== PROTOCOL_VERSION) throw new Error('Update required: install the latest Block Ops APK or reload the game.');
             const room = packet.type === 'create' ? manager.create(id, packet.name, packet.weaponId, { mapId: packet.mapId, modeId: packet.modeId, skinId: packet.skinId }) : manager.join(id, packet.code, packet.name, packet.weaponId, { skinId: packet.skinId });
-            send(socket, { type: 'welcome', protocol: PROTOCOL_VERSION, id, room: manager.snapshot(room, false) }); broadcast(room); break;
+            send(socket, { type: 'welcome', protocol: PROTOCOL_VERSION, id, room: manager.snapshot(room, false), equipment: manager.equipmentSnapshot(id) }); broadcast(room); break;
           }
           case 'configure': broadcast(manager.configure(id, { mapId: packet.mapId, modeId: packet.modeId })); break;
           case 'skin': broadcast(manager.setSkin(id, packet.skinId)); break;
           case 'start': broadcast(manager.start(id)); break;
           case 'input': manager.input(id, packet); break;
-          case 'equip': manager.equip(id, packet.weaponId); broadcast(manager.roomFor(id)); break;
+          case 'loadout': broadcast(manager.setLoadout(id, packet.weaponId)); break;
+          case 'equipment-action': {
+            const result = manager.equipmentAction(id, packet);
+            if (!result.ok) send(socket, { type: 'error', message: result.reason });
+            broadcast(manager.roomFor(id)); break;
+          }
           case 'leave': broadcast(manager.leave(id)); break;
           case 'ping': send(socket, { type: 'pong', at: packet.at }); break;
           default: throw new Error('Unknown message type.');
         }
       } catch (error) { send(socket, { type: 'error', message: error.message }); }
     });
-    socket.on('close', () => { connections.delete(id); broadcast(manager.leave(id)); });
+    socket.on('close', () => { connections.delete(id); broadcast(manager.leave(id, { disconnected: true })); });
   });
   let ticks = 0;
   const simulation = setInterval(() => {

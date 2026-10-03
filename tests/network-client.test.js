@@ -40,9 +40,9 @@ test('welcome sets identity before room callback and only welcomed sockets send'
     assert.equal(socket.url, 'wss://play.example.com/ws');
     assert.equal(client.send({ type: 'start' }), false);
     socket.open();
-    socket.message({ type: 'welcome', protocol: 2, id: 'p1', room: room() });
+    socket.message({ type: 'welcome', protocol: 3, id: 'p1', room: room() });
     assert.equal((await pending).id, 'p1');
-    assert.deepEqual(socket.sent[0], { type: 'create', protocol: 2, name: 'Alex', weaponId: 'm4a1', mapId: 'courtyard', modeId: 'ffa', skinId: 'ranger' });
+    assert.deepEqual(socket.sent[0], { type: 'create', protocol: 3, name: 'Alex', weaponId: 'm4a1', mapId: 'courtyard', modeId: 'ffa', skinId: 'ranger' });
     assert.deepEqual(seen, [['p1', 'ABC123']]);
     assert.equal(client.connected, true);
     assert.equal(client.send({ type: 'start' }), true);
@@ -58,10 +58,10 @@ test('malformed snapshots never replace a valid room, and intentional close supp
     const client = new RoomClient({ onError: error => errors.push(error), onDisconnect: () => disconnected.push(true) });
     const pending = client.connect('http://localhost:4180', { type: 'join', code: 'ABC123', name: 'Alex', weaponId: 'm4a1' });
     const socket = Socket.instances.at(-1); socket.open();
-    socket.message({ type: 'welcome', protocol: 2, id: 'p1', room: room() });
+    socket.message({ type: 'welcome', protocol: 3, id: 'p1', room: room() });
     await pending;
     socket.message('{');
-    socket.message({ type: 'state', protocol: 2, room: { ...room(), players: [{ ...player(), x: null }] } });
+    socket.message({ type: 'state', protocol: 3, room: { ...room(), players: [{ ...player(), x: null }] } });
     assert.equal(client.room.players.length, 2);
     assert.equal(errors.length, 2);
     client.close();
@@ -89,7 +89,7 @@ test('unexpected close after welcome reports a disconnect once', async () => {
     const client = new RoomClient({ onDisconnect: () => disconnected++ });
     const pending = client.connect('http://localhost:4180', { type: 'create', name: 'Alex', weaponId: 'm4a1' });
     const socket = Socket.instances.at(-1); socket.open();
-    socket.message({ type: 'welcome', protocol: 2, id: 'p1', room: room() }); await pending;
+    socket.message({ type: 'welcome', protocol: 3, id: 'p1', room: room() }); await pending;
     socket.close(); socket.close();
     assert.equal(disconnected, 1);
     assert.equal(client.connected, false);
@@ -111,17 +111,17 @@ test('a server that never welcomes times out and closes its connection', async c
   } finally { globalThis.WebSocket = original; context.mock.timers.reset(); }
 });
 
-test('protocol 2 requests forward selected create options and only approved join fields', async () => {
+test('protocol 3 requests forward selected create options and only approved join fields', async () => {
   const original = globalThis.WebSocket; globalThis.WebSocket = Socket;
   try {
     for (const [request, expected] of [
-      [{ type: 'create', name: 'Alex', weaponId: 'awp', mapId: 'harbor', modeId: 'ctf', skinId: 'space-guard', protocol: 1, kills: 99 }, { type: 'create', protocol: 2, name: 'Alex', weaponId: 'awp', mapId: 'harbor', modeId: 'ctf', skinId: 'space-guard' }],
-      [{ type: 'join', code: 'ABC123', name: 'Alex', weaponId: 'awp', skinId: 'shadow-ninja', mapId: 'harbor', modeId: 'ctf' }, { type: 'join', protocol: 2, code: 'ABC123', name: 'Alex', weaponId: 'awp', skinId: 'shadow-ninja' }],
+      [{ type: 'create', name: 'Alex', weaponId: 'awp', mapId: 'harbor', modeId: 'ctf', skinId: 'space-guard', protocol: 1, kills: 99 }, { type: 'create', protocol: 3, name: 'Alex', weaponId: 'awp', mapId: 'harbor', modeId: 'ctf', skinId: 'space-guard' }],
+      [{ type: 'join', code: 'ABC123', name: 'Alex', weaponId: 'awp', skinId: 'shadow-ninja', mapId: 'harbor', modeId: 'ctf' }, { type: 'join', protocol: 3, code: 'ABC123', name: 'Alex', weaponId: 'awp', skinId: 'shadow-ninja' }],
     ]) {
       const client = new RoomClient();
       const pending = client.connect('http://localhost:4180', request);
       const socket = Socket.instances.at(-1); socket.open();
-      socket.message({ type: 'welcome', protocol: 2, id: 'p1', room: room() });
+      socket.message({ type: 'welcome', protocol: 3, id: 'p1', room: room() });
       await pending; client.close(); assert.deepEqual(socket.sent[0], expected);
     }
   } finally { globalThis.WebSocket = original; }
@@ -147,14 +147,14 @@ test('old servers and version rejection require an update before any gameplay ca
   } finally { globalThis.WebSocket = original; }
 });
 
-test('invalid protocol 2 updates preserve the last valid room including objectives', async () => {
+test('invalid protocol 3 updates preserve the last valid room including objectives', async () => {
   const original = globalThis.WebSocket; globalThis.WebSocket = Socket;
   try {
     const errors = [];
     const client = new RoomClient({ onError: error => errors.push(error) });
     const pending = client.connect('http://localhost:4180', { type: 'create' });
     const socket = Socket.instances.at(-1); socket.open();
-    socket.message({ type: 'welcome', protocol: 2, id: 'p1', room: ctfRoom() }); await pending;
+    socket.message({ type: 'welcome', protocol: 3, id: 'p1', room: ctfRoom() }); await pending;
     const good = client.room;
     const mutations = [
       snapshot => { snapshot.mapId = 'unknown'; }, snapshot => { snapshot.modeId = 'unknown'; },
@@ -182,14 +182,14 @@ test('invalid protocol 2 updates preserve the last valid room including objectiv
     for (const mutate of mutations) {
       const snapshot = ctfRoom(); mutate(snapshot);
       const before = errors.length;
-      socket.message({ type: 'state', protocol: 2, room: snapshot });
+      socket.message({ type: 'state', protocol: 3, room: snapshot });
       assert.equal(errors.length, before + 1, mutate.toString());
       assert.equal(client.room, good, mutate.toString());
     }
     socket.message({ type: 'state', protocol: 1, room: ctfRoom() });
     assert.match(errors.at(-1), /update required/i); assert.equal(client.room, good);
     const automaticReturn = ctfRoom(); automaticReturn.events = [{ id: 10, type: 'flag-return', teamId: 'blue', playerId: null }];
-    socket.message({ type: 'state', protocol: 2, room: automaticReturn });
+    socket.message({ type: 'state', protocol: 3, room: automaticReturn });
     assert.equal(client.room.events[0].type, 'flag-return');
     client.close();
   } finally { globalThis.WebSocket = original; }
@@ -424,15 +424,15 @@ test('authoritative ended snapshots with departed carriers render frozen flags w
     const online = new OnlineArena(game, sender, { onEnd: () => { ended++; assert.equal(homePending, true); } });
     const client = new RoomClient({ onRoom: snapshot => online.running ? online.sync(snapshot) : online.start(snapshot, 'p1', { sensitivity: 1 }), onDisconnect: () => online.stop() });
     const pending = client.connect('http://localhost:4180', { type: 'join' });
-    const socket = Socket.instances.at(-1); socket.open(); socket.message({ type: 'welcome', protocol: 2, id: 'p1', room: manager.snapshot(state) }); await pending;
+    const socket = Socket.instances.at(-1); socket.open(); socket.message({ type: 'welcome', protocol: 3, id: 'p1', room: manager.snapshot(state) }); await pending;
     online.pause(); manager.tick(180); manager.leave('p2');
     const final = manager.snapshot(state);
-    socket.message({ type: 'state', protocol: 2, room: final }); online.update(.1); online.resume();
+    socket.message({ type: 'state', protocol: 3, room: final }); online.update(.1); online.resume();
     assert.equal(client.room.flags.red.carrierId, 'p2'); assert.equal(game.matchView.ended, true);
     assert.deepEqual(game.objectives.flags.red.position.toArray(), [0, 0, 18]);
     assert.equal(ended, 1); assert.equal(online.suspended, true); assert.equal(game.input.enabled, false);
     assert.equal(packets.at(-1).fire, false); assert.equal(packets.at(-1).x, 0);
-    socket.message({ type: 'state', protocol: 2, room: final }); assert.equal(ended, 1);
+    socket.message({ type: 'state', protocol: 3, room: final }); assert.equal(ended, 1);
     socket.close(); online.sync(final); online.update(.1); online.resume();
     assert.equal(online.running, false); assert.equal(game.input.enabled, false); assert.equal(homePending, true);
     homePending = false; client.close();
@@ -446,19 +446,19 @@ test('a fresh client joining after the FFA winner departs retains the authoritat
     const state = manager.create('winner', ' <Victor> ', 'awp'); manager.join('viewer', state.code, 'Viewer', 'm4a1'); manager.start('winner');
     Object.assign(state.players.get('winner'), { x: 0, y: 0, z: 5, protectedRemaining: 0 });
     Object.assign(state.players.get('viewer'), { x: 0, y: 0, z: -5, protectedRemaining: 0 });
-    manager.input('winner', { x: 0, y: 0, yaw: 0, pitch: 0, firePressed: true }); manager.tick(1 / 30); manager.tick(180);
+    manager.input('winner', { lifeId: state.players.get('winner').lifeId, x: 0, y: 0, yaw: 0, pitch: 0, firePressed: true }); manager.tick(1 / 30); manager.tick(180);
     manager.leave('winner'); manager.join('late', state.code, 'Late Join', 'm4a1');
     const { game, client: sender } = fixture(); const online = new OnlineArena(game, sender);
     const errors = [];
     const client = new RoomClient({ onRoom: snapshot => online.running ? online.sync(snapshot) : online.start(snapshot, 'late', { sensitivity: 1 }), onError: message => errors.push(message) });
     const pending = client.connect('http://localhost:4180', { type: 'join', code: state.code });
-    const socket = Socket.instances.at(-1); socket.open(); socket.message({ type: 'welcome', protocol: 2, id: 'late', room: manager.snapshot(state) }); await pending;
+    const socket = Socket.instances.at(-1); socket.open(); socket.message({ type: 'welcome', protocol: 3, id: 'late', room: manager.snapshot(state) }); await pending;
     assert.equal(game.matchView.winnerId, 'winner'); assert.equal(game.matchView.winnerName, 'Victor');
     assert.equal(game.matchView.players.some(player => player.id === 'winner'), false);
     assert.equal(game.input.enabled, false); online.resume(); assert.equal(online.suspended, true);
     const valid = client.room;
     for (const winnerName of [null, '', 12]) {
-      socket.message({ type: 'state', protocol: 2, room: { ...manager.snapshot(state), winnerName } });
+      socket.message({ type: 'state', protocol: 3, room: { ...manager.snapshot(state), winnerName } });
       assert.equal(client.room, valid); assert.equal(game.matchView.winnerName, 'Victor');
     }
     assert.equal(errors.length, 3); online.stop(); client.close();

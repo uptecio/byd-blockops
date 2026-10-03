@@ -4,7 +4,12 @@ import { getMap } from '../src/maps.js';
 import { getSkin } from '../src/skins.js';
 import { getMode, assignTeams, createModeState, addParticipant, areEnemies, recordElimination, tickMode, removeParticipant, getModeSnapshot } from '../src/modes.js';
 import { moveCircle } from '../src/collision.js';
-import { WEAPONS, getWeapon, createWeaponState, tickWeapon, tryFire, startReload } from '../src/weapons.js';
+import { WEAPONS, getWeapon, tryFire, startReload } from '../src/weapons.js';
+import { createEquipment, equipGun, setHeldItem, selectGrenade, tickEquipment, beginMelee, deathItems, clearEquipment, equipmentDTO } from '../src/equipment.js';
+import { createLootState, reconcileStartingGuns, tickLoot, collectLoot, addDeathDrops, lootDTO } from '../src/loot.js';
+import { createGearCombatState, meleeTarget, throwGrenade, stepGearCombat, gearCombatDTO } from '../src/gear-combat.js';
+import { validEquipmentAction } from '../src/gear-protocol.js';
+import { GEAR_BALANCE } from '../src/equipment-catalog.js';
 
 const mapPhysics = new Map();
 function physicsFor(map) {
@@ -35,6 +40,8 @@ export class RoomManager {
   constructor({ maxRooms = 32, random = Math.random } = {}) {
     this.rooms = new Map();
     this.sessions = new Map();
+    this.actionSequences = new Map();
+    this.connectionLives = new Map();
     this.maxRooms = Math.min(32, maxRooms);
     this.random = random;
     this.now = 0;
@@ -50,7 +57,7 @@ export class RoomManager {
     let code;
     do { code = Array.from({ length: 6 }, () => ALPHABET[randomInt(ALPHABET.length)]).join(''); } while (this.rooms.has(code));
     const room = { code, hostId: id, phase: 'lobby', timeLeft: 180, winnerId: null, winnerName: null, winnerTeamId: null, mapId, modeId, map, physics: physicsFor(map), players: new Map(), lifeCounters: new Map(), events: [], nextEventId: 1,
-      modeState: createModeState({ modeId, map, participants: [] }) };
+      modeState: createModeState({ modeId, map, participants: [] }), lootState: createLootState({ mapId, seed: 0, startingGunIds: [weaponId] }), gearCombatState: createGearCombatState() };
     this.addPlayer(room, id, name, weaponId, skinId);
     this.rooms.set(code, room);
     return room;
@@ -70,10 +77,11 @@ export class RoomManager {
 
   addPlayer(room, id, name, weaponId, skinId) {
     const teamId = addParticipant(room.modeState, { id });
-    const player = { id, name: sanitizeName(name), weaponId, teamId, skinId, pendingSkinId: null, kills: 0, deaths: 0, inventory: new Map(), input: emptyInput(), inputAt: -Infinity };
+    const player = { id, name: sanitizeName(name), weaponId, loadoutId: weaponId, startingGunId: weaponId, teamId, skinId, pendingSkinId: null, kills: 0, deaths: 0, inventory: new Map(), lastActionSeq: this.actionSequences.get(id) ?? 0, input: emptyInput(), inputAt: -Infinity };
     room.players.set(id, player);
     this.sessions.set(id, room);
     this.spawn(room, player);
+    if (room.phase === 'playing') reconcileStartingGuns(room.lootState, [...room.players.values()].map(p => p.startingGunId));
   }
 
   spawn(room, player) {
@@ -85,11 +93,13 @@ export class RoomManager {
       const distance = others.length ? Math.min(...others.map(other => Math.hypot(candidate.x - other.x, candidate.z - other.z))) : Infinity;
       if (distance > bestDistance) { bestDistance = distance; spawn = candidate; }
     }
-    Object.assign(player, spawn, { y: 0, velocityY: 0, yaw: Math.atan2(spawn.x, spawn.z), pitch: 0, health: 100, respawnRemaining: 0, protectedRemaining: 2, input: emptyInput(), inputAt: -Infinity });
-    player.lifeId = (room.lifeCounters.get(player.id) || 0) + 1;
+    Object.assign(player, spawn, { y: 0, velocityY: 0, yaw: Math.atan2(spawn.x, spawn.z), pitch: 0, health: 100, respawnRemaining: 0, protectedRemaining: 2, flashRemaining: 0, input: emptyInput(), inputAt: -Infinity });
+    player.lifeId = (this.connectionLives.get(player.id) || 0) + 1;
+    this.connectionLives.set(player.id, player.lifeId);
     room.lifeCounters.set(player.id, player.lifeId);
     if (player.pendingSkinId !== null) { player.skinId = player.pendingSkinId; player.pendingSkinId = null; }
-    player.inventory = new Map(WEAPONS.map(weapon => [weapon.id, createWeaponState(weapon.id)]));
+    player.equipment = createEquipment(player.startingGunId);
+    this.syncEquipment(player);
   }
 
   requirePlayer(id) {
@@ -102,7 +112,9 @@ export class RoomManager {
     const assignments = assignTeams([...room.players.keys()], modeId);
     const modeState = createModeState({ modeId, map, participants: [...room.players.keys()].map(id => ({ id, teamId: assignments[id] })) });
     Object.assign(room, { map, mapId: map.id, modeId, physics: physicsFor(map), modeState, timeLeft: 180, winnerId: null, winnerName: null, winnerTeamId: null, events: [] });
-    for (const player of room.players.values()) Object.assign(player, { health: 0, teamId: assignments[player.id], kills: 0, deaths: 0 });
+    for (const player of room.players.values()) Object.assign(player, { health: 0, teamId: assignments[player.id], kills: 0, deaths: 0, startingGunId: player.loadoutId });
+    room.lootState = createLootState({ mapId: map.id, seed: randomInt(4294967296), startingGunIds: [...room.players.values()].map(p => p.startingGunId) });
+    room.gearCombatState = createGearCombatState();
     for (const player of room.players.values()) this.spawn(room, player);
   }
 
@@ -133,7 +145,7 @@ export class RoomManager {
   }
 
   input(id, packet) {
-    const { player } = this.requirePlayer(id);
+    const { room, player } = this.requirePlayer(id);
     for (const key of ['x', 'y', 'yaw', 'pitch']) {
       if (typeof packet[key] !== 'number' || !Number.isFinite(packet[key])) throw new Error('Input controls must be finite numbers.');
     }
@@ -143,21 +155,83 @@ export class RoomManager {
     let x = Math.max(-1, Math.min(1, packet.x));
     let y = Math.max(-1, Math.min(1, packet.y));
     const length = Math.hypot(x, y); if (length > 1) { x /= length; y /= length; }
+    const combatAllowed = room.phase === 'playing' && player.health > 0 && packet.lifeId === player.lifeId;
     player.input = {
       x, y, yaw: packet.yaw % (Math.PI * 2), pitch: Math.max(-1.25, Math.min(1.25, packet.pitch)),
-      fire: packet.fire === true, zoom: packet.zoom === true,
-      firePressed: player.input.firePressed || packet.firePressed === true,
+      fire: combatAllowed && packet.fire === true, zoom: packet.zoom === true,
+      firePressed: combatAllowed && (player.input.firePressed || packet.firePressed === true),
       jump: player.input.jump || packet.jump === true,
-      reload: player.input.reload || packet.reload === true,
+      reload: combatAllowed && (player.input.reload || packet.reload === true),
+      lifeId: player.lifeId,
     };
     player.inputAt = this.now;
   }
 
-  equip(id, weaponId) { validWeapon(weaponId); this.requirePlayer(id).player.weaponId = weaponId; }
+  setLoadout(id, weaponId) {
+    validWeapon(weaponId); const { room, player } = this.requirePlayer(id);
+    if (room.phase === 'playing') throw new Error('Cannot change loadout during an active round.');
+    player.loadoutId = weaponId;
+    return room;
+  }
 
-  leave(id) {
+  syncEquipment(player) { player.weaponId = player.equipment.activeGunId; player.inventory = player.equipment.owned; }
+
+  actors(room) {
+    return [...room.players.values()].map(p => ({ id: p.id, lifeId: p.lifeId, teamId: p.teamId, x: p.x, y: p.y, z: p.z, yaw: p.yaw, pitch: p.pitch, alive: p.health > 0, protectedRemaining: p.protectedRemaining, flashRemaining: p.flashRemaining, equipment: p.equipment }));
+  }
+
+  equipmentAction(id, packet) {
+    const { room, player } = this.requirePlayer(id);
+    const denied = reason => ({ ok: false, reason });
+    if (!validEquipmentAction(packet)) return denied('Invalid equipment action');
+    if (packet.seq <= player.lastActionSeq) return denied('Repeated equipment action');
+    if (room.phase !== 'playing' || player.health <= 0 || packet.lifeId !== player.lifeId) return denied('Cannot change equipment while inactive');
+    player.lastActionSeq = packet.seq; this.actionSequences.set(id, packet.seq);
+    let result;
+    if (packet.kind === 'equip-gun') result = equipGun(player.equipment, packet.weaponId, { source: packet.source });
+    else if (packet.kind === 'held-item') result = setHeldItem(player.equipment, packet.heldItem);
+    else if (packet.kind === 'select-grenade') result = selectGrenade(player.equipment, packet.grenadeType);
+    else {
+      const actor = this.actors(room).find(actor => actor.id === id);
+      if (player.input.lifeId === player.lifeId && this.now - player.inputAt <= .3 + 1e-9) {
+        actor.yaw = player.input.yaw; actor.pitch = player.input.pitch;
+      }
+      result = throwGrenade(room.gearCombatState, actor, packet.grenadeType, { solids: room.physics.solids });
+    }
+    this.syncEquipment(player);
+    return result;
+  }
+
+  equipmentSnapshot(id) {
+    const { player } = this.requirePlayer(id);
+    return { playerId: id, lifeId: player.lifeId, lastActionSeq: player.lastActionSeq, equipment: equipmentDTO(player.equipment) };
+  }
+
+  eliminate(room, killerId, target) {
+    if (room.phase !== 'playing' || target.health <= 0) return false;
+    const items = deathItems(target.equipment);
+    target.health = 0; target.respawnRemaining = 2.5; target.input = emptyInput(); target.inputAt = -Infinity;
+    clearEquipment(target.equipment);
+    addDeathDrops(room.lootState, { actorId: target.id, lifeId: target.lifeId, position: target, items, solids: room.physics.solids });
+    const events = recordElimination(room.modeState, { killerId, victimId: target.id, position: target, lifeId: target.lifeId });
+    this.event(room, { type: 'kill', playerId: killerId, targetId: target.id });
+    for (const event of events) this.event(room, event);
+    this.syncMode(room);
+    return true;
+  }
+
+  damage(room, sourceId, target, amount) {
+    if (room.phase !== 'playing' || !target || target.health <= 0 || target.protectedRemaining > 0 || !areEnemies(room.modeState, sourceId, target.id)) return;
+    this.event(room, { type: 'hit', playerId: sourceId, targetId: target.id });
+    if (amount >= target.health) this.eliminate(room, sourceId, target);
+    else target.health -= amount;
+  }
+
+  leave(id, { disconnected = false } = {}) {
+    if (disconnected) { this.actionSequences.delete(id); this.connectionLives.delete(id); }
     const room = this.sessions.get(id);
     if (!room) return null;
+    for (const projectile of room.gearCombatState.projectiles) if (projectile.ownerId === id) projectile.visualOnly = true;
     for (const event of removeParticipant(room.modeState, id, room.players.get(id))) this.event(room, event);
     room.players.delete(id); this.sessions.delete(id);
     if (!room.players.size) this.rooms.delete(room.code);
@@ -200,16 +274,8 @@ export class RoomManager {
     }
     this.event(room, { type: 'shot', playerId: shooter.id, from: { x: origin.x, y: origin.y, z: origin.z }, to: { x: shotEnd.x, y: shotEnd.y, z: shotEnd.z } });
     for (const [target, amount] of damage) {
-      target.health = Math.max(0, target.health - amount);
-      this.event(room, { type: 'hit', playerId: shooter.id, targetId: target.id });
-      if (target.health === 0) {
-        const events = recordElimination(room.modeState, { killerId: shooter.id, victimId: target.id, position: target, lifeId: target.lifeId });
-        target.respawnRemaining = 2.5; target.input = emptyInput(); target.inputAt = -Infinity;
-        this.event(room, { type: 'kill', playerId: shooter.id, targetId: target.id });
-        for (const event of events) this.event(room, event);
-        this.syncMode(room);
-        if (room.phase === 'ended') break;
-      }
+      this.damage(room, shooter.id, target, amount);
+      if (room.phase === 'ended') break;
     }
   }
 
@@ -224,15 +290,17 @@ export class RoomManager {
 
   tickRoom(room, dt) {
     if (room.phase !== 'playing') return;
+    tickLoot(room.lootState, dt);
     for (const player of room.players.values()) {
       if (room.phase !== 'playing') break;
+      player.flashRemaining = Math.max(0, player.flashRemaining - dt);
       if (player.health <= 0) {
         player.respawnRemaining = Math.max(0, player.respawnRemaining - dt);
         if (player.respawnRemaining <= 1e-8) this.spawn(room, player);
         continue;
       }
       player.protectedRemaining = Math.max(0, player.protectedRemaining - dt);
-      for (const state of player.inventory.values()) tickWeapon(state, dt);
+      tickEquipment(player.equipment, dt);
       if (this.now - player.inputAt > 0.3 + 1e-9) player.input = emptyInput();
       const input = player.input;
       const weapon = getWeapon(player.weaponId);
@@ -244,11 +312,33 @@ export class RoomManager {
       if (input.jump && player.y === 0) player.velocityY = 4.3;
       player.velocityY -= 12 * dt; player.y = Math.max(0, player.y + player.velocityY * dt);
       if (player.y === 0) player.velocityY = 0;
-      if (input.reload) startReload(state);
-      if ((weapon.automatic ? input.fire || input.firePressed : input.firePressed) && tryFire(state)) this.shoot(room, player, weapon);
+      if (input.lifeId === player.lifeId && input.reload && player.equipment.heldItem === 'gun') startReload(state);
+      if (input.lifeId === player.lifeId && player.equipment.attackLockRemaining === 0) {
+        if (player.equipment.heldItem === 'knife') {
+          if ((input.fire || input.firePressed) && beginMelee(player.equipment).ok) {
+            this.event(room, { type: 'melee', playerId: player.id });
+            const targetId = meleeTarget(this.actors(room).find(a => a.id === player.id), this.actors(room), { solids: room.physics.solids, isEnemy: (a, b) => areEnemies(room.modeState, a, b) });
+            if (targetId) this.damage(room, player.id, room.players.get(targetId), GEAR_BALANCE.knife.damage);
+          }
+        } else {
+          if ((weapon.automatic ? input.fire || input.firePressed : input.firePressed) && tryFire(state)) this.shoot(room, player, weapon);
+        }
+      }
       input.firePressed = false; input.jump = false; input.reload = false;
     }
-    const actors = [...room.players.values()].map(player => ({ id: player.id, teamId: player.teamId, x: player.x, y: player.y, z: player.z, alive: player.health > 0, protectedRemaining: player.protectedRemaining, lifeId: player.lifeId }));
+    if (room.phase !== 'playing') return;
+    const effects = stepGearCombat(room.gearCombatState, this.actors(room), dt, { solids: room.physics.solids, isEnemy: (a, b) => areEnemies(room.modeState, a, b) });
+    for (const event of effects.events) this.event(room, event);
+    for (const intent of effects.damage) {
+      this.damage(room, intent.sourceId, room.players.get(intent.targetId), intent.amount);
+      if (room.phase !== 'playing') return;
+    }
+    for (const intent of effects.flashes) {
+      const target = room.players.get(intent.targetId);
+      if (target?.health > 0 && target.protectedRemaining === 0) target.flashRemaining = Math.min(3, Math.max(target.flashRemaining, intent.duration));
+    }
+    const actors = this.actors(room);
+    for (const event of collectLoot(room.lootState, actors, { solids: room.physics.solids })) this.event(room, event);
     for (const event of tickMode(room.modeState, dt, actors)) this.event(room, event);
     this.syncMode(room);
   }
@@ -257,7 +347,10 @@ export class RoomManager {
     const state = room.modeState;
     if (state.ended && room.phase !== 'ended') room.winnerName = state.winnerId === null ? null : room.players.get(state.winnerId)?.name ?? null;
     room.timeLeft = state.timeLeft; room.winnerId = state.winnerId; room.winnerTeamId = state.winnerTeamId;
-    if (state.ended) room.phase = 'ended';
+    if (state.ended) {
+      room.phase = 'ended';
+      for (const player of room.players.values()) { player.input = emptyInput(); player.inputAt = -Infinity; }
+    }
     for (const player of room.players.values()) {
       const stats = state.stats[player.id]; player.kills = stats.kills; player.deaths = stats.deaths;
     }
@@ -266,11 +359,11 @@ export class RoomManager {
   snapshot(room, consumeEvents = true) {
     const events = structuredClone(room.events); if (consumeEvents) room.events = [];
     const { mapId, modeId, teamScores, flags, winnerTeamId } = getModeSnapshot(room.modeState);
-    return { code: room.code, hostId: room.hostId, phase: room.phase, timeLeft: room.timeLeft, winnerId: room.winnerId, winnerName: room.winnerName, mapId, modeId, teamScores, winnerTeamId, flags, events,
+    return { code: room.code, hostId: room.hostId, phase: room.phase, timeLeft: room.timeLeft, winnerId: room.winnerId, winnerName: room.winnerName, mapId, modeId, teamScores, winnerTeamId, flags, events, gear: { loot: lootDTO(room.lootState), ...gearCombatDTO(room.gearCombatState) },
       players: [...room.players.values()].map(player => {
         const state = player.inventory.get(player.weaponId);
-        const { id, name, x, z, y, yaw, pitch, health, kills, deaths, weaponId, respawnRemaining, protectedRemaining, teamId, skinId, pendingSkinId } = player;
-        return { id, name, x, z, y, yaw, pitch, health, kills, deaths, weaponId, teamId, skinId, pendingSkinId, ammo: state.ammo, reserve: state.reserve, reloadRemaining: state.reloadRemaining, respawnRemaining, protectedRemaining };
+        const { id, name, x, z, y, yaw, pitch, health, kills, deaths, weaponId, respawnRemaining, protectedRemaining, teamId, skinId, pendingSkinId, lifeId, flashRemaining } = player;
+        return { id, name, x, z, y, yaw, pitch, health, kills, deaths, weaponId, teamId, skinId, pendingSkinId, lifeId, flashRemaining, heldItem: player.equipment.heldItem, ammo: state?.ammo ?? 0, reserve: state?.reserve ?? 0, reloadRemaining: state?.reloadRemaining ?? 0, respawnRemaining, protectedRemaining };
       }),
     };
   }

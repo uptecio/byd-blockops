@@ -12,7 +12,7 @@ function pair(mapId = 'courtyard', modeId = 'ffa', weaponId = 'awp') {
   return { manager, room, a: room.players.get('a'), b: room.players.get('b') };
 }
 function put(player, x, z) { Object.assign(player, { x, z, y: 0, protectedRemaining: 0 }); }
-function fire(manager) { manager.input('a', { ...controls, firePressed: true }); manager.tick(1 / 30); }
+function fire(manager) { manager.input('a', {lifeId: manager.requirePlayer('a').player.lifeId,  ...controls, firePressed: true }); manager.tick(1 / 30); }
 
 test('FFA winner identity is frozen for late joiners after departure and reset on new configuration', () => {
   const { manager, room, a, b } = pair();
@@ -46,6 +46,8 @@ for (const map of MAPS) for (const modeId of ['ffa', 'tdm', 'ctf']) {
     assert.deepEqual(state.players.map(player => player.teamId), modeId === 'ffa' ? [null, null] : ['red', 'blue']);
     assert.deepEqual(state.teamScores, { red: 0, blue: 0 });
     assert.equal(state.flags === null, modeId !== 'ctf');
+    assert.equal(state.gear.loot.length, 16);
+    assert.deepEqual(state.gear.projectiles, []); assert.deepEqual(state.gear.smokes, []);
     for (const player of state.players) {
       const spawns = modeId === 'ffa' ? [map.playerSpawn, ...map.spawns] : map.teamSpawns[player.teamId];
       assert.ok(spawns.some(spawn => spawn.x === player.x && spawn.z === player.z));
@@ -124,8 +126,8 @@ test('skin changes are immediate in lobby, pending during play, and applied on r
   manager.start('a'); manager.setSkin('a', 'shadow-ninja');
   let player = manager.snapshot(room).players[0];
   assert.equal(player.skinId, 'desert-ops'); assert.equal(player.pendingSkinId, 'shadow-ninja');
-  put(a, 0, -5); put(b, 0, 5); manager.equip('b', 'awp');
-  manager.input('b', { ...controls, firePressed: true }); manager.tick(1 / 30); manager.tick(2.6);
+  put(a, 0, -5); put(b, 0, 5); manager.equipmentAction('b', {type:'equipment-action',seq:1,lifeId:b.lifeId,kind:'equip-gun',weaponId:'awp',source:'armory'});
+  manager.input('b', {lifeId: manager.requirePlayer('b').player.lifeId,  ...controls, firePressed: true }); manager.tick(1 / 30); manager.tick(2.6);
   assert.equal(a.skinId, 'shadow-ninja'); assert.equal(a.pendingSkinId, null);
   manager.setSkin('a', 'arctic-scout'); manager.tick(180); manager.start('a');
   assert.equal(a.skinId, 'arctic-scout'); assert.equal(a.pendingSkinId, null);
@@ -141,7 +143,7 @@ test('team rays ignore teammates and kills count toward the 30 team target', () 
   assert.deepEqual(manager.snapshot(room).teamScores, { red: 1, blue: 0 });
   for (let kill = 1; kill < 30; kill++) {
     manager.tick(2.6);
-    if (a.inventory.get('awp').ammo === 0) { manager.input('a', { ...controls, reload: true }); manager.tick(3.1); }
+    if (a.inventory.get('awp').ammo === 0) { manager.input('a', {lifeId: manager.requirePlayer('a').player.lifeId,  ...controls, reload: true }); manager.tick(3.1); }
     put(a, 0, 5); put(teammate, 0, 0); put(b, 0, -5); fire(manager);
   }
   const state = manager.snapshot(room);
@@ -151,12 +153,12 @@ test('team rays ignore teammates and kills count toward the 30 team target', () 
 
 test('lobby flags cannot be stolen and authoritative flag events cover pickup death return capture', () => {
   const { manager, room, a, b } = pair('courtyard', 'ctf');
-  put(a, 0, -18); manager.input('a', { ...controls }); manager.tick(3);
+  put(a, 0, -18); manager.input('a', {lifeId: manager.requirePlayer('a').player.lifeId,  ...controls }); manager.tick(3);
   assert.equal(manager.snapshot(room).flags.blue.status, 'home');
   manager.start('a'); put(a, 0, -18); put(b, 0, -12);
   manager.tick(1 / 30);
   assert.equal(manager.snapshot(room, false).flags.blue.carrierId, 'a');
-  manager.equip('b', 'awp'); manager.input('b', { ...controls, firePressed: true }); manager.tick(1 / 30);
+  manager.equipmentAction('b', {type:'equipment-action',seq:1,lifeId:b.lifeId,kind:'equip-gun',weaponId:'awp',source:'armory'}); manager.input('b', {lifeId: manager.requirePlayer('b').player.lifeId,  ...controls, firePressed: true }); manager.tick(1 / 30);
   let state = manager.snapshot(room);
   assert.equal(state.flags.blue.status, 'dropped');
   assert.equal(state.flags.blue.returnRemaining <= 15, true);
@@ -205,7 +207,7 @@ for (const map of MAPS) test(`${map.id} uses its walls for collisions and hitsca
   const front = solid.z + solid.d / 2 + 1;
   put(a, solid.x, front); put(b, solid.x, solid.z - solid.d / 2 - 1);
   fire(manager); assert.equal(b.health, 100);
-  for (let step = 0; step < 20; step++) { manager.input('a', { ...controls, y: 1 }); manager.tick(0.1); }
+  for (let step = 0; step < 20; step++) { manager.input('a', {lifeId: manager.requirePlayer('a').player.lifeId,  ...controls, y: 1 }); manager.tick(0.1); }
   assert.ok(a.z >= solid.z + solid.d / 2 + 0.4 - 1e-8);
   manager.tick(1.5); put(a, 0, 20); put(b, 0, 17); fire(manager);
   assert.equal(b.health, 0); assert.equal(manager.snapshot(room).players[0].kills, 1);
