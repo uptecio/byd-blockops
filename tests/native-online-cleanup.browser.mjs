@@ -34,7 +34,7 @@ try {
       if (packet.room?.code === code) observed = packet.room;
     };
     await new Promise((resolve, reject) => { peer.onopen = resolve; peer.onerror = reject; });
-    peer.send(JSON.stringify({ type: 'join', protocol: 2, code, name: 'CleanupObserver', weaponId: 'm4a1', skinId: 'robo-unit' }));
+    peer.send(JSON.stringify({ type: 'join', protocol: 3, code, name: 'CleanupObserver', weaponId: 'm4a1', skinId: 'robo-unit' }));
     await until(() => observed?.players.length === 2);
     if (openConfirmation) {
       await page.locator('#leave-room').click();

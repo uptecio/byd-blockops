@@ -5,15 +5,15 @@ import { startServer } from '../server/server.mjs';
 import { build } from 'esbuild';
 import { WebSocketServer } from 'ws';
 
-const server = await startServer({ port: 4187, distDir: process.env.DIST_DIR || 'dist' });
+const server = await startServer({ port: 0, distDir: process.env.DIST_DIR || 'dist' });
 const pendingServer = new WebSocketServer({ host: '127.0.0.1', port: 0 });
 await new Promise(resolve => pendingServer.once('listening', resolve));
 const browser = await chromium.launch({ headless: true, args: ['--no-sandbox', '--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader'] });
 const page = await browser.newPage({ viewport: { width: 1200, height: 700 }, hasTouch: true });
 const errors = [];
 page.on('pageerror', error => errors.push(error.message));
-const base = 'http://127.0.0.1:4187';
-const artifacts = '.superpowers/sdd/2026-10-02-home-maps-skins-modes/screenshots';
+const base = `http://127.0.0.1:${server.port}`;
+const artifacts = 'artifacts/loot-review/home';
 try {
   // Exercise the real result renderer against public snapshots independently
   // of networking, including a frozen result whose winner left the room.

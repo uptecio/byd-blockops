@@ -10,9 +10,9 @@ let simulationRate = 1;
 const nativeInterval = globalThis.setInterval;
 globalThis.setInterval = (callback, delay, ...args) => nativeInterval(() => { for (let i = 0; i < (delay === 1000 / 30 ? simulationRate : 1); i++) callback(...args); }, delay);
 let server;
-try { server = hosted ? null : await startServer({ port: 4186, distDir: process.env.DIST_DIR || 'dist' }); }
+try { server = hosted ? null : await startServer({ port: 0, distDir: process.env.DIST_DIR || 'dist' }); }
 finally { globalThis.setInterval = nativeInterval; }
-const base = hosted || 'http://127.0.0.1:4186';
+const base = hosted || `http://127.0.0.1:${server.port}`;
 const browser = await chromium.launch({ headless: true, args: ['--no-sandbox', '--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader'] });
 const contexts = await Promise.all([browser.newContext({ viewport: { width: 1200, height: 700 } }), browser.newContext({ viewport: { width: 1200, height: 700 } })]);
 const pages = await Promise.all(contexts.map(context => context.newPage()));
@@ -29,12 +29,15 @@ await Promise.all(pages.map(page => page.addInitScript(() => {
     }
   };
 })));
-const errors = [], snapshots = [null, null];
+const errors = [], snapshots = [null, null], sent = [[], []];
 pages.forEach((page, index) => {
   page.on('pageerror', error => errors.push(error.message));
-  page.on('websocket', socket => socket.on('framereceived', frame => {
-    try { const message = JSON.parse(String(frame.payload)); if (message.room) snapshots[index] = message.room; } catch {}
-  }));
+  page.on('websocket', socket => {
+    socket.on('framesent', frame => sent[index].push(JSON.parse(String(frame.payload))));
+    socket.on('framereceived', frame => {
+      try { const message = JSON.parse(String(frame.payload)); if (message.room) snapshots[index] = message.room; } catch {}
+    });
+  });
 });
 const waitFor = async (predicate, message, timeout = 12000) => {
   const until = Date.now() + timeout;
@@ -56,6 +59,46 @@ const roomAfterInputBarrier = page => page.evaluate(() => new Promise((resolve, 
   socket.send(JSON.stringify({ type: 'ping', at: marker }));
 }));
 try {
+  // A regular remote start retains the guest's intentional menu; a native
+  // backgrounded start closes the obsolete overlay into explicit pause.
+  for (const scenario of ['ordinary', 'background', 'home-confirmation']) {
+    const suspended = scenario === 'background', homeConfirmation = scenario === 'home-confirmation';
+    snapshots.fill(null);
+    for (let i = 0; i < 2; i++) {
+      await pages[i].goto(base); await pages[i].locator('#home-online').click();
+      await pages[i].locator('.server-settings').evaluate(element => { element.open = true; });
+      await pages[i].locator('#server-address').fill(base);
+    }
+    await pages[0].locator('#create-room').click(); await pages[0].locator('#room-lobby:not([hidden])').waitFor();
+    const menuCode = await pages[0].locator('#room-code').textContent();
+    await pages[1].locator('#room-code-input').fill(menuCode); await pages[1].locator('#join-room').click();
+    await waitFor(() => snapshots.every(room => room?.code === menuCode && room.players.length === 2), 'menu-start peers join');
+    if (homeConfirmation) await pages[1].locator('#online-back').click();
+    else { await pages[1].locator('#room-loadout').click(); await pages[1].locator('#armory .settings-open').click(); }
+    if (suspended) await pages[1].evaluate(() => window.pauseGame());
+    await pages[0].locator('#start-online').click();
+    await waitFor(() => snapshots.every(room => room?.code === menuCode && room.phase === 'playing'), 'menu-start peers receive new round');
+    assert.equal(await pages[1].locator('body').getAttribute('data-mode'), homeConfirmation ? 'playing' : suspended ? 'paused' : 'armory', `remote start ${scenario} resolves the correct screen`);
+    assert.equal(await pages[1].locator('#settings-screen').isHidden(), suspended || homeConfirmation, 'ordinary open settings remain while obsolete overlays close');
+    if (homeConfirmation) {
+      assert.equal(await pages[1].locator('#confirm-home-screen').isHidden(), true, 'remote start invalidates old Home confirmation');
+      await pages[1].evaluate(() => { document.querySelector('#cancel-home').click(); document.querySelector('#confirm-home').click(); });
+      assert.equal(await pages[1].locator('body').getAttribute('data-mode'), 'playing', 'stale Home actions cannot leave or restore the previous lobby');
+    } else {
+      const own = { ...snapshots[1].players.find(player => player.id !== snapshots[1].hostId) }, clock = snapshots[1].timeLeft;
+      await pages[1].keyboard.down('KeyW'); await pages[1].keyboard.down('KeyF');
+      try { await waitFor(() => snapshots[1].timeLeft < clock - .4, 'shared clock advances with guest menu suspended'); }
+      finally { await pages[1].keyboard.up('KeyW'); await pages[1].keyboard.up('KeyF'); }
+      const still = snapshots[1].players.find(player => player.id === own.id);
+      assert.equal(still.ammo, own.ammo); assert.equal(still.x, own.x); assert.equal(still.z, own.z);
+      if (suspended) await pages[1].locator('#resume-button').click();
+      else { await pages[1].locator('#settings-done').click(); await pages[1].locator('#play-button').click(); }
+    }
+    for (const page of pages) { await page.locator('#home-button').click(); await page.locator('#confirm-home').click(); await page.waitForSelector('body[data-mode="home"]'); }
+    console.log(`PASS remote start ${homeConfirmation ? 'invalidates stale Home confirmation' : suspended ? 'background suspension closes overlays and waits for Resume' : 'ordinary menu remains open and neutral'}`);
+  }
+  if (process.argv.includes('--menus')) { assert.deepEqual(errors, []); console.log('Remote-start menu regressions passed.'); }
+  else {
   for (let i = 0; i < 2; i++) {
     const page = pages[i];
     await page.goto(base);
@@ -81,7 +124,8 @@ try {
   await pages[0].locator('#room-loadout').click();
   await pages[0].locator('[data-weapon="ak47"]').click();
   await pages[0].locator('#play-button').click();
-  await waitFor(() => snapshots[0].players.find(player => player.name === 'Host').weaponId === 'ak47', 'lobby loadout changes reach server before starting');
+  await waitFor(() => sent[0].findLast(packet => packet.type === 'loadout')?.weaponId === 'ak47', 'lobby selection sends the normal future-loadout request');
+  await roomAfterInputBarrier(pages[0]);
   await pages[1].locator('#room-code-input').fill(code);
   await pages[1].locator('#join-room').click();
   await waitFor(async () => (await pages[0].locator('#room-roster .roster-player').count()) === 2, 'two real players reach lobby');
@@ -104,8 +148,8 @@ try {
   await pages[0].locator('#room-mode').selectOption('ffa');
   await waitFor(() => snapshots.every(room => room.mapId === 'courtyard' && room.modeId === 'ffa'), 'host restores map and mode before combat');
   assert.equal(await pages[0].evaluate(() => JSON.parse(localStorage.getItem('block-ops-v1')).selection.mapId), 'courtyard', 'host room map persists locally');
-  await mkdir('artifacts', { recursive: true });
-  await pages[0].screenshot({ path: 'artifacts/online-lobby.png' });
+  await mkdir('artifacts/loot-review', { recursive: true });
+  await pages[0].screenshot({ path: 'artifacts/loot-review/online-lobby.png' });
   await pages[1].locator('#room-loadout').click();
   await pages[1].locator('#armory .settings-open').click();
   assert.equal(await pages[1].locator('#settings-screen').isVisible(), true);
@@ -115,6 +159,7 @@ try {
   await pages[0].locator('#start-online').click();
   await pages[0].waitForSelector('body[data-mode="playing"]');
   await waitFor(() => snapshots.every(snapshot => snapshot && snapshot.phase === 'playing' && snapshot.players.length === 2), 'both clients share the running match');
+  assert.equal(snapshots[0].players.find(player => player.name === 'Host').weaponId, 'ak47', 'ordered lobby loadout becomes the original gun when the round starts');
   assert.equal(await pages[1].locator('body').getAttribute('data-mode'), 'paused', 'native background suspension survives remote start');
   assert.equal(await pages[1].locator('#settings-screen').isHidden(), true, 'host start closes obsolete guest settings without enabling controls');
   // Android onResume only resumes rendering; it never calls game Resume.
@@ -129,8 +174,7 @@ try {
   assert.equal(await pages[1].locator('body').getAttribute('data-mode'), 'paused', 'foregrounding does not implicitly resume the remotely started arena');
   assert.ok(Math.hypot(foregroundGuest.x - suspendedGuest.x, foregroundGuest.z - suspendedGuest.z) < .05, 'background-started guest stays motionless until explicit Resume');
   assert.equal(foregroundGuest.ammo, suspendedGuest.ammo, 'background-started guest cannot fire before explicit Resume');
-  await mkdir('.superpowers/sdd/2026-10-02-home-maps-skins-modes/screenshots', { recursive: true });
-  await pages[1].screenshot({ path: '.superpowers/sdd/2026-10-02-home-maps-skins-modes/screenshots/background-remote-paused.png' });
+  await pages[1].screenshot({ path: 'artifacts/loot-review/background-remote-paused.png' });
   await pages[1].locator('#resume-button').click();
   await pages[1].waitForSelector('body[data-mode="playing"]');
   await pages[1].keyboard.press('KeyF');
@@ -191,7 +235,7 @@ try {
   await pages[0].locator('[data-class="sniper"]').click(); await pages[0].locator('[data-weapon="awp"]').click();
   await pages[0].locator('#play-button').click();
   await waitFor(() => snapshots[1].players.find(player => player.name === 'Host').weaponId === 'awp', 'loadout replicates to other player');
-  await pages[0].screenshot({ path: 'artifacts/online-gameplay.png' });
+  await pages[0].screenshot({ path: 'artifacts/loot-review/online-gameplay.png' });
   await pages[0].locator('#loadout-button').click(); await pages[0].locator('#online-button').click();
   await pages[0].locator('#room-skin').selectOption('space-guard');
   await waitFor(() => snapshots.every(room => {
@@ -203,7 +247,9 @@ try {
   if (server) {
     await pages[1].locator('#pause-button').click();
     await pages[1].locator('#pause-screen .settings-open').click();
-    simulationRate = 240;
+    // Limit acceleration so a single synchronous timer turn does not emit
+    // enough larger protocol-3 snapshots to manufacture socket backpressure.
+    simulationRate = 30;
     for (const page of pages) await page.waitForSelector('body[data-mode="results"]');
     simulationRate = 1;
     assert.equal(await pages[1].locator('#settings-screen').isHidden(), true, 'remote end closes settings');
@@ -240,7 +286,7 @@ try {
     await pages[0].locator('#pause-button').click();
     await pages[0].locator('#pause-screen .settings-open').click();
     await pages[1].locator('#home-button').click();
-    simulationRate = 240;
+    simulationRate = 30;
     for (const page of pages) await page.waitForSelector('body[data-mode="results"]');
     simulationRate = 1;
     assert.equal(await pages[0].locator('#settings-screen').isHidden(), true);
@@ -255,8 +301,19 @@ try {
     await pages[1].locator('#room-loadout').click();
     await pages[1].locator('#armory .settings-open').click();
     await pages[0].locator('#start-online').click();
-    for (const page of pages) await page.waitForSelector('body[data-mode="playing"]');
-    assert.equal(await pages[1].locator('#settings-screen').isHidden(), true, 'ordinary local settings do not latch background suspension on remote start');
+    await pages[0].waitForSelector('body[data-mode="playing"]');
+    await waitFor(() => snapshots.every(room => room.phase === 'playing' && room.modeId === 'ctf'), 'both peers receive selected CTF round');
+    assert.equal(await pages[1].locator('body').getAttribute('data-mode'), 'armory', 'ordinary remote start retains the intentional Armory menu');
+    assert.equal(await pages[1].locator('#settings-screen').isVisible(), true, 'ordinary remote start retains open local settings');
+    const menuGuest = { ...snapshots[1].players.find(player => player.name === 'Friend') }, menuTime = snapshots[1].timeLeft;
+    await pages[1].keyboard.down('KeyW'); await pages[1].keyboard.down('KeyF');
+    try { await waitFor(() => snapshots[1].timeLeft < menuTime - .4, 'CTF clock continues while ordinary guest menu remains neutral'); }
+    finally { await pages[1].keyboard.up('KeyW'); await pages[1].keyboard.up('KeyF'); }
+    const neutralGuest = snapshots[1].players.find(player => player.name === 'Friend');
+    assert.equal(neutralGuest.x, menuGuest.x); assert.equal(neutralGuest.z, menuGuest.z); assert.equal(neutralGuest.ammo, menuGuest.ammo);
+    await pages[1].locator('#settings-done').click(); await pages[1].locator('#play-button').click();
+    await pages[1].waitForSelector('body[data-mode="playing"]');
+    assert.equal(await pages[1].locator('#settings-screen').isHidden(), true, 'explicit foreground Return works without a background latch');
     assert.match(await pages[1].locator('#objective-status').textContent(), /RED FLAG: HOME.*BLUE FLAG: HOME/);
     await pages[0].setViewportSize({ width: 960, height: 540 });
     for (const id of ['home-button', 'pause-button', 'loadout-button', 'objective-status', 'joystick', 'fire-button', 'ammo-panel']) {
@@ -264,8 +321,7 @@ try {
       const box = await locator.boundingBox();
       assert.ok(box && box.x >= 0 && box.y >= 0 && box.x + box.width <= 960 && box.y + box.height <= 540, `${id} fits compact CTF HUD`);
     }
-    await mkdir('.superpowers/sdd/2026-10-02-home-maps-skins-modes/screenshots', { recursive: true });
-    await pages[0].screenshot({ path: '.superpowers/sdd/2026-10-02-home-maps-skins-modes/screenshots/online-ctf-960.png' });
+    await pages[0].screenshot({ path: 'artifacts/loot-review/online-ctf-960.png' });
     // Walk both real clients through the open central chamber, then inspect
     // nearby peer names and badges rather than relying on distant spawn views.
     const ownPlayer = index => snapshots[index].players.find(player => player.name === (index === 0 ? 'Host' : 'Friend'));
@@ -291,8 +347,8 @@ try {
     finally { await pages[0].keyboard.up('KeyW'); }
     await pages[0].waitForTimeout(200);
     assert.ok(Math.hypot(ownPlayer(0).x - ownPlayer(1).x, ownPlayer(0).z - ownPlayer(1).z) < 6, 'peers are close enough for readable labels and team badges');
-    await pages[0].screenshot({ path: '.superpowers/sdd/2026-10-02-home-maps-skins-modes/screenshots/online-peer-blue-960.png' });
-    await pages[1].screenshot({ path: '.superpowers/sdd/2026-10-02-home-maps-skins-modes/screenshots/online-peer-red-1200.png' });
+    await pages[0].screenshot({ path: 'artifacts/loot-review/online-peer-blue-960.png' });
+    await pages[1].screenshot({ path: 'artifacts/loot-review/online-peer-red-1200.png' });
   }
   await pages[0].locator('#home-button').click();
   await pages[0].locator('#confirm-home').click();
@@ -321,4 +377,5 @@ try {
   }
   assert.deepEqual(errors, []);
   console.log(`Multiplayer browser passed: two real clients, movement/shots/ammo, authoritative settings/skins, Home cancel/confirm/host transfer, live clock, native background remote-start suspension until explicit Resume, remote overlay invalidation, departed winner, team/flag HUD and peer screenshots. ${base}`);
+  }
 } finally { await browser.close(); if (server) await server.close(); }

@@ -1,15 +1,8 @@
 import { chromium } from 'playwright';
-import { spawn } from 'node:child_process';
+import { startServer } from '../server/server.mjs';
 import assert from 'node:assert/strict';
 
-const server = spawn(process.execPath, ['scripts/serve.mjs'], {
-  env: { ...process.env, PORT: '4180' }, stdio: ['ignore', 'pipe', 'pipe'],
-});
-await new Promise((resolve, reject) => {
-  server.stdout.once('data', resolve);
-  server.once('error', reject);
-  server.once('exit', code => reject(new Error(`Test server exited: ${code}`)));
-});
+const server = await startServer({ port: 0, distDir: process.env.DIST_DIR || 'dist' });
 const browser = await chromium.launch({ headless: true, args: ['--no-sandbox', '--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader'] });
 const page = await browser.newPage({ viewport: { width: 960, height: 540 }, hasTouch: true });
 const errors = [];
@@ -46,7 +39,7 @@ const equip = async (classId, weaponId) => {
 };
 
 try {
-  await page.goto('http://127.0.0.1:4180');
+  await page.goto(`http://127.0.0.1:${server.port}`);
   await page.locator('#home-armory').click();
   await page.locator('#play-button').waitFor();
   await page.locator('#armory .settings-open').click();
@@ -64,6 +57,15 @@ try {
   await page.locator('#settings-done').click();
   await page.locator('#play-button').click();
   await page.waitForSelector('body[data-mode="playing"]');
+
+  // Keep the original-gun restriction separate from ammo conservation:
+  // M4A1 is the original; AK-47 and AWP are non-starting owned guns.
+  await equip('assault', 'ak47');
+  await page.locator('#loadout-button').click();
+  await page.locator('[data-class="assault"]').click();
+  await page.waitForFunction(() => document.querySelector('[data-weapon="m4a1"]').getAttribute('aria-disabled') === 'true');
+  assert.match(await page.locator('[data-weapon="m4a1"]').textContent(), /Find this gun as loot/, 'replacing the starting gun requires loot before returning to it');
+  await page.locator('#armory-cancel').click(); await page.locator('#resume-button').click();
 
   // These observation listeners inspect actual browser pointer delivery; they
   // do not replace application listeners or synthesize application events.
@@ -119,7 +121,7 @@ try {
   await waitRoundSeconds(3);
   assert.equal(await ammo(), 3, 'holding semi-automatic fire does not shoot again after cooldown');
   await touch('touchEnd');
-  await equip('assault', 'm4a1');
+  await equip('assault', 'ak47');
   assert.equal(await ammo(), beforeSwap, 'switching back restores depleted magazine');
   console.log('PASS quick semi-auto taps, held semi-auto, and preserved weapon ammo');
 
@@ -172,7 +174,7 @@ try {
   await page.waitForSelector('body[data-mode="home"]');
   await page.locator('#home-solo').click();
   await page.waitForSelector('body[data-mode="playing"]');
-  assert.equal(await ammo(), 30, 'new round starts replenished');
+  assert.equal(await ammo(), 30, 'new round restores the original M4A1 magazine');
   await stableAmmo('new solo round does not revive held fire');
   assert.equal(await page.locator('#joystick-knob').evaluate(element => element.style.transform), '', 'new round keeps old joystick neutral');
   await touch('touchEnd');
@@ -183,5 +185,5 @@ try {
 } finally {
   await session.detach();
   await browser.close();
-  server.kill();
+  await server.close();
 }
