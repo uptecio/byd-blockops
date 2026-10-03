@@ -25,7 +25,8 @@ test('pointer cancellation and backgrounding clear every combat edge and held po
   const { input, buttons, document, restore } = createInputFixture(); t.after(restore); input.setEnabled(true);
   for (const id of ['fire-button', 'throw-button', 'knife-button', 'grenade-type-button']) buttons.get(id)?.dispatchEvent(event('pointerdown', { pointerId: 7 }));
   buttons.get('fire-button').dispatchEvent(event('pointercancel', { pointerId: 7 }));
-  for (const key of ['fire', 'firePressed', 'throwPressed', 'knifePressed', 'grenadePickerPressed']) assert.equal(input.read()[key], false, key);
+  const read = input.read();
+  for (const key of ['fire', 'firePressed', 'throwPressed', 'knifePressed', 'grenadePickerPressed']) assert.equal(read[key], false, key);
   buttons.get('throw-button')?.dispatchEvent(event('pointerdown', { pointerId: 8 }));
   document.hidden = true; document.dispatchEvent(event('visibilitychange')); assert.equal(input.read().throwPressed, false);
 });

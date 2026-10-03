@@ -18,13 +18,15 @@ export class ObjectiveView {
     }
     scene.add(this.group);
   }
-  update({ flags, actors, viewerId }) {
+  update({ flags, actors, viewerId, actorVisibility }) {
     this.group.clear();
     if (!flags) return;
     for (const teamId of ['red', 'blue']) {
       const state = flags[teamId]; if (!state) continue;
       const carrier = state.status === 'carried' ? actors.find(actor => actor.id === state.carrierId) : null;
       const flag = this.flags[teamId];
+      // Share the current avatar decision; reset home/dropped/local flags too.
+      flag.visible = !carrier || carrier.id === viewerId || actorVisibility?.get(carrier.id) !== false;
       flag.position.set(carrier?.x ?? state.x, carrier?.y ?? 0, carrier?.z ?? state.z);
       // First-person carrier gets a lower pole beside the camera, not a HUD asset.
       flag.rotation.y = carrier?.id === viewerId ? Math.PI : 0;

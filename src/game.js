@@ -143,8 +143,7 @@ export class ArenaGame {
     this.lootState = createLootState({ mapId: this.world.definition.id, seed: Math.floor(Math.random() * 4294967296),
       startingGunIds: [this.player.equipment.startingGunId, ...this.bots.map(bot => bot.equipment.startingGunId)] });
     this.simulationTime = 0; this.gearEvents = []; this.pickupEvents = []; this.gearEventId = 0;
-    this.refreshGearView();
-    this.refreshMatchView(); this.input.clear(); this.resume();
+    this.refreshMatchView(); this.refreshGearView(); this.input.clear(); this.resume();
   }
   spawnPoints(teamId) {
     const map = this.world.definition;
@@ -179,7 +178,6 @@ export class ArenaGame {
       kills: this.modeState.stats[actor.id].kills, deaths: this.modeState.stats[actor.id].deaths, skinId: actor.skinId })) };
     const own = this.modeState.stats.local;
     Object.assign(this.match, { timeLeft: this.modeState.timeLeft, kills: own.kills, deaths: own.deaths, ended: this.modeState.ended });
-    this.objectives.update({ flags: this.matchView.flags, actors, viewerId: 'local' });
   }
   getMatchView() { return this.matchView; }
   finishRound(actors) {
@@ -341,9 +339,10 @@ export class ArenaGame {
         Object.assign(bot.model.userData, { weaponId: equipment.activeGunId, heldItem: equipment.heldItem });
       }
     }
-    this.gearView.update({ viewer: { id: this.player.id, teamId: this.player.teamId, x: this.player.x, y: this.player.jump, z: this.player.z, camera: this.camera },
+    const actorVisibility = this.gearView.update({ viewer: { id: this.player.id, teamId: this.player.teamId, x: this.player.x, y: this.player.jump, z: this.player.z, camera: this.camera },
       actors: this.bots.map(bot => ({ id: bot.id, teamId: bot.teamId, x: bot.model.position.x, y: bot.model.position.y, z: bot.model.position.z,
         alive: bot.health > 0 && bot.respawn <= 0, model: bot.model, label: bot.bar })), flashRemaining: this.player.flashRemaining, dt });
+    this.objectives.update({ flags: this.matchView?.flags, actors: this.getActors(), viewerId: this.player.id, actorVisibility });
   }
   actorEntity(id) { return id === this.player.id ? this.player : this.bots.find(bot => bot.id === id); }
   slash(actor, actors) {

@@ -114,9 +114,11 @@ export class GearView {
     // Actor/viewer y is feet height; an optional camera supplies the rendered eye.
     const eye = actor => ({ x: actor.x, y: actor.y + GEAR_BALANCE.eyeHeight, z: actor.z });
     const origin = viewer.camera?.position ?? eye(viewer);
+    const actorVisibility = new Map();
     for (const actor of actors) {
       const enemy = actor.id !== viewer.id && (viewer.teamId == null || actor.teamId !== viewer.teamId);
       const visible = actor.alive !== false && !(enemy && flashRemaining > 0) && !smokeBlocksSight(origin, eye(actor), this.smokeRecords);
+      actorVisibility.set(actor.id, visible);
       if (actor.model) actor.model.visible = visible;
       if (actor.label) actor.label.visible = visible;
     }
@@ -128,6 +130,7 @@ export class GearView {
       if (burst.userData.remaining <= 0) { burst.removeFromParent(); this.bursts.delete(id); }
       else burst.scale.setScalar(.3 + (1 - burst.userData.remaining / .35) * 2);
     }
+    return actorVisibility;
   }
   event(event) {
     if (this.disposed || event.id <= this.lastEventId) return;

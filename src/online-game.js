@@ -120,25 +120,25 @@ export class OnlineArena {
         this.onToast(messages[event.type]);
       }
     }
-    this.updateObjectives();
     this.updateGearView();
     if (room.phase !== 'playing' && !this.suspended) this.pause();
     if (room.phase === 'ended' && !initial && !this.endReported) { this.endReported = true; this.pause(); this.onEnd(game.match); }
   }
-  updateObjectives() {
+  updateObjectives(actorVisibility) {
     const game = this.game;
     const actors = this.room.phase === 'ended' ? [] : [
       { id: this.id, x: game.player.x, y: game.player.jump, z: game.player.z },
       ...[...this.remotes].map(([id, remote]) => ({ id, x: remote.model.position.x, y: remote.model.position.y, z: remote.model.position.z })),
     ];
-    game.objectives.update({ flags: game.matchView.flags, actors, viewerId: this.id });
+    game.objectives.update({ flags: game.matchView.flags, actors, viewerId: this.id, actorVisibility });
   }
   updateGearView(dt = 0) {
     const game = this.game;
-    game.gearView?.update({ viewer: { id: this.id, teamId: game.player.teamId, x: game.player.x, y: game.player.jump, z: game.player.z, camera: game.camera },
+    const actorVisibility = game.gearView?.update({ viewer: { id: this.id, teamId: game.player.teamId, x: game.player.x, y: game.player.jump, z: game.player.z, camera: game.camera },
       actors: [...this.remotes.values()].map(remote => ({ ...remote.player, x: remote.model.position.x, y: remote.model.position.y, z: remote.model.position.z,
         alive: remote.player.health > 0 && remote.player.respawnRemaining <= 0, model: remote.model, label: remote.model.getObjectByName('name-label') })),
       flashRemaining: game.player.flashRemaining, dt });
+    this.updateObjectives(actorVisibility);
   }
   getEquipmentView() { return equipmentDTO(this.game.player.equipment); }
   requestEquipment(action) {
@@ -195,7 +195,6 @@ export class OnlineArena {
       const target = remote.player;
       remote.model.position.lerp(new THREE.Vector3(target.x, target.y, target.z), smoothing);
     }
-    this.updateObjectives();
     game.recoil *= Math.exp(-dt * 13); game.placeCamera();
     // Online shots follow the transmitted pitch. Keep recoil on the weapon
     // model so the reticle and the server's authoritative ray stay aligned.
