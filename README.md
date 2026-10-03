@@ -139,27 +139,29 @@ Online native cleanup stops only `au.local.blockops` on the verified owned emula
 
 Third-party rendering library: [Three.js](https://threejs.org/), MIT licensed. Its copyright/license notice is bundled in `dist/THREE-LICENSE.txt` and the generated game JavaScript. Version 0.160.1 retains WebGL1 support for older head-unit WebViews.
 
-## Loot release candidate (not published)
+## Loot release v0.4.0
 
-The reviewed v0.4.0 candidate is `artifacts/block-ops-v0.4.0-debug.apk` (Android version code 4, unchanged package `au.local.blockops`, debug signing). Its SHA-256 is `8ad658d52640cd2b95bdfaf2e88c1ff9e9e785ce752f267b0cce46c6e331114e`. The latest/restored APK above remains v0.3.0 until coordinated rollout. Candidate verification and exact packaged browser assets are in `artifacts/loot-review/verification.json` and `artifacts/loot-review/apk-dist/`.
+The released v0.4.0 APK is `artifacts/block-ops-v0.4.0-debug.apk`, also promoted to `artifacts/block-ops-debug.apk` (Android version code 4, unchanged package `au.local.blockops`, debug signing). Both have SHA-256 `8ad658d52640cd2b95bdfaf2e88c1ff9e9e785ce752f267b0cce46c6e331114e`. The previous v0.3.0 APK remains in `artifacts/block-ops-restored-debug.apk` and the protected task backup. Release verification and exact packaged browser assets are in `artifacts/loot-review/verification.json` and `artifacts/loot-review/apk-dist/`.
 
-This candidate uses protocol 3. The current public origin remains the restored protocol-2 release, so the candidate's bundled default currently reports an update mismatch when creating/joining online rooms. A protocol-3 staging server can be selected through Online Friends → Server settings in the same APK. Browser/server/APK publication must happen together; this candidate has not been published.
+Play at [the current public browser link](https://emerald-arctic-thanks-settings.trycloudflare.com/). Browser, server and APK now use protocol 3. Refresh an already-open browser page or install the new APK; old protocol-2 clients receive an update-required message. The public files were verified byte-for-byte against the APK assets, two fresh browser peers verified shared pickups/throws, and the same installed APK passed the complete native online checks against its bundled public default. The temporary link requires this computer's server and Cloudflare tunnel to remain running.
+
+The live server uses reviewed source commit `6fa8b33` and an isolated source/assets snapshot at `artifacts/release-v0.4.0-6fa8b33-msdszr/`. Previous source/assets remain at `artifacts/loot-review/recovery-v0.3.0-nocomQ/`. Release occurred after a fresh empty-room check without forcing anyone out. Final verification: 523 unit tests, package checks, seven browser suites, all 24 map/mode configurations, CTF concealment/recovery, Playwright CLI checks, and native offline/online checks. Carried CTF flags now hide and recover with their concealed carriers.
 
 Loot is collected automatically on all maps and modes. Carried Guns lists collected guns; Armory can equip a different gun, after which the original starting gun must be recovered as loot. Duplicate owned guns are skipped. Switching preserves ammo; death drops the active gun and remaining grenades, clears collected equipment, and restores the starting gun on respawn. One knife and three grenades total can be carried. Use Knife/Q to toggle the knife, Throw/G to throw the selected grenade, and the grenade selector/T to choose a type.
 
 Eight gun pickups per map are spread across end lanes, outer flanks and central approaches. Close-range torso knife hits now follow the actual aim ray and show hit feedback; knife damage remains 50. Valid gun headshots deal exactly 10,000,000,000 damage per head hit in Solo and Online, with unchanged body damage, reach, cover and protection rules.
 
-Validate the candidate package and exact bundled assets with:
+Validate the release package and exact bundled assets with:
 
 ```sh
 ANDROID_APK_PATH=artifacts/block-ops-v0.4.0-debug.apk DIST_DIR=artifacts/loot-review/apk-dist npm run test:apk
 ```
 
-Native smoke requires an explicitly owned disposable AVD name and serial. Install the candidate on that emulator, then run the scripts sequentially; the staging override changes the real Server settings UI while retaining the candidate's bundled default:
+Native smoke requires an explicitly owned disposable AVD name and serial. Install the release on that emulator, then run the scripts sequentially against the bundled public default:
 
 ```sh
 ANDROID_TEST_SERIAL=emulator-5588 ANDROID_TEST_AVD=BlockOpsLootTask10 node android/tests/emulator-smoke.mjs
-ANDROID_TEST_SERIAL=emulator-5588 ANDROID_TEST_AVD=BlockOpsLootTask10 GAME_TEST_SERVER_URL=https://your-protocol-3-staging.example node android/tests/emulator-online-smoke.mjs
+ANDROID_TEST_SERIAL=emulator-5588 ANDROID_TEST_AVD=BlockOpsLootTask10 node android/tests/emulator-online-smoke.mjs
 ```
 
 Automated emulator results do not verify a physical BYD head unit. Physical BYD installation, appearance, touch and performance checks remain outstanding.
