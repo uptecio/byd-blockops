@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { mkdir, writeFile } from 'node:fs/promises';
-import { fixture, freshSolo, emptyControls, soloLoot, equip, walkSolo, onlinePair, moveTo, lookTo, until, selectGrenade } from './helpers/loot-browser.js';
+import { fixture, freshSolo, emptyControls, soloLoot, equip, walkSolo, onlinePair, moveTo, lookTo, lookAt, deadSnapshot, until, selectGrenade } from './helpers/loot-browser.js';
 
 const f = await fixture();
 try {
@@ -103,19 +103,20 @@ async function online(f) {
   await moveTo(page, peer, -2, 10);
   await until(() => peer.equipment.grenades.flash === 1, 'respawned authored flash can be collected again', 25000);
   await moveTo(page, peer, 0, 0); await moveTo(targetPage, target, 0, -1.3);
-  await lookTo(page, peer, 0); await lookTo(targetPage, target, Math.PI);
+  await lookAt(page, peer, target); await lookAt(targetPage, target, peer);
   await page.locator('#knife-button').click();
   await until(() => peer.player.heldItem === 'knife', 'knife selection reaches server');
   const targetHealth = target.player.health;
   await page.locator('#fire-button').click();
   await until(() => target.player.health === targetHealth - 50, 'real Slash applies exactly one 50 damage knife hit');
   const oldLife = peer.player.lifeId, activeGun = peer.equipment.activeGunId;
-  const drops = new Map();
+  await lookAt(targetPage, target, peer);
+  const drops = new Map(), dead = [];
   await targetPage.keyboard.down('KeyF');
   try {
     await until(() => {
-      for (const packet of f.packets[other]) for (const item of packet.room?.gear?.loot || []) if (item.source === 'drop') drops.set(item.id, item);
-      return peers.every(p => p.room.players.find(player => player.id === peer.id).health === 0);
+      for (let i = 0; i < peers.length; i++) dead[i] ||= deadSnapshot(f.packets[i], peer.id, oldLife);
+      return dead.every(Boolean) && dead.length === peers.length;
     }, 'opponent gun eliminates knife holder');
   } catch (error) {
     console.error('Death observation diagnostic:', JSON.stringify(peers.map((p, i) => ({
@@ -128,16 +129,34 @@ async function online(f) {
     throw error;
   } finally { await targetPage.keyboard.up('KeyF'); }
   for (const messages of f.packets) for (const packet of messages) for (const item of packet.room?.gear?.loot || []) if (item.source === 'drop') drops.set(item.id, item);
-  assert.deepEqual(peer.equipment.owned, [], 'dead collected inventory clears');
-  assert.equal(peer.equipment.knife, false);
+  const deaths = dead.map(packet => packet.room.players.find(player => player.id === peer.id));
+  for (const player of deaths) {
+    assert.equal(player.lifeId, oldLife, 'each independent stream captures the same old life');
+    assert.equal(player.health, 0); assert.equal(player.ammo, 0); assert.equal(player.reserve, 0);
+    assert.equal(player.heldItem, 'gun', 'public dead state no longer holds the collected knife');
+  }
+  const deadEnvelope = dead[index].equipment;
+  assert.equal(deadEnvelope.playerId, peer.id, 'private stock belongs only to holder');
+  assert.equal(deadEnvelope.lifeId, oldLife, 'dead stock binds the captured public death life');
+  assert.deepEqual(deadEnvelope.equipment.owned, [], 'captured dead collected inventory clears');
+  assert.equal(deadEnvelope.equipment.knife, false);
+  assert.deepEqual(deadEnvelope.equipment.grenades, { frag: 0, smoke: 0, flash: 0 });
+  for (const p of peers) {
+    assert.ok(p.events('shot').some(event => event.playerId === target.id), 'both peers observe actual opponent gunfire');
+    assert.ok(p.events('hit').some(event => event.playerId === target.id && event.targetId === peer.id), 'both peers observe actual opponent damage');
+  }
+  const kills = peers.map(p => p.events('kill').filter(event => event.playerId === target.id && event.targetId === peer.id));
+  assert.equal(kills[0].length, 1); assert.deepEqual(kills[0], kills[1], 'both peers agree on exactly one gun elimination');
   assert.equal([...drops.values()].filter(drop => drop.item.kind === 'gun' && drop.item.weaponId === activeGun).length, 1, 'knife holder drops remembered active gun exactly once');
   assert.equal([...drops.values()].filter(drop => drop.item.kind === 'grenade' && drop.item.grenadeType === 'flash').length, 1, 'death drops exactly one unspent grenade');
-  await until(() => peer.player.lifeId > oldLife && peer.player.health === 100, 'collected player respawns');
+  await until(() => peers.every(p => p.room.players.some(player => player.id === peer.id && player.lifeId > oldLife && player.health === 100)), 'both peers observe collected player respawn in a newer life');
+  assert.equal(peer.packet.equipment.playerId, peer.id);
+  assert.equal(peer.packet.equipment.lifeId, peer.player.lifeId, 'restored stock binds the newer public respawn life');
   assert.deepEqual(peer.equipment.owned.map(gun => gun.weaponId), ['m4a1']);
   assert.equal(peer.equipment.owned[0].ammo + peer.equipment.owned[0].reserve, 500);
   assert.deepEqual(peer.equipment.grenades, { frag: 0, smoke: 0, flash: 0 });
   assert.equal(peer.equipment.startingGunRemoved, false);
-  evidence.death = { drops: [...drops.values()], restored: peer.equipment };
+  evidence.death = { oldLife, publicDeaths: deaths, cleared: deadEnvelope, kills: kills[0], drops: [...drops.values()], restored: peer.equipment };
   await writeFile('artifacts/loot-review/peer-proof.json', JSON.stringify(evidence, null, 2));
   console.log('PASS independent peers: contested loot, three projectiles/effects, flash recovery, smoke expiry, 50 damage knife, one death drop/reset');
 }

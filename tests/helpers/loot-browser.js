@@ -155,6 +155,27 @@ export async function lookTo(page, peer, yaw, pitch = 0) {
   assert.ok(Math.abs(Math.atan2(Math.sin(yaw - peer.player.yaw), Math.cos(yaw - peer.player.yaw))) < .03, 'real aim drag reaches target yaw');
 }
 
+export function targetAim(from, to) {
+  const dx = to.x - from.x, dz = to.z - from.z;
+  return { yaw: Math.atan2(-dx, -dz), pitch: Math.atan2(to.y - from.y, Math.hypot(dx, dz)) };
+}
+
+export async function lookAt(page, peer, target) {
+  for (let attempt = 0; attempt < 3; attempt++) {
+    const desired = targetAim(peer.player, target.player);
+    await lookTo(page, peer, desired.yaw, desired.pitch);
+    const settled = targetAim(peer.player, target.player);
+    const yawError = Math.atan2(Math.sin(settled.yaw - peer.player.yaw), Math.cos(settled.yaw - peer.player.yaw));
+    if (Math.abs(yawError) < .015 && Math.abs(settled.pitch - peer.player.pitch) < .015) return;
+  }
+  assert.fail('real aim drag aligns with the opponent\'s observed settled coordinates');
+}
+
+export function deadSnapshot(messages, playerId, lifeId) {
+  return messages.find(packet => packet.room?.phase === 'playing'
+    && packet.room.players.some(player => player.id === playerId && player.lifeId === lifeId && player.health === 0));
+}
+
 export async function moveTo(page, peer, x, z) {
   await lookTo(page, peer, 0);
   for (const [axis, target, positive, negative] of [['x', x, 'KeyD', 'KeyA'], ['z', z, 'KeyS', 'KeyW']]) {
