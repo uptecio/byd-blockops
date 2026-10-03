@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { MAPS } from '../src/maps.js';
-import { canOccupy, hasLineOfSight } from '../src/collision.js';
+import { MAPS, getMap } from '../src/maps.js';
+import { canOccupy, hasLineOfSight, moveCircle } from '../src/collision.js';
 import { createNavigation } from '../src/navigation.js';
 import { createEquipment, equipGun, deathItems, pickupEquipment } from '../src/equipment.js';
 import { WEAPONS } from '../src/weapons.js';
@@ -237,6 +237,37 @@ test('drop spread stays grounded clear and on the origin side of cover', () => {
     assert.equal(record.y, 0);
     assert.ok(canOccupy(record.x, record.z, .42, solids));
     assert.ok(hasLineOfSight({ x: 0, z: 0 }, record, solids));
+  }
+});
+
+test('human and bot deaths at legal wall contact drop their gun and grenades exactly once', () => {
+  const map = getMap('courtyard');
+  // Literal radii match solo humans (.34), solo bots and online actors (.4).
+  for (const radius of [.34, .4]) for (const boundary of [false, true]) {
+    const state = create();
+    const start = boundary ? { x: 22 - radius - .02, z: 0 } : { x: -6.9 + radius + .02, z: 0 };
+    const position = moveCircle(start, boundary ? .02 : -.02, 0, radius, map.solids);
+    assert.ok(canOccupy(position.x, position.z, radius, map.solids));
+    assert.equal(canOccupy(position.x, position.z, .42, map.solids), false);
+    const equipment = createEquipment('ak47');
+    equipment.owned.get('ak47').ammo = 7;
+    equipment.owned.get('ak47').reserve = 11;
+    equipment.grenades = { frag: 1, smoke: 1, flash: 1 };
+    const args = { actorId: 'victim', lifeId: 1, position, items: deathItems(equipment), solids: map.solids };
+    addDeathDrops(state, args);
+    assert.equal(drops(state).length, 4, `radius ${radius}, boundary ${boundary}`);
+    assert.deepEqual(drops(state)[0].item, { kind: 'gun', weaponId: 'ak47', ammo: 7, reserve: 11 });
+    assert.deepEqual(drops(state).slice(1).map(record => record.item.grenadeType), ['frag', 'smoke', 'flash']);
+    for (const record of drops(state)) {
+      assert.ok(canOccupy(record.x, record.z, .34, map.solids));
+      assert.ok(record.x >= map.bounds.min + .34 && record.x <= map.bounds.max - .34);
+      assert.ok(record.z >= map.bounds.min + .34 && record.z <= map.bounds.max - .34);
+      assert.ok(hasLineOfSight(position, record, map.solids));
+      assert.equal(record.y, 0);
+    }
+    const before = drops(state);
+    addDeathDrops(state, args);
+    assert.deepEqual(drops(state), before);
   }
 });
 

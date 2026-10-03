@@ -6,7 +6,9 @@ import { getMap } from './maps.js';
 import { canOccupy, hasLineOfSight } from './collision.js';
 
 const gunIds = new Set(WEAPONS.map(gun => gun.id));
-const groundRadius = .42;
+// Drops must fit wherever the smallest runtime actor (solo human) can stand.
+// Authored locations separately retain their conservative .42 clearance.
+const dropRadius = .34;
 const remaining = (time, dt) => time - dt < 1e-9 ? 0 : time - dt;
 const dto = record => ({
   id: record.id, x: record.x, y: record.y, z: record.z, item: { ...record.item },
@@ -117,9 +119,9 @@ export function addDeathDrops(state, { actorId, lifeId, position, items, solids 
   if (state.lastDroppedLife.get(actorId) === lifeId) return;
   const { bounds } = getMap(state.mapId);
   const safe = point => Number.isFinite(point?.x) && Number.isFinite(point?.z)
-    && point.x >= bounds.min + groundRadius && point.x <= bounds.max - groundRadius
-    && point.z >= bounds.min + groundRadius && point.z <= bounds.max - groundRadius
-    && canOccupy(point.x, point.z, groundRadius, solids);
+    && point.x >= bounds.min + dropRadius && point.x <= bounds.max - dropRadius
+    && point.z >= bounds.min + dropRadius && point.z <= bounds.max - dropRadius
+    && canOccupy(point.x, point.z, dropRadius, solids);
   if (!safe(position) || (position.y !== undefined && !Number.isFinite(position.y))) return;
   state.lastDroppedLife.set(actorId, lifeId);
   for (const [index, item] of items.entries()) {
