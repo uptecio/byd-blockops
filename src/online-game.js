@@ -18,6 +18,7 @@ function addNameLabel(model, name) {
   context.fillText(name, 128, 32, 240);
   const texture = new THREE.CanvasTexture(canvas);
   const label = new THREE.Sprite(new THREE.SpriteMaterial({ map: texture, transparent: true, depthTest: true }));
+  label.name = 'name-label';
   label.position.y = 2.2; label.scale.set(1.7, .425, 1); model.add(label);
 }
 
@@ -82,7 +83,7 @@ export class OnlineArena {
       if (player.id === this.id) continue;
       present.add(player.id);
       let remote = this.remotes.get(player.id);
-      if (!remote || remote.model.userData.skinId !== player.skinId || remote.model.userData.teamId !== player.teamId || remote.model.userData.weaponId !== player.weaponId || remote.name !== player.name) {
+      if (!remote || remote.model.userData.skinId !== player.skinId || remote.model.userData.teamId !== player.teamId || remote.model.userData.weaponId !== player.weaponId || (remote.model.userData.heldItem ?? 'gun') !== player.heldItem || remote.name !== player.name) {
         disposeModel(remote?.model);
         const model = createAvatarModel(THREE, player); game.world.botGroup.add(model);
         addNameLabel(model, player.name);
@@ -120,6 +121,7 @@ export class OnlineArena {
       }
     }
     this.updateObjectives();
+    this.updateGearView();
     if (room.phase !== 'playing' && !this.suspended) this.pause();
     if (room.phase === 'ended' && !initial && !this.endReported) { this.endReported = true; this.pause(); this.onEnd(game.match); }
   }
@@ -130,6 +132,13 @@ export class OnlineArena {
       ...[...this.remotes].map(([id, remote]) => ({ id, x: remote.model.position.x, y: remote.model.position.y, z: remote.model.position.z })),
     ];
     game.objectives.update({ flags: game.matchView.flags, actors, viewerId: this.id });
+  }
+  updateGearView(dt = 0) {
+    const game = this.game;
+    game.gearView?.update({ viewer: { id: this.id, teamId: game.player.teamId, x: game.player.x, y: game.player.jump, z: game.player.z, camera: game.camera },
+      actors: [...this.remotes.values()].map(remote => ({ ...remote.player, x: remote.model.position.x, y: remote.model.position.y, z: remote.model.position.z,
+        alive: remote.player.health > 0 && remote.player.respawnRemaining <= 0, model: remote.model, label: remote.model.getObjectByName('name-label') })),
+      flashRemaining: game.player.flashRemaining, dt });
   }
   getEquipmentView() { return equipmentDTO(this.game.player.equipment); }
   requestEquipment(action) {
@@ -178,11 +187,11 @@ export class OnlineArena {
     const zoom = !!(input && input.zoom);
     const fov = zoom ? 75 / game.weapon.zoom : 75;
     game.camera.fov += (fov - game.camera.fov) * Math.min(1, dt * 14); game.camera.updateProjectionMatrix();
-    game.weaponModel.visible = game.player.dead <= 0 && !(zoom && game.weapon.classId === 'sniper');
-    const reload = game.weaponState.reloadRemaining > 0;
+    game.weaponModel.visible = game.player.dead <= 0 && !(game.heldItem === 'gun' && zoom && game.weapon.classId === 'sniper');
+    const reload = game.heldItem === 'gun' && game.weaponState.reloadRemaining > 0;
     game.weaponModel.position.set(zoom ? .08 : .28, -.27 - (reload ? .17 : 0), -.5 + game.recoil * .7);
     game.weaponModel.rotation.z = reload ? Math.sin(game.time * 6) * .15 - .3 : 0;
-    game.shotFlash = Math.max(0, game.shotFlash - dt); game.muzzle.visible = game.shotFlash > 0 && game.weaponModel.visible;
+    game.shotFlash = Math.max(0, game.shotFlash - dt); game.muzzle.visible = game.heldItem === 'gun' && game.shotFlash > 0 && game.weaponModel.visible;
     game.hitFlash = Math.max(0, game.hitFlash - dt); game.damageFlash = Math.max(0, game.damageFlash - dt);
     game.effects = game.effects.filter(effect => {
       effect.life -= dt;
@@ -191,6 +200,7 @@ export class OnlineArena {
     });
     this.hudTimer -= dt;
     if (this.hudTimer <= 0) { game.events.onHud(game); this.hudTimer = .05; }
+    this.updateGearView(dt);
     game.renderer.render(game.scene, game.camera);
   }
   pause() {
@@ -207,6 +217,7 @@ export class OnlineArena {
     for (const remote of this.remotes.values()) disposeModel(remote.model);
     this.remotes.clear(); this.game.clearEffects();
     this.game.gearWorld = emptyWorld(); this.game.gearView?.sync(this.game.gearWorld);
+    this.game.gearView?.clear();
     if (this.running) { this.game.objectives?.dispose(); this.game.objectives = null; }
     this.running = false; this.suspended = true; this.room = null; this.target = null;
   }

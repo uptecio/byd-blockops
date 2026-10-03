@@ -6,10 +6,28 @@ import { AVATAR_HITBOX, createAvatarModel } from '../src/avatar.js';
 import { WEAPONS, getWeapon } from '../src/weapons.js';
 import { createWeaponModel } from '../src/world.js';
 import { disposeModel } from '../src/game.js';
+import { createHash } from 'node:crypto';
 
 const ids = ['ranger', 'desert-ops', 'arctic-scout', 'jungle-scout', 'neon-runner', 'shadow-ninja', 'robo-unit', 'space-guard'];
 const close = (actual, expected) => assert.ok(Math.abs(actual - expected) < 1e-8, `${actual} != ${expected}`);
 const bounds = model => new THREE.Box3().setFromObject(model);
+test('optional knife preserves the complete existing gun anatomy and every skin/team/hitbox', () => {
+  const signatures = [];
+  for (const skinId of ids) for (const teamId of [null, 'red', 'blue']) for (const weapon of WEAPONS) {
+    const gun = createAvatarModel(THREE, { skinId, teamId, weaponId: weapon.id, heldItem: 'gun' });
+    const rows = []; gun.traverse(o => rows.push([o.name, o.position.toArray(), o.scale.toArray(), o.rotation.toArray(), o.material?.color?.getHexString(), o.userData]));
+    signatures.push(rows);
+    const knife = createAvatarModel(THREE, { skinId, teamId, weaponId: weapon.id, heldItem: 'knife' });
+    assert.equal(knife.userData.hitbox, AVATAR_HITBOX);
+    assert.equal(knife.getObjectByName('weapon').children[0].name, 'Knife');
+    const attachment = gun.getObjectByName('weapon'); attachment.removeFromParent();
+    const knifeAttachment = knife.getObjectByName('weapon'); knifeAttachment.removeFromParent();
+    assert.equal(meshSignature(gun), meshSignature(knife));
+    gun.add(attachment); knife.add(knifeAttachment); disposeModel(gun); disposeModel(knife);
+  }
+  // Captured from all 672 original models before optional held-item support.
+  assert.equal(createHash('sha256').update(JSON.stringify(signatures)).digest('hex'), 'f2b0171a213b8d1c6cb67f7dfdf2d367e6478646541cca518c64be8bad7819fb');
+});
 function meshSignature(model, includeColours = true) {
   const result = [];
   model.traverse(object => {

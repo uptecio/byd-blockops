@@ -577,18 +577,20 @@ test('online reconciliation owns all ammo and never grants through setWeapon or 
 test('late joins sync existing world without old effects and suspended removals reach the visual consumer', () => {
   const { game, client } = fixture(), messages = [], views = [];
   const online = new OnlineArena(game, client, { onToast: value => messages.push(value) });
-  game.gearView = { sync(value) { views.push(structuredClone(value)); }, dispose() {} };
   const snapshot = room();
   snapshot.gear.loot = [{ id: 'knife', x: 0, y: 0, z: 0, item: { kind: 'knife' }, source: 'map', availableRemaining: 0, expiresRemaining: null }];
   snapshot.gear.smokes = [{ id: 'smoke', ownerId: 'p2', x: 0, y: 0, z: 0, radius: 4, remaining: 6 }];
   snapshot.events = [{ id: 9, type: 'pickup', playerId: 'p1', itemId: 'old', item: { kind: 'knife' } }];
   online.start(snapshot, 'p1', { sensitivity: 1 });
+  const sync = game.gearView.sync.bind(game.gearView);
+  game.gearView.sync = value => { views.push(structuredClone(value)); sync(value); };
   assert.equal(messages.length, 0); assert.equal(game.gearWorld.smokes.length, 1);
   snapshot.gear.smokes[0].remaining = 1;
   assert.equal(game.gearWorld.smokes[0].remaining, 6, 'world is detached');
   online.pause(); snapshot.gear = { loot: [], projectiles: [], smokes: [] }; online.sync(snapshot);
   assert.deepEqual(views.at(-1), { loot: [], projectiles: [], smokes: [] });
   assert.deepEqual(game.gearWorld, { loot: [], projectiles: [], smokes: [] });
+  assert.equal(game.gearView.loot.size, 0); assert.equal(game.gearView.smokes.size, 0);
   online.stop();
 });
 
@@ -608,15 +610,17 @@ test('combat packets carry the current life and pending edges clear on death and
 test('replayed grenade and melee effects trigger each approved audio callback only once', () => {
   const { game, client } = fixture(), heard = [], effects = [];
   game.audio.swing = () => heard.push('swing'); game.audio.grenade = type => heard.push(type);
-  game.gearView = { sync() {}, event(event) { effects.push(event.id); } };
   const online = new OnlineArena(game, client); online.start(room(), 'p1', { sensitivity: 1 });
+  const presentEvent = game.gearView.event.bind(game.gearView);
+  game.gearView.event = event => { effects.push(event.id); presentEvent(event); };
   const snapshot = room(); snapshot.events = [
     { id: 1, type: 'melee', playerId: 'p2' },
     { id: 2, type: 'grenade-throw', playerId: 'p2', grenadeId: 'frag', grenadeType: 'frag' },
     { id: 3, type: 'grenade-burst', playerId: 'p2', grenadeId: 'frag', grenadeType: 'frag', position: { x: 0, y: 0, z: 0 } },
   ];
   online.sync(snapshot); online.sync(snapshot);
-  assert.deepEqual(heard, ['swing', 'frag']); assert.deepEqual(effects, [1, 2, 3]); online.stop();
+  assert.deepEqual(heard, ['swing', 'frag']); assert.deepEqual(effects, [1, 2, 3]);
+  assert.equal(game.gearView.bursts.size, 1); online.stop(); assert.equal(game.gearView.bursts.size, 0);
 });
 
 test('failed input sends retain one-shot edges only until sent and pause clears queued attacks', () => {

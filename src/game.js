@@ -11,9 +11,10 @@ import { chooseBotIntent, chooseBotEquipment } from './bot-brain.js';
 import { ObjectiveView } from './objectives.js';
 import { createEquipment, equipGun, setHeldItem, selectGrenade, tickEquipment, beginMelee,
   deathItems, clearEquipment, resetEquipment, equipmentDTO } from './equipment.js';
-import { createLootState, tickLoot, collectLoot, addDeathDrops } from './loot.js';
-import { createGearCombatState, throwGrenade, stepGearCombat, meleeTarget, smokeBlocksSight } from './gear-combat.js';
+import { createLootState, tickLoot, collectLoot, addDeathDrops, lootDTO } from './loot.js';
+import { createGearCombatState, throwGrenade, stepGearCombat, meleeTarget, smokeBlocksSight, gearCombatDTO } from './gear-combat.js';
 import { GEAR_BALANCE } from './equipment-catalog.js';
+import { GearView, createKnifeModel } from './gear-view.js';
 
 export function disposeModel(model) {
   if (!model) return;
@@ -68,7 +69,7 @@ export class ArenaGame {
   presentHeldItem(weaponId, heldItem) {
     this.weapon = getWeapon(weaponId); this.heldItem = heldItem;
     disposeModel(this.weaponModel);
-    this.weaponModel = createWeaponModel(THREE, this.weapon);
+    this.weaponModel = heldItem === 'knife' ? createKnifeModel(THREE) : createWeaponModel(THREE, this.weapon);
     this.weaponModel.position.set(.28, -.27, -.5); this.camera.add(this.weaponModel);
     this.lastFire = false; this.recoil = 0;
   }
@@ -105,6 +106,8 @@ export class ArenaGame {
     const map = getMap(mapId);
     for (const bot of this.bots) disposeModel(bot.model);
     this.bots = []; this.clearEffects(); this.objectives?.dispose();
+    this.gearView?.dispose(); this.gearView = new GearView(THREE, this.scene);
+    this.gearWorld = { loot: [], projectiles: [], smokes: [] };
     this.lootState = null; this.gearCombatState = createGearCombatState();
     this.navigation?.clearCache(); this.world?.dispose();
     this.world = createWorld(THREE, this.scene, map.id);
@@ -139,6 +142,7 @@ export class ArenaGame {
     this.lootState = createLootState({ mapId: this.world.definition.id, seed: Math.floor(Math.random() * 4294967296),
       startingGunIds: [this.player.equipment.startingGunId, ...this.bots.map(bot => bot.equipment.startingGunId)] });
     this.simulationTime = 0; this.gearEvents = []; this.pickupEvents = []; this.gearEventId = 0;
+    this.refreshGearView();
     this.refreshMatchView(); this.input.clear(); this.resume();
   }
   spawnPoints(teamId) {
@@ -198,7 +202,7 @@ export class ArenaGame {
   }
   resume() { if (this.hasRound && !this.match.ended) { this.active = true; this.lastFire = false; this.input.setEnabled(true); } }
   pause() { this.active = false; this.input.setEnabled(false); this.lastFire = false; }
-  quit() { this.pause(); this.hasRound = false; }
+  quit() { this.pause(); this.hasRound = false; this.gearView?.clear(); }
   clearEffects() { for (const effect of this.effects) { effect.line.removeFromParent(); effect.line.geometry.dispose(); effect.line.material.dispose(); } this.effects = []; }
   placeCamera() {
     this.camera.position.set(this.player.x, 1.65 + this.player.jump, this.player.z);
@@ -212,6 +216,7 @@ export class ArenaGame {
       this.simulate(Math.min(dt, this.modeState.timeLeft));
       tickMode(this.modeState, dt, this.getActors()); this.refreshMatchView(); this.finishRound();
     }
+    if (this.hasRound) this.refreshGearView(this.active ? dt : 0);
     this.hudTimer -= dt;
     if (this.hudTimer <= 0) { this.events.onHud(this); this.hudTimer = .045; }
     this.renderer.render(this.scene, this.camera);
@@ -259,10 +264,12 @@ export class ArenaGame {
       this.lastFire = input.fire;
       const targetFov = zoom ? 75 / this.weapon.zoom : 75;
       this.camera.fov += (targetFov - this.camera.fov) * Math.min(1, dt * 14); this.camera.updateProjectionMatrix();
-      this.weaponModel.visible = !(zoom && this.weapon.classId === 'sniper');
-      const reload = this.weaponState.reloadRemaining > 0;
+      this.weaponModel.visible = !(this.heldItem === 'gun' && zoom && this.weapon.classId === 'sniper');
+      const reload = this.heldItem === 'gun' && this.weaponState.reloadRemaining > 0;
       this.weaponModel.position.set(zoom ? .08 : .28, -.27 - (reload ? .17 : 0) + Math.sin(this.time * 10) * Math.hypot(input.x, input.y) * .012, -.5 + this.recoil * .7);
       this.weaponModel.rotation.z = reload ? Math.sin(this.time * 6) * .15 - .3 : 0;
+      this.weaponModel.rotation.x = this.heldItem === 'knife'
+        ? -Math.sin(Math.min(1, (GEAR_BALANCE.knife.interval - this.player.equipment.meleeRemaining) / .2) * Math.PI) * .75 : 0;
     }
     for (const actor of actors) if (this.actorEntity(actor.id).health <= 0) actor.alive = false;
     this.recoil *= Math.exp(-dt * 13);
@@ -280,16 +287,21 @@ export class ArenaGame {
         const victim = this.actorEntity(flash.targetId);
         if (victim?.health > 0) victim.flashRemaining = Math.min(3, Math.max(victim.flashRemaining, flash.duration));
       }
-      this.gearEvents.push(...result.events.map(event => ({ ...event, id: ++this.gearEventId })));
+      this.presentGearEvents(result.events);
+    } else {
+      // A winning swing can end the round before combat runs. Drain only
+      // already-queued feedback; never step projectile damage to obtain it.
+      this.presentGearEvents(this.gearCombatState.events.splice(0));
     }
     if (!this.modeState.ended) {
       const pickups = collectLoot(this.lootState, actors, { solids: this.world.solids })
         .map(event => ({ ...event, id: ++this.gearEventId }));
       this.pickupEvents.push(...pickups); this.gearEvents.push(...pickups);
+      for (const event of pickups) if (event.playerId === 'local') this.audio.pickup?.();
       for (const event of pickups) if (event.playerId === 'local') this.events.onToast(event.item.kind === 'gun'
         ? `PICKED UP ${getWeapon(event.item.weaponId).name}` : event.item.kind === 'knife' ? 'PICKED UP KNIFE' : `PICKED UP ${event.item.grenadeType.toUpperCase()} GRENADE`);
     }
-    this.shotFlash = Math.max(0, this.shotFlash - dt); this.muzzle.visible = this.shotFlash > 0 && this.weaponModel.visible;
+    this.shotFlash = Math.max(0, this.shotFlash - dt); this.muzzle.visible = this.heldItem === 'gun' && this.shotFlash > 0 && this.weaponModel.visible;
     this.hitFlash = Math.max(0, this.hitFlash - dt); this.damageFlash = Math.max(0, this.damageFlash - dt);
     this.effects = this.effects.filter(effect => {
       effect.life -= dt;
@@ -297,6 +309,30 @@ export class ArenaGame {
       effect.line.material.opacity = effect.life / .12;
       return true;
     });
+  }
+  presentGearEvents(events) {
+    for (const event of events) {
+      const feedback = { ...event, id: ++this.gearEventId }; this.gearEvents.push(feedback); this.gearView?.event(feedback);
+      if (event.type === 'melee') this.audio.swing?.();
+      else if (event.type === 'grenade-burst') this.audio.grenade?.(event.grenadeType);
+    }
+  }
+  refreshGearView(dt = 0) {
+    if (!this.gearView) return;
+    this.gearWorld = { loot: this.lootState ? lootDTO(this.lootState) : [], ...gearCombatDTO(this.gearCombatState) };
+    this.gearView.sync(this.gearWorld);
+    for (const bot of this.bots) {
+      const attachment = bot.model.getObjectByName('weapon'), equipment = bot.equipment;
+      if (attachment.userData.weaponId !== equipment.activeGunId || (bot.model.userData.heldItem ?? 'gun') !== equipment.heldItem) {
+        for (const child of [...attachment.children]) disposeModel(child);
+        attachment.add(equipment.heldItem === 'knife' ? createKnifeModel(THREE) : createWeaponModel(THREE, getWeapon(equipment.activeGunId)));
+        attachment.userData.weaponId = equipment.activeGunId;
+        Object.assign(bot.model.userData, { weaponId: equipment.activeGunId, heldItem: equipment.heldItem });
+      }
+    }
+    this.gearView.update({ viewer: { id: this.player.id, teamId: this.player.teamId, x: this.player.x, y: this.player.jump, z: this.player.z, camera: this.camera },
+      actors: this.bots.map(bot => ({ id: bot.id, teamId: bot.teamId, x: bot.model.position.x, y: bot.model.position.y, z: bot.model.position.z,
+        alive: bot.health > 0 && bot.respawn <= 0, model: bot.model, label: bot.bar })), flashRemaining: this.player.flashRemaining, dt });
   }
   actorEntity(id) { return id === this.player.id ? this.player : this.bots.find(bot => bot.id === id); }
   slash(actor, actors) {

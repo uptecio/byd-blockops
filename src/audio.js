@@ -26,4 +26,11 @@ export class GameAudio {
   hit() { this.tone(780, .08, .045, 'triangle', 1.5); }
   kill() { this.tone(520, .18, .07, 'triangle', 2); }
   reload() { this.tone(230, .12, .025, 'square', .5); }
+  pickup() { this.tone(660, .13, .035, 'triangle', 1.6); }
+  swing() { this.tone(260, .14, .025, 'sawtooth', .25); }
+  grenade(type) {
+    if (type === 'frag') this.tone(85, .3, .07, 'sawtooth', .25);
+    else if (type === 'smoke') this.tone(180, .24, .025, 'triangle', .4);
+    else if (type === 'flash') this.tone(740, .18, .025, 'sine', .6);
+  }
 }

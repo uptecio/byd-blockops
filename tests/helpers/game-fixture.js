@@ -31,4 +31,5 @@ export function cleanupGame(game) {
   for (const bot of game.bots) disposeModel(bot.model);
   disposeModel(game.weaponModel);
   game.objectives?.dispose(); game.world.dispose();
+  game.gearView?.dispose();
 }
