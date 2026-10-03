@@ -162,7 +162,6 @@ export class OnlineArena {
         this.requestEquipment({ kind: 'held-item', heldItem: game.player.equipment.heldItem === 'knife' ? 'gun' : 'knife' });
         game.input.zoom = false;
       }
-      if (input?.throwPressed) this.requestEquipment({ kind: 'throw', grenadeType: game.player.equipment.selectedGrenade });
       if (input && game.player.equipment.heldItem === 'knife') input.zoom = input.reload = false;
     }
     if (input) {
@@ -171,13 +170,21 @@ export class OnlineArena {
       for (const key of ['firePressed', 'jump', 'reload']) this.pending[key] = this.pending[key] || !!input[key];
     }
     this.sendTimer -= dt;
-    if (this.sendTimer <= 0) {
+    if (this.sendTimer <= 0 || input?.throwPressed) {
       const packet = neutral(game.yaw, game.pitch, game.player.lifeId);
       if (input) {
         const length = Math.max(1, Math.hypot(input.x, input.y));
         Object.assign(packet, { x: input.x / length, y: input.y / length, fire: !!input.fire, zoom: !!input.zoom }, this.pending);
       }
-      if (this.client.send(packet)) this.pending = emptyPending();
+      // The server validates/releases a throw immediately using its latest
+      // input aim. Flush this frame's look and pending edges before the action,
+      // even between regular input intervals; never throw after a failed flush.
+      const sent = this.client.send(packet);
+      if (sent) this.pending = emptyPending();
+      if (input?.throwPressed) {
+        if (sent) this.requestEquipment({ kind: 'throw', grenadeType: game.player.equipment.selectedGrenade });
+        else this.onToast('Unable to send throw aim');
+      }
       this.sendTimer = .05;
     }
     const smoothing = 1 - Math.exp(-dt * 18);

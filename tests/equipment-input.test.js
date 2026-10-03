@@ -2,6 +2,9 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createInputFixture } from './helpers/input-fixture.js';
 import { createHeadlessGame, cleanupGame } from './helpers/game-fixture.js';
+import { OnlineArena } from '../src/online-game.js';
+import { RoomClient } from '../src/network.js';
+import { RoomManager } from '../server/rooms.js';
 
 const event = (type, fields = {}) => Object.assign(new Event(type, { cancelable: true }), fields);
 test('one pointer tap creates exactly one throw edge', t => {
@@ -53,4 +56,53 @@ test('opening the picker pauses all remaining solo simulation substeps', t => {
   const game = createHeadlessGame(); t.after(() => cleanupGame(game)); game.start('m4a1', { bots: 1 });
   game.events.onEquipmentPicker = () => game.pause(); game.input.grenadePickerPressed = true;
   const time = game.simulationTime; game.simulate(.12); assert.equal(game.simulationTime, time);
+});
+
+function onlineThrowFixture(t) {
+  const game = createHeadlessGame(), manager = new RoomManager({ random: () => .5 });
+  const room = manager.create('p1', 'Host', 'm4a1'); manager.join('p2', room.code, 'Guest', 'm4a1'); manager.start('p1');
+  const player = room.players.get('p1'); Object.assign(player, { x: 0, y: 0, z: 19, yaw: 0, pitch: 0 }); player.equipment.grenades.frag = 2;
+  const snapshot = manager.snapshot(room, false); snapshot.selfEquipment = manager.equipmentSnapshot('p1');
+  const packets = [], results = [], client = new RoomClient(); Object.assign(client, { id: 'p1', connected: true, room: snapshot });
+  const receive = text => {
+    const packet = JSON.parse(text); packets.push(packet);
+    if (packet.type === 'input') manager.input('p1', packet);
+    else if (packet.type === 'equipment-action') results.push(manager.equipmentAction('p1', packet));
+  };
+  client.socket = { readyState: 1, send: receive }; const messages = [];
+  const arena = new OnlineArena(game, client, { onToast: message => messages.push(message) }); arena.start(snapshot, 'p1', { sensitivity: 1 });
+  t.after(() => { arena.stop(); cleanupGame(game); });
+  return { game, arena, client, room, player, packets, results, messages, receive };
+}
+
+for (const [label, dt, sendTimer] of [['at the normal input interval', .05, 0], ['between normal input intervals', .01, .04]]) {
+  test(`online drag and throw launches with current aim ${label}`, t => {
+    const { game, arena, room, packets, results } = onlineThrowFixture(t); arena.sendTimer = sendTimer;
+    game.input.look.x = 604.1524333826525; game.input.look.y = -96.15384615384616;
+    game.input.throwPressed = game.input.firePressed = game.input.jump = game.input.reload = true;
+    arena.update(dt);
+    assert.equal(room.gearCombatState.projectiles.length, 1);
+    const projectile = room.gearCombatState.projectiles[0];
+    assert.ok(Math.abs(projectile.vx - 11.626949060527737) < 1e-8, `expected current +X aim, got vx=${projectile.vx}`);
+    assert.ok(Math.abs(projectile.vz) < 1e-8, `old forward aim leaked into vz=${projectile.vz}`);
+    assert.ok(Math.abs(projectile.vy - 5.968847511054276) < 1e-8, `expected current upward aim, got vy=${projectile.vy}`);
+    assert.deepEqual(packets.map(packet => packet.type), ['input', 'equipment-action']); assert.deepEqual(results, [{ ok: true }]);
+    for (const edge of ['firePressed', 'jump', 'reload']) { assert.equal(packets[0][edge], true); assert.equal(arena.pending[edge], false); }
+    arena.update(.05); assert.equal(room.gearCombatState.projectiles.length, 1);
+    for (const edge of ['firePressed', 'jump', 'reload']) assert.equal(packets.at(-1)[edge], false);
+  });
+}
+
+test('failed online throw aim send spends no grenade and retains other one-shot edges until sent', t => {
+  const { game, arena, client, room, player, packets, messages, receive } = onlineThrowFixture(t); arena.sendTimer = .04;
+  client.socket.send = text => { if (JSON.parse(text).type === 'input') throw new Error('transport unavailable'); receive(text); };
+  game.input.look.x = 604.1524333826525; game.input.throwPressed = game.input.firePressed = game.input.jump = game.input.reload = true;
+  arena.update(.01);
+  assert.equal(room.gearCombatState.projectiles.length, 0); assert.equal(player.equipment.grenades.frag, 2);
+  assert.equal(packets.some(packet => packet.type === 'equipment-action'), false);
+  for (const edge of ['firePressed', 'jump', 'reload']) assert.equal(arena.pending[edge], true);
+  assert.equal(messages.at(-1), 'Unable to send throw aim');
+  client.socket.send = receive; arena.update(.05);
+  for (const edge of ['firePressed', 'jump', 'reload']) { assert.equal(packets.at(-1)[edge], true); assert.equal(arena.pending[edge], false); }
+  assert.equal(room.gearCombatState.projectiles.length, 0, 'failed throw is not replayed without another press');
 });
