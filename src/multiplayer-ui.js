@@ -88,7 +88,9 @@ export class MultiplayerUI {
     } else if (this.arena) this.arena.sync(room);
     if (this.pendingDeployment) {
       const pending = this.pendingDeployment, authoritative = room.selfEquipment;
-      if (room.phase !== 'playing' || authoritative.lifeId !== pending.lifeId) this.pendingDeployment = null;
+      const recipient = room.players.find(player => player.id === this.client.id);
+      const alive = recipient?.health > 0 && recipient.respawnRemaining === 0;
+      if (room.phase !== 'playing' || authoritative.lifeId !== pending.lifeId || !alive) this.pendingDeployment = null;
       else if (authoritative.lastActionSeq >= pending.seq) {
         this.pendingDeployment = null;
         if (authoritative.equipment.activeGunId === pending.weaponId && authoritative.equipment.heldItem === 'gun') this.returnToMatch();

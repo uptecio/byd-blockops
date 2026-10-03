@@ -80,6 +80,28 @@ test('stale equip acknowledgement after respawn cannot resume or remove the next
   assert.deepEqual(game.getEquipmentView().owned.map(gun => gun.weaponId), ['m4a1']);
 });
 
+test('accepted equip followed by death before acknowledgement keeps Armory suspended', t => {
+  const { ui, game, manager, state, sent, receive, body } = fixture(t);
+  manager.start('p1'); receive(); ui.pause(); body.dataset.mode = 'armory';
+  ui.deploy({ equipWeaponId: 'mp5' });
+  const action = sent.findLast(packet => packet.type === 'equipment-action');
+  assert.equal(manager.equipmentAction('p2', action).ok, true);
+  manager.eliminate(state, state.players.get('p1'), state.players.get('p2'));
+  const snapshot = receive();
+  assert.equal(snapshot.selfEquipment.lifeId, action.lifeId, 'death retains the accepted action life');
+  assert.equal(snapshot.selfEquipment.lastActionSeq, action.seq);
+  assert.equal(snapshot.selfEquipment.equipment.activeGunId, 'mp5', 'dead equipment remembers the accepted gun');
+  assert.deepEqual(snapshot.selfEquipment.equipment.owned, []);
+  assert.equal(body.dataset.mode, 'armory'); assert.equal(ui.arena.suspended, true); assert.equal(game.input.enabled, false);
+  assert.equal(ui.pendingDeployment, null, 'death cancels the return intent');
+  receive(); assert.equal(body.dataset.mode, 'armory');
+  manager.tick(3.1); receive();
+  assert.equal(body.dataset.mode, 'armory'); assert.equal(ui.arena.suspended, true);
+  assert.equal(game.getEquipmentView().activeGunId, 'm4a1');
+  assert.equal(game.getEquipmentView().startingGunRemoved, false);
+  assert.equal(game.getEquipmentView().owned.some(gun => gun.weaponId === 'm4a1'), true);
+});
+
 test('denied actions show an in-game toast and keep explicit equip returns suspended', t => {
   const { ui, manager, receive, messages, elements, body } = fixture(t);
   manager.start('p1'); receive(); ui.pause(); body.dataset.mode = 'armory';
