@@ -1,8 +1,12 @@
 import * as THREE from 'three';
 import { createAvatarModel } from './avatar.js';
 import { disposeModel } from './game.js';
+import { equipmentDTO, equipmentFromDTO } from './equipment.js';
+import { getWeapon } from './weapons.js';
 
-const neutral = (yaw, pitch) => ({ type: 'input', x: 0, y: 0, yaw, pitch, fire: false, firePressed: false, jump: false, reload: false, zoom: false });
+const neutral = (yaw, pitch, lifeId) => ({ type: 'input', lifeId, x: 0, y: 0, yaw, pitch, fire: false, firePressed: false, jump: false, reload: false, zoom: false });
+const emptyPending = () => ({ firePressed: false, jump: false, reload: false });
+const emptyWorld = () => ({ loot: [], projectiles: [], smokes: [] });
 
 function addNameLabel(model, name) {
   if (typeof document === 'undefined') return;
@@ -21,7 +25,7 @@ export class OnlineArena {
   constructor(game, client, { onEnd = () => {}, onToast = () => {} } = {}) {
     this.game = game; this.client = client; this.onEnd = onEnd; this.onToast = onToast;
     this.remotes = new Map(); this.running = false; this.suspended = true;
-    this.pending = { firePressed: false, jump: false, reload: false };
+    this.pending = emptyPending();
     this.sendTimer = 0; this.hudTimer = 0; this.lastEvent = -1; this.endReported = false;
   }
   start(room, id, settings) {
@@ -32,6 +36,7 @@ export class OnlineArena {
     this.lastEvent = room.events.reduce((maximum, event) => Math.max(maximum, event.id), -1);
     this.sendTimer = 0; this.hudTimer = 0; this.previousRespawn = own.respawnRemaining;
     this.game.start(own.weaponId, { ...settings, mapId: room.mapId, modeId: room.modeId, skinId: own.skinId, bots: 0 }); this.game.active = false;
+    this.game.lootState = null;
     this.game.yaw = own.yaw; this.game.pitch = own.pitch;
     Object.assign(this.game.player, { x: own.x, z: own.z, jump: own.y });
     this.sync(room, true); this.game.input.setEnabled(room.phase === 'playing' && !this.suspended); this.game.placeCamera();
@@ -40,6 +45,10 @@ export class OnlineArena {
     if (!this.running) return;
     const game = this.game, own = room.players.find(player => player.id === this.id);
     if (!own) return;
+    const equipment = equipmentFromDTO(room.selfEquipment.equipment);
+    const lifeChanged = game.player.lifeId !== own.lifeId;
+    const roundChanged = this.room && (this.room.phase !== room.phase || this.room.mapId !== room.mapId || this.room.modeId !== room.modeId);
+    if (lifeChanged || roundChanged || own.health <= 0) { game.input.clear(); this.pending = emptyPending(); }
     if (game.world.definition.id !== room.mapId) {
       for (const remote of this.remotes.values()) disposeModel(remote.model);
       this.remotes.clear(); game.loadMap(room.mapId); initial = true;
@@ -48,14 +57,14 @@ export class OnlineArena {
     this.room = room;
     this.target = { x: own.x, z: own.z, y: own.y };
     const respawned = this.previousRespawn > 0 && own.respawnRemaining === 0;
-    if (initial || respawned) {
+    if (initial || respawned || lifeChanged) {
       Object.assign(game.player, { x: own.x, z: own.z, jump: own.y });
       game.yaw = own.yaw; game.pitch = own.pitch; game.recoil = 0; game.input.clear();
     }
     if (own.health < game.player.health) game.damageFlash = .3;
-    if (own.respawnRemaining > 0 && this.previousRespawn <= 0) { game.input.clear(); this.pending = { firePressed: false, jump: false, reload: false }; this.onToast('ELIMINATED · RESPAWNING'); }
+    if (own.respawnRemaining > 0 && this.previousRespawn <= 0) { game.input.clear(); this.pending = emptyPending(); this.onToast('ELIMINATED · RESPAWNING'); }
     this.previousRespawn = own.respawnRemaining;
-    Object.assign(game.player, { id: own.id, name: own.name, teamId: own.teamId, skinId: own.skinId, pendingSkinId: own.pendingSkinId, health: own.health, dead: own.respawnRemaining, protected: own.protectedRemaining });
+    Object.assign(game.player, { id: own.id, lifeId: own.lifeId, name: own.name, teamId: own.teamId, skinId: own.skinId, pendingSkinId: own.pendingSkinId, health: own.health, dead: own.respawnRemaining, protected: own.protectedRemaining, flashRemaining: own.flashRemaining, equipment });
     game.matchView = {
       mapId: room.mapId, modeId: room.modeId, timeLeft: room.timeLeft, ended: room.phase === 'ended',
       winnerId: room.winnerId, winnerName: room.winnerName, winnerTeamId: room.winnerTeamId,
@@ -63,9 +72,11 @@ export class OnlineArena {
       players: room.players.map(player => ({ id: player.id, name: player.name, teamId: player.teamId, skinId: player.skinId, kills: player.kills, deaths: player.deaths })),
     };
     game.match = { ...game.matchView, kills: own.kills, deaths: own.deaths };
-    if (game.weapon.id !== own.weaponId) game.setWeapon(own.weaponId);
     if (own.reloadRemaining > 0 && game.weaponState.reloadRemaining === 0 && !this.suspended) game.audio.reload();
-    Object.assign(game.weaponState, { ammo: own.ammo, reserve: own.reserve, reloadRemaining: own.reloadRemaining, cooldown: 0 });
+    game.syncPlayerEquipment();
+    // Always reconcile complete public arrays, including removals during menus.
+    game.gearWorld = structuredClone(room.gear);
+    game.gearView?.sync(game.gearWorld);
     const present = new Set();
     for (const player of room.players) {
       if (player.id === this.id) continue;
@@ -94,6 +105,14 @@ export class OnlineArena {
       } else if (event.type === 'kill' && event.playerId === this.id) {
         game.audio.kill();
         this.onToast(room.modeId === 'ffa' ? `+1 ELIMINATION · ${own.kills} / 15` : room.modeId === 'tdm' ? `+1 ELIMINATION · ${own.teamId.toUpperCase()} ${room.teamScores[own.teamId]} / 30` : '+1 ELIMINATION');
+      } else if (event.type === 'pickup' && event.playerId === this.id) {
+        const label = event.item.kind === 'gun' ? getWeapon(event.item.weaponId).name : event.item.kind === 'knife' ? 'KNIFE' : `${event.item.grenadeType.toUpperCase()} GRENADE`;
+        this.onToast(`PICKED UP ${label}`);
+        game.audio.pickup?.();
+      } else if (['melee', 'grenade-throw', 'grenade-burst'].includes(event.type)) {
+        game.gearView?.event?.(event);
+        if (event.type === 'melee') game.audio.swing?.();
+        else if (event.type === 'grenade-burst') game.audio.grenade?.(event.grenadeType);
       } else if (event.type.startsWith('flag-')) {
         const team = event.teamId.toUpperCase();
         const messages = { 'flag-pickup': `${team} FLAG PICKED UP`, 'flag-drop': `${team} FLAG DROPPED`, 'flag-return': `${team} FLAG RETURNED`, 'flag-capture': `${team} TEAM CAPTURED A FLAG` };
@@ -112,12 +131,22 @@ export class OnlineArena {
     ];
     game.objectives.update({ flags: game.matchView.flags, actors, viewerId: this.id });
   }
+  getEquipmentView() { return equipmentDTO(this.game.player.equipment); }
+  requestEquipment(action) {
+    let reason;
+    if (!this.running || this.room.phase !== 'playing' || this.game.player.health <= 0 || this.game.player.dead > 0)
+      reason = 'Cannot change equipment while inactive';
+    else if (action?.kind === 'throw' && this.suspended) reason = 'Cannot throw while paused';
+    else if (!this.client.sendEquipmentAction(action)) reason = 'Unable to send equipment action';
+    if (reason) { this.onToast(reason); return { ok: false, reason }; }
+    return { ok: true };
+  }
   update(dt) {
     if (!this.running || !Number.isFinite(dt) || dt <= 0) return;
     const game = this.game;
     game.time += dt;
     let input = null;
-    if (!this.suspended && this.room.phase === 'playing' && game.player.dead <= 0) {
+    if (!this.suspended && this.room.phase === 'playing' && game.player.dead <= 0 && game.player.health > 0) {
       input = game.input.read();
       const sensitivity = .0026 * game.settings.sensitivity / (input.zoom ? Math.sqrt(game.weapon.zoom) : 1);
       game.yaw -= input.lookX * sensitivity; game.pitch = THREE.MathUtils.clamp(game.pitch - input.lookY * sensitivity, -1.25, 1.25);
@@ -125,12 +154,12 @@ export class OnlineArena {
     }
     this.sendTimer -= dt;
     if (this.sendTimer <= 0) {
-      const packet = neutral(game.yaw, game.pitch);
+      const packet = neutral(game.yaw, game.pitch, game.player.lifeId);
       if (input) {
         const length = Math.max(1, Math.hypot(input.x, input.y));
         Object.assign(packet, { x: input.x / length, y: input.y / length, fire: !!input.fire, zoom: !!input.zoom }, this.pending);
       }
-      if (this.client.send(packet)) this.pending = { firePressed: false, jump: false, reload: false };
+      if (this.client.send(packet)) this.pending = emptyPending();
       this.sendTimer = .05;
     }
     const smoothing = 1 - Math.exp(-dt * 18);
@@ -165,18 +194,19 @@ export class OnlineArena {
     game.renderer.render(game.scene, game.camera);
   }
   pause() {
-    this.suspended = true; this.game.pause(); this.pending = { firePressed: false, jump: false, reload: false };
-    if (this.running) this.client.send(neutral(this.game.yaw, this.game.pitch));
+    this.suspended = true; this.game.pause(); this.pending = emptyPending();
+    if (this.running) this.client.send(neutral(this.game.yaw, this.game.pitch, this.game.player.lifeId));
   }
   resume() {
     if (!this.running || this.room.phase !== 'playing') return;
-    this.game.input.clear(); this.pending = { firePressed: false, jump: false, reload: false };
+    this.game.input.clear(); this.pending = emptyPending();
     this.suspended = false; this.game.active = false; this.game.input.setEnabled(true); this.sendTimer = 0;
   }
   stop() {
     if (this.running) this.pause();
     for (const remote of this.remotes.values()) disposeModel(remote.model);
     this.remotes.clear(); this.game.clearEffects();
+    this.game.gearWorld = emptyWorld(); this.game.gearView?.sync(this.game.gearWorld);
     if (this.running) { this.game.objectives?.dispose(); this.game.objectives = null; }
     this.running = false; this.suspended = true; this.room = null; this.target = null;
   }

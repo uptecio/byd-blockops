@@ -5,13 +5,17 @@ import { MAPS } from './maps.js';
 import { MODES } from './modes.js';
 import { SKINS } from './skins.js';
 import { renderMatchResults } from './match-ui.js';
+import { WEAPONS } from './weapons.js';
 
 const $ = id => document.getElementById(id);
 export class MultiplayerUI {
   constructor({ getGame, getSettings, getSelected, getSelection, onSkin, onConfiguration, onRoomSettings, onHome, onMode, onLoadout, onToast }) {
     Object.assign(this, { getGame, getSettings, getSelected, getSelection, onSkin, onConfiguration, onRoomSettings, onHome, onMode, onLoadout, onToast });
-    this.arena = null; this.room = null; this.busy = false;
-    this.client = new RoomClient({ onRoom: room => this.receive(room), onError: message => this.status(message, true), onDisconnect: () => this.disconnected() });
+    this.arena = null; this.room = null; this.busy = false; this.pendingDeployment = null;
+    this.client = new RoomClient({ onRoom: room => this.receive(room), onError: message => {
+      this.pendingDeployment = null; this.status(message, true);
+      if (this.arena) this.onToast(message);
+    }, onDisconnect: () => this.disconnected() });
     $('room-map').innerHTML = MAPS.map(map => `<option value="${map.id}">${map.name}</option>`).join('');
     $('room-mode').innerHTML = MODES.map(mode => `<option value="${mode.id}">${mode.name}</option>`).join('');
     $('room-skin').innerHTML = SKINS.map(skin => `<option value="${skin.id}">${skin.name}</option>`).join('');
@@ -33,7 +37,7 @@ export class MultiplayerUI {
     $('join-room').addEventListener('click', () => this.connect('join'));
     $('room-code-input').addEventListener('input', () => { $('room-code-input').value = $('room-code-input').value.toUpperCase().replace(/[^A-Z0-9]/g, ''); });
     $('start-online').addEventListener('click', () => {
-      if (this.room && this.room.phase === 'playing') this.deploy(this.getSelected().id);
+      if (this.room && this.room.phase === 'playing') this.deploy();
       else this.client.send({ type: 'start' });
     });
     $('room-loadout').addEventListener('click', () => this.onLoadout());
@@ -70,6 +74,8 @@ export class MultiplayerUI {
     $('mode-badge').textContent = `ONLINE / ${room.code}`;
     $('online-setup').hidden = true; $('room-lobby').hidden = false;
     if (room.phase === 'playing' && (!this.arena || !previous || previous.phase !== 'playing')) {
+      this.pendingDeployment = null;
+      const retainMenu = !['lobby', 'playing', undefined].includes(document.body.dataset.mode) || !$('settings-screen').hidden;
       if (this.arena) this.arena.stop();
       const game = this.getGame();
       this.arena = new OnlineArena(game, this.client, {
@@ -77,8 +83,17 @@ export class MultiplayerUI {
         onEnd: ended => this.showResults(ended || this.room),
       });
       this.arena.start(room, this.client.id, this.getSettings());
-      this.onMode('playing'); game.audio.unlock();
+      if (retainMenu) this.arena.pause();
+      else { this.onMode('playing'); game.audio.unlock(); }
     } else if (this.arena) this.arena.sync(room);
+    if (this.pendingDeployment) {
+      const pending = this.pendingDeployment, authoritative = room.selfEquipment;
+      if (room.phase !== 'playing' || authoritative.lifeId !== pending.lifeId) this.pendingDeployment = null;
+      else if (authoritative.lastActionSeq >= pending.seq) {
+        this.pendingDeployment = null;
+        if (authoritative.equipment.activeGunId === pending.weaponId && authoritative.equipment.heldItem === 'gun') this.returnToMatch();
+      }
+    }
     if (room.phase === 'ended' && (!previous || previous.phase !== 'ended')) this.showResults(room);
   }
   renderRoom() {
@@ -117,17 +132,27 @@ export class MultiplayerUI {
     $('again-button').textContent = 'BACK TO ROOM ↗';
     this.onMode('results');
   }
-  deploy(weaponId) {
-    if (!this.room) { this.open(); return; }
-    this.client.send({ type: 'equip', weaponId });
-    this.client.send({ type: 'skin', skinId: this.getSelection().skinId });
-    if (this.room.phase !== 'playing') { this.open(); return; }
-    this.resume(); this.onMode('playing'); this.getGame().audio.unlock();
+  setLoadout(weaponId) {
+    if (!this.room || this.room.phase === 'playing' || !WEAPONS.some(gun => gun.id === weaponId)) return false;
+    return this.client.send({ type: 'loadout', weaponId });
   }
-  pause() { if (this.arena) this.arena.pause(); }
+  deploy({ equipWeaponId = null, source = 'armory' } = {}) {
+    if (!this.room) { this.open(); return; }
+    if (this.room.phase !== 'playing') { this.open(); return; }
+    if (equipWeaponId !== null) {
+      this.pause();
+      const result = this.arena?.requestEquipment({ kind: 'equip-gun', weaponId: equipWeaponId, source });
+      if (result?.ok) this.pendingDeployment = { seq: this.client.actionSeq, lifeId: this.room.selfEquipment.lifeId, weaponId: equipWeaponId };
+      return result;
+    }
+    this.pendingDeployment = null; this.returnToMatch();
+  }
+  returnToMatch() { this.resume(); this.onMode('playing'); this.getGame().audio.unlock(); }
+  pause() { this.pendingDeployment = null; if (this.arena) this.arena.pause(); }
   resume() { if (this.arena) this.arena.resume(); }
   update(dt) { if (this.arena) this.arena.update(dt); }
   leave() {
+    this.pendingDeployment = null;
     this.client.send({ type: 'leave' }); this.client.close();
     if (this.arena) this.arena.stop(); this.arena = null; this.room = null;
     const game = this.getGame(); if (game) game.quit();

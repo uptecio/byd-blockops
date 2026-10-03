@@ -1,8 +1,9 @@
-import { WEAPONS } from './weapons.js';
+import { WEAPONS, TOTAL_AMMO } from './weapons.js';
 import { MAPS, DEFAULT_MAP_ID } from './maps.js';
 import { MODES } from './modes.js';
 import { SKINS, DEFAULT_SKIN_ID } from './skins.js';
 import { PROTOCOL_VERSION } from './protocol.js';
+import { validEquipmentAction, validEquipmentSnapshot, validGearEvent, validGearWorld } from './gear-protocol.js';
 
 const weaponIds = new Set(WEAPONS.map(weapon => weapon.id));
 const mapIds = new Set(MAPS.map(map => map.id));
@@ -11,8 +12,10 @@ const skinIds = new Set(SKINS.map(skin => skin.id));
 const teams = ['red', 'blue'];
 const validId = id => typeof id === 'string' && id.trim().length > 0;
 const count = value => Number.isSafeInteger(value) && value >= 0;
+const exactKeys = (value, keys) => value && typeof value === 'object' && !Array.isArray(value)
+  && Object.keys(value).length === keys.length && keys.every(key => Object.hasOwn(value, key));
 const updateRequired = 'Update required: install the latest Block Ops APK or reload the game.';
-const finitePoint = point => point && ['x', 'y', 'z'].every(key => Number.isFinite(point[key]));
+const finitePoint = point => exactKeys(point, ['x', 'y', 'z']) && ['x', 'y', 'z'].every(key => Number.isFinite(point[key]));
 
 export function normaliseServerUrl(raw) {
   let url;
@@ -23,6 +26,7 @@ export function normaliseServerUrl(raw) {
 }
 
 function validRoom(room) {
+  if (!exactKeys(room, ['code', 'hostId', 'phase', 'timeLeft', 'winnerId', 'winnerName', 'mapId', 'modeId', 'teamScores', 'winnerTeamId', 'flags', 'events', 'gear', 'players']) || !validGearWorld(room.gear)) return false;
   if (!room || !validId(room.code) || !validId(room.hostId) || !['lobby', 'playing', 'ended'].includes(room.phase) || !Number.isFinite(room.timeLeft) || room.timeLeft < 0 || room.timeLeft > 180 || !Array.isArray(room.players) || room.players.length < 1 || room.players.length > 8 || !Array.isArray(room.events)) return false;
   if (!mapIds.has(room.mapId) || !modeIds.has(room.modeId) || !room.teamScores || !teams.every(team => count(room.teamScores[team])) || Object.keys(room.teamScores).some(team => !teams.includes(team))) return false;
   if (room.winnerId !== null && !validId(room.winnerId)) return false;
@@ -32,12 +36,18 @@ function validRoom(room) {
   if (room.modeId === 'ffa' ? room.winnerTeamId !== null : room.winnerId !== null) return false;
   const ids = new Set();
   for (const player of room.players) {
+    if (!exactKeys(player, ['id', 'name', 'x', 'z', 'y', 'yaw', 'pitch', 'health', 'kills', 'deaths', 'weaponId', 'teamId', 'skinId', 'pendingSkinId', 'lifeId', 'flashRemaining', 'heldItem', 'ammo', 'reserve', 'reloadRemaining', 'respawnRemaining', 'protectedRemaining'])
+      || !count(player.lifeId) || player.lifeId === 0 || !['gun', 'knife'].includes(player.heldItem)
+      || !Number.isFinite(player.flashRemaining) || player.flashRemaining < 0 || player.flashRemaining > 3) return false;
     if (!player || !validId(player.id) || ids.has(player.id) || typeof player.name !== 'string' || !weaponIds.has(player.weaponId) || !skinIds.has(player.skinId) || (player.pendingSkinId !== null && !skinIds.has(player.pendingSkinId))) return false;
     if (room.modeId === 'ffa' ? player.teamId !== null : !teams.includes(player.teamId)) return false;
     ids.add(player.id);
     if (!['x', 'y', 'z', 'yaw', 'pitch', 'health', 'kills', 'deaths', 'ammo', 'reserve', 'reloadRemaining', 'respawnRemaining', 'protectedRemaining'].every(key => Number.isFinite(player[key]))) return false;
     if (['health', 'kills', 'deaths', 'ammo', 'reserve', 'reloadRemaining', 'respawnRemaining', 'protectedRemaining'].some(key => player[key] < 0)) return false;
     if (!['kills', 'deaths', 'ammo', 'reserve'].every(key => count(player[key]))) return false;
+    const gun = WEAPONS.find(gun => gun.id === player.weaponId);
+    if (player.ammo > gun.magazine || player.ammo + player.reserve > TOTAL_AMMO || player.reloadRemaining > gun.reloadTime || player.health > 100) return false;
+    if (player.health === 0 && (player.ammo !== 0 || player.reserve !== 0 || player.reloadRemaining !== 0 || player.heldItem !== 'gun')) return false;
   }
   if (!ids.has(room.hostId)) return false;
   if (room.modeId !== 'ctf') { if (room.flags !== null) return false; }
@@ -46,7 +56,7 @@ function validRoom(room) {
     const carriers = new Set();
     for (const team of teams) {
       const flag = room.flags[team];
-      if (!flag || flag.teamId !== team || !['home', 'carried', 'dropped'].includes(flag.status) || !Number.isFinite(flag.x) || !Number.isFinite(flag.z) || !Number.isFinite(flag.returnRemaining) || flag.returnRemaining < 0 || flag.returnRemaining > 15) return false;
+      if (!exactKeys(flag, ['teamId', 'status', 'x', 'z', 'carrierId', 'returnRemaining']) || flag.teamId !== team || !['home', 'carried', 'dropped'].includes(flag.status) || !Number.isFinite(flag.x) || !Number.isFinite(flag.z) || !Number.isFinite(flag.returnRemaining) || flag.returnRemaining < 0 || flag.returnRemaining > 15) return false;
       if (flag.status === 'carried') {
         if (!validId(flag.carrierId) || carriers.has(flag.carrierId) || flag.returnRemaining !== 0 || room.phase === 'lobby') return false;
         carriers.add(flag.carrierId);
@@ -59,8 +69,9 @@ function validRoom(room) {
   }
   return room.events.every(event => {
     if (!event || !count(event.id)) return false;
-    if (['flag-pickup', 'flag-drop', 'flag-return', 'flag-capture'].includes(event.type)) return room.modeId === 'ctf' && teams.includes(event.teamId) && (validId(event.playerId) || (event.type === 'flag-return' && event.playerId === null));
-    return ['shot', 'hit', 'kill'].includes(event.type) && validId(event.playerId) && (event.targetId === undefined || validId(event.targetId)) && (event.from === undefined || finitePoint(event.from)) && (event.to === undefined || finitePoint(event.to));
+    if (['pickup', 'melee', 'grenade-throw', 'grenade-burst'].includes(event.type)) return validGearEvent(event);
+    if (['flag-pickup', 'flag-drop', 'flag-return', 'flag-capture'].includes(event.type)) return exactKeys(event, ['id', 'type', 'teamId', 'playerId']) && room.modeId === 'ctf' && teams.includes(event.teamId) && (validId(event.playerId) || (event.type === 'flag-return' && event.playerId === null));
+    return ['shot', 'hit', 'kill'].includes(event.type) && Object.keys(event).every(key => ['id', 'type', 'playerId', 'targetId', 'from', 'to'].includes(key)) && validId(event.playerId) && (event.targetId === undefined || validId(event.targetId)) && (event.from === undefined || finitePoint(event.from)) && (event.to === undefined || finitePoint(event.to));
   });
 }
 
@@ -68,11 +79,13 @@ export class RoomClient {
   constructor({ onRoom = () => {}, onError = () => {}, onDisconnect = () => {} } = {}) {
     this.onRoom = onRoom; this.onError = onError; this.onDisconnect = onDisconnect;
     this.id = null; this.room = null; this.connected = false; this.socket = null; this.cancelPending = null;
+    this.actionSeq = 0;
   }
   async connect(serverBase, request) {
     const base = normaliseServerUrl(serverBase);
     if (!request || !['create', 'join'].includes(request.type)) throw new Error('Choose Create room or Join room.');
     this.close();
+    this.actionSeq = 0;
     return new Promise((resolve, reject) => {
       let socket;
       try { socket = new WebSocket(base.replace(/^http/, 'ws') + '/ws'); } catch { reject(new Error('Unable to open a connection to this server.')); return; }
@@ -108,16 +121,24 @@ export class RoomClient {
         }
         if (packet.type === 'welcome' || packet.type === 'state') {
           if (packet.protocol !== PROTOCOL_VERSION) { if (!welcomed) fail(updateRequired); else this.onError(updateRequired); return; }
-          const valid = validRoom(packet.room) && (packet.type !== 'welcome' || (typeof packet.id === 'string' && packet.room.players.some(player => player.id === packet.id)));
+          const recipientId = packet.type === 'welcome' ? packet.id : this.id;
+          const own = Array.isArray(packet.room?.players) ? packet.room.players.find(player => player?.id === recipientId) : null;
+          const valid = exactKeys(packet, packet.type === 'welcome' ? ['type', 'protocol', 'id', 'room', 'equipment'] : ['type', 'protocol', 'room', 'equipment'])
+            && validRoom(packet.room) && validEquipmentSnapshot(packet.equipment, own)
+            && (!welcomed || packet.equipment.lifeId >= this.room.selfEquipment.lifeId);
           if (!valid) {
             if (!welcomed) fail('The server sent an invalid room snapshot.'); else this.onError('The server sent an invalid room snapshot.');
             return;
           }
           if (packet.type === 'welcome' && !welcomed) {
             this.id = packet.id; this.connected = true; welcomed = true; settled = true; cleanup();
+            packet.room.selfEquipment = packet.equipment;
+            this.actionSeq = Math.max(this.actionSeq, packet.equipment.lastActionSeq);
             this.room = packet.room; resolve(packet); this.onRoom(this.room);
           } else if (packet.type === 'state' && welcomed) {
             if (!packet.room.players.some(player => player.id === this.id)) { this.onError('Your player is missing from the room snapshot.'); return; }
+            packet.room.selfEquipment = packet.equipment;
+            this.actionSeq = Math.max(this.actionSeq, packet.equipment.lastActionSeq);
             this.room = packet.room; this.onRoom(this.room);
           }
         }
@@ -140,6 +161,15 @@ export class RoomClient {
   send(packet) {
     if (!this.connected || !this.socket || this.socket.readyState !== 1) return false;
     try { this.socket.send(JSON.stringify(packet)); return true; } catch { return false; }
+  }
+  sendEquipmentAction(action) {
+    const own = this.room?.players.find(player => player.id === this.id);
+    if (!own || !action || this.actionSeq >= Number.MAX_SAFE_INTEGER) return false;
+    const packet = { type: 'equipment-action', seq: this.actionSeq + 1, lifeId: own.lifeId, ...action };
+    if (!validEquipmentAction(packet) || Object.hasOwn(action, 'type') || Object.hasOwn(action, 'seq') || Object.hasOwn(action, 'lifeId')) return false;
+    if (!this.send(packet)) return false;
+    this.actionSeq = packet.seq;
+    return true;
   }
   close() {
     if (this.suppressDisconnect) this.suppressDisconnect();

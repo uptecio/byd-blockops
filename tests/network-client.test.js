@@ -7,8 +7,19 @@ import { createHeadlessGame, cleanupGame } from './helpers/game-fixture.js';
 import { RoomManager } from '../server/rooms.js';
 import { SKINS } from '../src/skins.js';
 
-const player = (id = 'p1') => ({ id, name: id, teamId: null, skinId: 'ranger', pendingSkinId: null, x: 2, z: 3, y: 0, yaw: 0, pitch: 0, health: 100, kills: 0, deaths: 0, weaponId: 'm4a1', ammo: 30, reserve: 470, reloadRemaining: 0, respawnRemaining: 0, protectedRemaining: 2 });
-const room = () => ({ code: 'ABC123', hostId: 'p1', phase: 'playing', mapId: 'courtyard', modeId: 'ffa', timeLeft: 180, winnerId: null, winnerName: null, winnerTeamId: null, teamScores: { red: 0, blue: 0 }, flags: null, players: [player(), player('p2')], events: [] });
+const player = (id = 'p1') => ({ id, name: id, teamId: null, skinId: 'ranger', pendingSkinId: null, lifeId: 1, heldItem: 'gun', flashRemaining: 0, x: 2, z: 3, y: 0, yaw: 0, pitch: 0, health: 100, kills: 0, deaths: 0, weaponId: 'm4a1', ammo: 30, reserve: 470, reloadRemaining: 0, respawnRemaining: 0, protectedRemaining: 2 });
+function room() {
+  const value = { code: 'ABC123', hostId: 'p1', phase: 'playing', mapId: 'courtyard', modeId: 'ffa', timeLeft: 180, winnerId: null, winnerName: null, winnerTeamId: null, teamScores: { red: 0, blue: 0 }, flags: null, players: [player(), player('p2')], events: [], gear: { loot: [], projectiles: [], smokes: [] } };
+  Object.defineProperty(value, 'selfEquipment', { enumerable: true, configurable: true, get() {
+    const own = value.players[0];
+    return { playerId: own.id, lifeId: own.lifeId, lastActionSeq: 0, equipment: {
+      startingGunId: 'm4a1', activeGunId: own.weaponId, heldItem: own.heldItem, startingGunRemoved: own.weaponId !== 'm4a1',
+      owned: own.health > 0 ? [{ weaponId: own.weaponId, ammo: own.ammo, reserve: own.reserve, cooldown: 0, reloadRemaining: own.reloadRemaining }] : [],
+      knife: own.heldItem === 'knife', grenades: { frag: 0, smoke: 0, flash: 0 }, selectedGrenade: 'frag', throwRemaining: 0, attackLockRemaining: 0, meleeRemaining: 0,
+    } };
+  } });
+  return value;
+}
 function ctfRoom() {
   const snapshot = room(); snapshot.modeId = 'ctf';
   snapshot.players[0].teamId = 'red'; snapshot.players[1].teamId = 'blue';
@@ -19,7 +30,13 @@ class Socket extends EventTarget {
   static instances = [];
   constructor(url) { super(); this.url = url; this.readyState = 0; this.sent = []; Socket.instances.push(this); }
   open() { this.readyState = 1; this.dispatchEvent(new Event('open')); }
-  message(packet) { this.dispatchEvent(new MessageEvent('message', { data: typeof packet === 'string' ? packet : JSON.stringify(packet) })); }
+  message(packet) {
+    if (packet?.room?.selfEquipment) {
+      const { selfEquipment, ...publicRoom } = packet.room;
+      packet = { ...packet, room: publicRoom, equipment: Object.hasOwn(packet, 'equipment') ? packet.equipment : selfEquipment };
+    }
+    this.dispatchEvent(new MessageEvent('message', { data: typeof packet === 'string' ? packet : JSON.stringify(packet) }));
+  }
   send(text) { this.sent.push(JSON.parse(text)); }
   close() { this.readyState = 3; this.dispatchEvent(new Event('close')); }
 }
@@ -64,6 +81,9 @@ test('malformed snapshots never replace a valid room, and intentional close supp
     socket.message({ type: 'state', protocol: 3, room: { ...room(), players: [{ ...player(), x: null }] } });
     assert.equal(client.room.players.length, 2);
     assert.equal(errors.length, 2);
+    const previous = client.room;
+    socket.message({type:'state',protocol:3,room:room(),equipment:{playerId:'wrong-recipient'}});
+    assert.equal(client.room,previous);
     client.close();
     assert.equal(disconnected.length, 0);
   } finally { globalThis.WebSocket = original; }
@@ -424,15 +444,15 @@ test('authoritative ended snapshots with departed carriers render frozen flags w
     const online = new OnlineArena(game, sender, { onEnd: () => { ended++; assert.equal(homePending, true); } });
     const client = new RoomClient({ onRoom: snapshot => online.running ? online.sync(snapshot) : online.start(snapshot, 'p1', { sensitivity: 1 }), onDisconnect: () => online.stop() });
     const pending = client.connect('http://localhost:4180', { type: 'join' });
-    const socket = Socket.instances.at(-1); socket.open(); socket.message({ type: 'welcome', protocol: 3, id: 'p1', room: manager.snapshot(state) }); await pending;
+    const socket = Socket.instances.at(-1); socket.open(); socket.message({ type: 'welcome', protocol: 3, id: 'p1', room: manager.snapshot(state), equipment: manager.equipmentSnapshot('p1') }); await pending;
     online.pause(); manager.tick(180); manager.leave('p2');
     const final = manager.snapshot(state);
-    socket.message({ type: 'state', protocol: 3, room: final }); online.update(.1); online.resume();
+    socket.message({ type: 'state', protocol: 3, room: final, equipment: manager.equipmentSnapshot('p1') }); online.update(.1); online.resume();
     assert.equal(client.room.flags.red.carrierId, 'p2'); assert.equal(game.matchView.ended, true);
     assert.deepEqual(game.objectives.flags.red.position.toArray(), [0, 0, 18]);
     assert.equal(ended, 1); assert.equal(online.suspended, true); assert.equal(game.input.enabled, false);
     assert.equal(packets.at(-1).fire, false); assert.equal(packets.at(-1).x, 0);
-    socket.message({ type: 'state', protocol: 3, room: final }); assert.equal(ended, 1);
+    socket.message({ type: 'state', protocol: 3, room: final, equipment: manager.equipmentSnapshot('p1') }); assert.equal(ended, 1);
     socket.close(); online.sync(final); online.update(.1); online.resume();
     assert.equal(online.running, false); assert.equal(game.input.enabled, false); assert.equal(homePending, true);
     homePending = false; client.close();
@@ -452,15 +472,163 @@ test('a fresh client joining after the FFA winner departs retains the authoritat
     const errors = [];
     const client = new RoomClient({ onRoom: snapshot => online.running ? online.sync(snapshot) : online.start(snapshot, 'late', { sensitivity: 1 }), onError: message => errors.push(message) });
     const pending = client.connect('http://localhost:4180', { type: 'join', code: state.code });
-    const socket = Socket.instances.at(-1); socket.open(); socket.message({ type: 'welcome', protocol: 3, id: 'late', room: manager.snapshot(state) }); await pending;
+    const socket = Socket.instances.at(-1); socket.open(); socket.message({ type: 'welcome', protocol: 3, id: 'late', room: manager.snapshot(state), equipment: manager.equipmentSnapshot('late') }); await pending;
     assert.equal(game.matchView.winnerId, 'winner'); assert.equal(game.matchView.winnerName, 'Victor');
     assert.equal(game.matchView.players.some(player => player.id === 'winner'), false);
     assert.equal(game.input.enabled, false); online.resume(); assert.equal(online.suspended, true);
     const valid = client.room;
     for (const winnerName of [null, '', 12]) {
-      socket.message({ type: 'state', protocol: 3, room: { ...manager.snapshot(state), winnerName } });
+      socket.message({ type: 'state', protocol: 3, room: { ...manager.snapshot(state), winnerName }, equipment: manager.equipmentSnapshot('late') });
       assert.equal(client.room, valid); assert.equal(game.matchView.winnerName, 'Victor');
     }
     assert.equal(errors.length, 3); online.stop(); client.close();
   } finally { globalThis.WebSocket = original; }
+});
+
+test('equipment actions share one connection sequence and current life across kinds rounds and respawns', async () => {
+  const original = globalThis.WebSocket; globalThis.WebSocket = Socket;
+  try {
+    const seen = [], client = new RoomClient({ onRoom: snapshot => seen.push(snapshot.selfEquipment) });
+    const pending = client.connect('http://localhost:4180', { type: 'create' });
+    const socket = Socket.instances.at(-1); socket.open();
+    socket.message({ type: 'welcome', protocol: 3, id: 'p1', room: room() }); await pending;
+    assert.equal(seen[0].playerId, 'p1', 'private snapshot is attached before callback');
+    assert.equal(client.sendEquipmentAction({ kind: 'equip-gun', weaponId: 'mp5', source: 'armory' }), true);
+    assert.equal(client.sendEquipmentAction({ kind: 'throw', grenadeType: 'frag' }), true);
+    const next = room(); next.players[0].lifeId = 2;
+    socket.message({ type: 'state', protocol: 3, room: next });
+    assert.equal(client.sendEquipmentAction({ kind: 'held-item', heldItem: 'knife' }), true);
+    next.phase = 'ended'; socket.message({ type: 'state', protocol: 3, room: next });
+    next.phase = 'playing'; next.players[0].lifeId = 3; socket.message({ type: 'state', protocol: 3, room: next });
+    assert.equal(client.sendEquipmentAction({ kind: 'select-grenade', grenadeType: 'smoke' }), true);
+    assert.deepEqual(socket.sent.filter(p => p.type === 'equipment-action').map(p => [p.seq, p.lifeId]), [[1, 1], [2, 1], [3, 2], [4, 3]]);
+    const count = socket.sent.length;
+    assert.equal(client.sendEquipmentAction({ kind: 'throw', grenadeType: 'frag', ammo: 3 }), false);
+    assert.equal(socket.sent.length, count);
+    const reconnect = client.connect('http://localhost:4180', { type: 'join' });
+    const fresh = Socket.instances.at(-1); fresh.open(); fresh.message({ type: 'welcome', protocol: 3, id: 'p1', room: room() }); await reconnect;
+    client.sendEquipmentAction({ kind: 'throw', grenadeType: 'flash' });
+    assert.equal(fresh.sent.at(-1).seq, 1); client.close();
+  } finally { globalThis.WebSocket = original; }
+});
+
+test('private equipment and public gear validate atomically including stale lives and extra keys', async () => {
+  const original = globalThis.WebSocket; globalThis.WebSocket = Socket;
+  try {
+    const client = new RoomClient(), pending = client.connect('http://localhost:4180', { type: 'create' });
+    const socket = Socket.instances.at(-1); socket.open();
+    const current = room(); current.players[0].lifeId = 2;
+    socket.message({ type: 'welcome', protocol: 3, id: 'p1', room: current }); await pending;
+    const previous = client.room;
+    for (const mutate of [
+      p => { delete p.equipment; }, p => { p.equipment.equipment.grenades.frag = 4; },
+      p => { p.equipment.equipment.owned[0].ammo = 29; }, p => { p.equipment.lifeId = 1; },
+      p => { p.room.players[0].lifeId = 1; p.equipment.lifeId = 1; },
+      p => { p.room.players[1].lifeId = 0; }, p => { p.room.players[1].heldItem = 'rocket'; },
+      p => { p.room.players[1].flashRemaining = 4; },
+      p => { p.room.players = { find: 1 }; },
+      p => { p.room.players[1].health = 0; },
+      p => { p.room.gear.smokes = [{ id: 'bad' }]; }, p => { p.room.gear.extra = []; },
+      p => { p.room.selfEquipment = p.equipment; }, p => { p.extra = 'injected'; },
+      p => { p.room.players[1].equipment = p.equipment.equipment; },
+      p => { p.room.events = [{ id: 3, type: 'pickup', playerId: 'p1', itemId: 'item', item: { kind: 'grenade', grenadeType: 'invalid' } }]; },
+      p => { p.room.events = [{ id: 3, type: 'shot', playerId: 'p1', inventory: [] }]; },
+    ]) {
+      const { selfEquipment, ...publicRoom } = current;
+      const packet = structuredClone({ type: 'state', protocol: 3, room: publicRoom, equipment: selfEquipment });
+      mutate(packet);
+      // Bypass the fixture's convenience extraction to test actual wire keys.
+      socket.message(JSON.stringify(packet)); assert.equal(client.room, previous, mutate.toString());
+    }
+    const good = room(); good.players[0].lifeId = 2;
+    good.events = [{ id: 3, type: 'pickup', playerId: 'p1', itemId: 'item', item: { kind: 'knife' } }];
+    socket.message({ type: 'state', protocol: 3, room: good });
+    assert.equal(client.room.events[0].type, 'pickup'); client.close();
+  } finally { globalThis.WebSocket = original; }
+});
+
+test('online reconciliation owns all ammo and never grants through setWeapon or replayed pickups', () => {
+  const { game, client } = fixture(), messages = [];
+  const online = new OnlineArena(game, client, { onToast: message => messages.push(message) });
+  const snapshot = room(), privateSnapshot = snapshot.selfEquipment;
+  privateSnapshot.equipment.owned.push({ weaponId: 'mp5', ammo: 7, reserve: 11, cooldown: 0, reloadRemaining: 0 });
+  privateSnapshot.equipment.grenades.frag = 2;
+  Object.defineProperty(snapshot, 'selfEquipment', { value: privateSnapshot, enumerable: true });
+  online.start(snapshot, 'p1', { sensitivity: 1 });
+  game.setWeapon = () => assert.fail('online must never use granting solo setter');
+  client.sendEquipmentAction = () => true;
+  const before = online.getEquipmentView();
+  assert.deepEqual(online.requestEquipment({ kind: 'equip-gun', weaponId: 'mp5', source: 'inventory' }), { ok: true });
+  assert.deepEqual(online.getEquipmentView(), before, 'queued action is not an inventory grant');
+  snapshot.players[0].weaponId = 'mp5'; snapshot.players[0].ammo = 7; snapshot.players[0].reserve = 11;
+  privateSnapshot.equipment.activeGunId = 'mp5'; privateSnapshot.equipment.startingGunRemoved = true;
+  privateSnapshot.equipment.owned.shift();
+  snapshot.events = [{ id: 1, type: 'pickup', playerId: 'p1', itemId: 'frag', item: { kind: 'grenade', grenadeType: 'frag' } }];
+  online.sync(snapshot); online.sync(snapshot);
+  assert.equal(game.weaponState.ammo, 7); assert.equal(game.weaponState.reserve, 11);
+  assert.equal(game.inventory.has('m4a1'), false); assert.equal(online.getEquipmentView().grenades.frag, 2);
+  assert.equal(messages.length, 1);
+  privateSnapshot.equipment.owned[0].ammo = 1;
+  assert.equal(game.weaponState.ammo, 7, 'client equipment is detached');
+  const copy = online.getEquipmentView(); copy.grenades.frag = 0;
+  assert.equal(online.getEquipmentView().grenades.frag, 2); online.stop();
+});
+
+test('late joins sync existing world without old effects and suspended removals reach the visual consumer', () => {
+  const { game, client } = fixture(), messages = [], views = [];
+  const online = new OnlineArena(game, client, { onToast: value => messages.push(value) });
+  game.gearView = { sync(value) { views.push(structuredClone(value)); }, dispose() {} };
+  const snapshot = room();
+  snapshot.gear.loot = [{ id: 'knife', x: 0, y: 0, z: 0, item: { kind: 'knife' }, source: 'map', availableRemaining: 0, expiresRemaining: null }];
+  snapshot.gear.smokes = [{ id: 'smoke', ownerId: 'p2', x: 0, y: 0, z: 0, radius: 4, remaining: 6 }];
+  snapshot.events = [{ id: 9, type: 'pickup', playerId: 'p1', itemId: 'old', item: { kind: 'knife' } }];
+  online.start(snapshot, 'p1', { sensitivity: 1 });
+  assert.equal(messages.length, 0); assert.equal(game.gearWorld.smokes.length, 1);
+  snapshot.gear.smokes[0].remaining = 1;
+  assert.equal(game.gearWorld.smokes[0].remaining, 6, 'world is detached');
+  online.pause(); snapshot.gear = { loot: [], projectiles: [], smokes: [] }; online.sync(snapshot);
+  assert.deepEqual(views.at(-1), { loot: [], projectiles: [], smokes: [] });
+  assert.deepEqual(game.gearWorld, { loot: [], projectiles: [], smokes: [] });
+  online.stop();
+});
+
+test('combat packets carry the current life and pending edges clear on death and round transitions', () => {
+  const { game, client, packets, controls } = fixture();
+  const online = new OnlineArena(game, client); online.start(room(), 'p1', { sensitivity: 1 });
+  controls.push({ x: 0, y: 0, lookX: 0, lookY: 0, fire: true, firePressed: true, reload: true }); online.update(.05);
+  assert.equal(packets.at(-1).lifeId, 1);
+  online.sendTimer = 1; controls.push({ x: 0, y: 0, lookX: 0, lookY: 0, firePressed: true, reload: true }); online.update(.01);
+  const snapshot = room(); snapshot.players[0].lifeId = 2; online.sync(snapshot); online.sendTimer = 0; online.update(.05);
+  assert.equal(packets.at(-1).lifeId, 2); assert.equal(packets.at(-1).firePressed, false); assert.equal(packets.at(-1).reload, false);
+  online.pending.firePressed = true; snapshot.players[0].health = 0; snapshot.players[0].ammo = snapshot.players[0].reserve = 0;
+  online.sync(snapshot); assert.equal(online.pending.firePressed, false);
+  online.pending.reload = true; snapshot.phase = 'ended'; online.sync(snapshot); assert.equal(online.pending.reload, false); online.stop();
+});
+
+test('replayed grenade and melee effects trigger each approved audio callback only once', () => {
+  const { game, client } = fixture(), heard = [], effects = [];
+  game.audio.swing = () => heard.push('swing'); game.audio.grenade = type => heard.push(type);
+  game.gearView = { sync() {}, event(event) { effects.push(event.id); } };
+  const online = new OnlineArena(game, client); online.start(room(), 'p1', { sensitivity: 1 });
+  const snapshot = room(); snapshot.events = [
+    { id: 1, type: 'melee', playerId: 'p2' },
+    { id: 2, type: 'grenade-throw', playerId: 'p2', grenadeId: 'frag', grenadeType: 'frag' },
+    { id: 3, type: 'grenade-burst', playerId: 'p2', grenadeId: 'frag', grenadeType: 'frag', position: { x: 0, y: 0, z: 0 } },
+  ];
+  online.sync(snapshot); online.sync(snapshot);
+  assert.deepEqual(heard, ['swing', 'frag']); assert.deepEqual(effects, [1, 2, 3]); online.stop();
+});
+
+test('failed input sends retain one-shot edges only until sent and pause clears queued attacks', () => {
+  const { game, client, controls, packets } = fixture();
+  const online = new OnlineArena(game, client); online.start(room(), 'p1', { sensitivity: 1 });
+  client.send = packet => { packets.push(packet); return false; };
+  controls.push({ x: 0, y: 0, lookX: 0, lookY: 0, firePressed: true, reload: true }); online.update(.05);
+  assert.equal(online.pending.firePressed, true);
+  client.send = packet => { packets.push(packet); return true; }; online.update(.05);
+  assert.equal(packets.at(-1).firePressed, true); assert.equal(online.pending.firePressed, false);
+  online.update(.05); assert.equal(packets.at(-1).firePressed, false);
+  online.pending.firePressed = true; online.pending.reload = true; online.pause();
+  assert.equal(packets.at(-1).firePressed, false); assert.equal(online.pending.reload, false);
+  online.stop();
 });
