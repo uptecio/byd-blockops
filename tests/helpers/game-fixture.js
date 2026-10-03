@@ -9,7 +9,7 @@ export function createHeadlessGame() {
   const input = Object.assign(Object.create(Input.prototype), {
     enabled: false, keys: new Set(), pointers: new Map(), move: { x: 0, y: 0 },
     look: { x: 0, y: 0 }, knob: { style: {} }, fire: false, firePressed: false,
-    jump: false, reload: false, zoom: false,
+    jump: false, reload: false, zoom: false, knifePressed: false, throwPressed: false, grenadePickerPressed: false,
   });
   const game = Object.create(ArenaGame.prototype);
   Object.assign(game, {

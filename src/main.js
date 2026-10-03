@@ -9,6 +9,7 @@ import { HomeUI, validateSelection } from './home-ui.js';
 import { getMap } from './maps.js';
 import { getMode } from './modes.js';
 import { renderMatchHud, renderMatchResults } from './match-ui.js';
+import { EquipmentUI } from './equipment-ui.js';
 
 const $ = id => document.getElementById(id);
 const storageKey = 'block-ops-v1';
@@ -26,25 +27,26 @@ const settings = {
 };
 let selection = validateSelection(saved.selection, saved.weaponId);
 let selected = getWeapon(selection.weaponId), activeClass = selected.classId;
-let mode = 'home', settingsOrigin = 'home', game, preview, home, multiplayer, toastUntil = 0, confirmation = null;
+let mode = 'home', settingsOrigin = 'home', game, preview, home, multiplayer, equipmentUI, toastUntil = 0, confirmation = null;
 let backgroundSuspended = false;
 const audio = new GameAudio();
 const input = new Input(() => pauseGame());
 const classNames = { assault: 'ASSAULT', smg: 'SMG', shotgun: 'SHOTGUN', sniper: 'SNIPER', marksman: 'MARKSMAN', lmg: 'LMG', sidearm: 'SIDEARM' };
 const traits = { assault: 'Versatile. Reliable. Ready for anything.', smg: 'Fast hands. Close quarters. No hesitation.', shotgun: 'Get close. Make every shot count.', sniper: 'One sightline. One perfect shot.', marksman: 'Precision at your own pace.', lmg: 'Big magazines. Keep the pressure on.', sidearm: 'Travel light. Hit above your weight.' };
-function persist() { try { localStorage.setItem(storageKey, JSON.stringify({ weaponId: selected.id, selection, settings })); } catch { /* Play remains available without storage. */ } }
+function persist() { try { localStorage.setItem(storageKey, JSON.stringify({ weaponId: selection.weaponId, selection, settings })); } catch { /* Play remains available without storage. */ } }
 function setMode(next) {
   // A remote start may create/enable an arena while native rendering is
   // suspended. Re-pause it synchronously and retain that state on foreground.
   if (next === 'playing' && (backgroundSuspended || document.hidden)) { backgroundSuspended = true; next = 'paused'; }
   confirmation = null; $('confirm-home-screen').hidden = true;
   mode = next; document.body.dataset.mode = next;
+  equipmentUI?.close();
   // Remote starts, results and disconnects replace any locally open settings.
   $('settings-screen').hidden = true;
   $('home-screen').hidden = next !== 'home';
   $('armory').hidden = next !== 'armory';
   $('online-screen').hidden = next !== 'lobby';
-  $('game-ui').hidden = !['playing', 'paused', 'results', 'confirm-home'].includes(next);
+  $('game-ui').hidden = !['playing', 'paused', 'results', 'confirm-home', 'grenade-picker'].includes(next);
   $('pause-screen').hidden = next !== 'paused';
   $('results-screen').hidden = next !== 'results';
   const online = multiplayer && multiplayer.isActive();
@@ -99,9 +101,10 @@ function selectConfiguration(next) {
   else apply();
 }
 function pauseGame() {
+  if (mode === 'grenade-picker') { setMode('paused'); $('resume-button').focus({ preventScroll: true }); return; }
   if (mode === 'playing') { setMode('paused'); $('resume-button').focus({ preventScroll: true }); }
 }
-function suspendForBackground() { backgroundSuspended = true; input.clear(); pauseGame(); }
+function suspendForBackground() { backgroundSuspended = true; input.clear(); equipmentUI?.close(); if (mode === 'grenade-picker') setMode('paused'); else pauseGame(); }
 window.pauseGame = suspendForBackground;
 document.addEventListener('visibilitychange', () => { if (document.hidden) suspendForBackground(); });
 window.addEventListener('blur', suspendForBackground);
@@ -134,10 +137,18 @@ function renderSelected() {
 $('class-tabs').addEventListener('click', event => { const button = event.target.closest('[data-class]'); if (button) { activeClass = button.dataset.class; renderTabs(); } });
 $('weapon-grid').addEventListener('click', event => {
   const button = event.target.closest('[data-weapon]'); if (!button) return;
-  selected = getWeapon(button.dataset.weapon); selection.weaponId = selected.id; renderSelected(); persist();
+  selected = getWeapon(button.dataset.weapon);
+  if (equipmentView().roundId) equipmentUI.previewGun(selected.id);
+  else { selection.weaponId = selected.id; multiplayer?.setLoadout(selected.id); persist(); }
+  renderSelected(); equipmentUI?.render(); renderArmorySession();
 });
+function equipmentView() {
+  const online = multiplayer?.isActive(), live = online ? multiplayer.room.phase === 'playing' : game?.hasRound && !game.match.ended;
+  if (!live) return { owned: [], grenades: { frag: 0, smoke: 0, flash: 0 }, selectedGrenade: 'frag', alive: false, roundId: null };
+  return { ...(online ? multiplayer.arena.getEquipmentView() : game.getEquipmentView()), lifeId: game.player.lifeId, roundId: online ? multiplayer.arena : game.modeState, alive: game.player.health > 0 && game.player.dead <= 0 };
+}
 function showArmory() {
-  setMode('armory'); activeClass = selected.classId; renderSelected();
+  setMode('armory'); selected = getWeapon(equipmentView().activeGunId || selection.weaponId); activeClass = selected.classId; renderSelected(); equipmentUI?.render();
   renderArmorySession();
 }
 function renderArmorySession() {
@@ -147,18 +158,22 @@ function renderArmorySession() {
   $('armory-mode').textContent = `${getMode(modeId).name.toUpperCase()} · ${multiplayer?.isConnected() ? 'ONLINE FRIENDS' : 'SOLO VS BOTS'}`;
   $('session-target').textContent = `${getMode(modeId).scoreLimit} ${modeId === 'ctf' ? 'CAPTURES' : modeId === 'tdm' ? 'TEAM KILLS' : 'ELIMINATIONS'}`;
   $('play-button').innerHTML = multiplayer && multiplayer.isConnected() ? (multiplayer.room.phase === 'playing' ? 'RETURN TO MATCH <span>↗</span>' : 'BACK TO ROOM <span>↗</span>') : game && game.hasRound && !game.match.ended ? 'RETURN TO MATCH <span>↗</span>' : 'DEPLOY <span>↗</span>';
+  if (equipmentUI?.currentSelection()) $('play-button').innerHTML = 'EQUIP & RETURN <span>↗</span>';
 }
 function deploy(forceNew = false) {
   if (!game) return;
-  if (multiplayer && multiplayer.isConnected()) { multiplayer.deploy(selected.id); document.activeElement.blur(); return; }
+  if (multiplayer && multiplayer.isConnected()) {
+    if (equipmentUI.currentSelection()) equipmentUI.confirmGun(); else multiplayer.deploy();
+    document.activeElement.blur(); return;
+  }
   audio.unlock();
   if (forceNew || !game.hasRound || game.match.ended) {
     // Explicit foreground deployment authorizes a NEW solo round, not a
     // resumed/remote one. Background clicks retain the Resume requirement.
     if (!document.hidden && document.hasFocus()) backgroundSuspended = false;
-    game.start(selected.id, { ...settings, ...selection });
+    game.start(selection.weaponId, { ...settings, ...selection });
   }
-  else { game.setWeapon(selected.id); game.resume(); }
+  else { const result = equipmentUI.confirmGun(); if (result && !result.ok) return; game.resume(); }
   setMode('playing'); game.events.onHud(game); document.activeElement.blur();
 }
 $('play-button').addEventListener('click', () => deploy());
@@ -218,6 +233,7 @@ class WeaponPreview {
   }
 }
 function onHud(current) {
+  equipmentUI?.render();
   renderMatchHud(current.getMatchView(), multiplayer?.isActive() ? multiplayer.client.id : 'local');
   $('health-count').textContent = Math.ceil(current.player.health);
   $('health-bar').style.width = `${current.player.health}%`;
@@ -228,7 +244,7 @@ function onHud(current) {
   $('reload-status').textContent = current.weaponState.reloadRemaining > 0 ? `RELOADING ${current.weaponState.reloadRemaining.toFixed(1)}s` : current.weaponState.ammo === 0 ? 'TAP RELOAD' : '';
   $('hit-marker').style.opacity = current.hitFlash > 0 ? 1 : 0;
   $('damage-flash').style.opacity = Math.min(1, current.damageFlash * 4);
-  $('scope-overlay').hidden = !(input.zoom && current.weapon.classId === 'sniper');
+  $('scope-overlay').hidden = !(input.zoom && current.heldItem === 'gun' && current.weapon.classId === 'sniper');
   $('zoom-button').classList.toggle('active', input.zoom);
   $('respawn-banner').hidden = current.player.dead <= 0;
   $('respawn-count').textContent = Math.ceil(current.player.dead);
@@ -244,6 +260,17 @@ try {
     onFatal: showFatal,
   });
   multiplayer = new MultiplayerUI({ getGame: () => game, getSettings: () => settings, getSelected: () => selected, getSelection: () => selection, onSkin: skinId => selectConfiguration({ ...selection, skinId }), onConfiguration: next => { selection = validateSelection({ ...selection, ...next }); persist(); home.render(); }, onRoomSettings: () => { if (mode === 'armory') renderArmorySession(); }, onHome: requestHome, onMode: setMode, onLoadout: showArmory, onToast: message => { $('toast').textContent = message; toastUntil = performance.now() + 1900; } });
+  equipmentUI = new EquipmentUI({ getView: equipmentView,
+    onAction: action => multiplayer?.isActive() ? action.kind === 'equip-gun' && mode === 'armory'
+      ? multiplayer.deploy({ equipWeaponId: action.weaponId, source: action.source }) : multiplayer.arena.requestEquipment(action) : game.requestEquipment(action),
+    onPicker: open => { input.clear(); setMode(open ? 'grenade-picker' : 'paused'); },
+    onToast: message => { $('toast').textContent = message; toastUntil = performance.now() + 1900; } });
+  game.events.onEquipmentPicker = () => equipmentUI.openPicker();
+  $('grenade-picker-resume').addEventListener('click', () => {
+    if (document.hidden) { suspendForBackground(); return; } backgroundSuspended = false;
+    audio.unlock(); if (multiplayer?.isActive()) multiplayer.resume(); else game.resume(); setMode('playing');
+  });
+  $('armory-cancel').addEventListener('click', () => { equipmentUI.close(); if (equipmentView().roundId) setMode('paused'); else if (multiplayer?.isConnected()) multiplayer.open(); else showHome(); });
   home = new HomeUI({ getSelection: () => selection, onSelection: selectConfiguration, onSolo: () => deploy(), onOnline: () => multiplayer.open(), onArmory: showArmory, onSettings: openSettings });
   preview = new WeaponPreview($('weapon-preview'));
   let previous = performance.now();
@@ -253,8 +280,15 @@ try {
       if (multiplayer && multiplayer.isActive()) multiplayer.update(dt);
       else if (mode === 'playing') game.update(dt);
       if (mode === 'armory' && $('settings-screen').hidden) preview.render(now / 1000);
+      if (mode === 'armory' || mode === 'grenade-picker') {
+        equipmentUI.render();
+        const pending = equipmentUI.currentSelection();
+        if (pending && selected.id !== pending.weaponId) { selected = getWeapon(pending.weaponId); renderSelected(); }
+        renderArmorySession();
+      }
       if (mode === 'home' && $('settings-screen').hidden) home.renderPreview(now / 1000);
     }
+    if (now > toastUntil) $('toast').textContent = '';
     requestAnimationFrame(frame);
   }
   requestAnimationFrame(frame);

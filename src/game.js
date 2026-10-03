@@ -224,13 +224,14 @@ export class ArenaGame {
   simulate(dt) {
     if (!Number.isFinite(dt) || dt <= 0) return;
     const steps = Math.ceil(dt / .05);
-    for (let step = 0; step < steps && !this.modeState.ended; step++) this.simulateStep(dt / steps);
+    for (let step = 0; step < steps && this.active && !this.modeState.ended; step++) this.simulateStep(dt / steps);
   }
   simulateStep(dt) {
     if (this.modeState.ended) return;
+    const input = this.input.read();
+    if (input.grenadePickerPressed) { this.events.onEquipmentPicker?.(); if (!this.active) return; }
     this.simulationTime += dt;
     tickLoot(this.lootState, dt);
-    const input = this.input.read();
     tickEquipment(this.player.equipment, dt);
     this.player.flashRemaining = Math.max(0, this.player.flashRemaining - dt);
     this.player.protected = Math.max(0, this.player.protected - dt);
@@ -240,7 +241,12 @@ export class ArenaGame {
     }
     const actors = this.getActors(), playerActor = actors[0];
     if (this.player.dead <= 0) {
-      const zoom = input.zoom;
+      if (input.knifePressed) {
+        const result = this.requestEquipment({ kind: 'held-item', heldItem: this.player.equipment.heldItem === 'knife' ? 'gun' : 'knife' });
+        if (!result.ok) this.events.onToast(result.reason);
+        this.input.zoom = false;
+      }
+      const zoom = input.zoom && this.player.equipment.heldItem === 'gun';
       const sensitivity = .0026 * this.settings.sensitivity / (zoom ? Math.sqrt(this.weapon.zoom) : 1);
       this.yaw -= input.lookX * sensitivity;
       this.pitch = THREE.MathUtils.clamp(this.pitch - input.lookY * sensitivity, -1.25, 1.25);
@@ -254,6 +260,10 @@ export class ArenaGame {
       this.player.jump = Math.max(0, this.player.jump + this.player.velocity * dt);
       if (this.player.jump === 0) this.player.velocity = 0;
       Object.assign(playerActor, { x: this.player.x, y: this.player.jump, z: this.player.z, yaw: this.yaw, pitch: -this.pitch });
+      if (input.throwPressed) {
+        const result = this.requestEquipment({ kind: 'throw', grenadeType: this.player.equipment.selectedGrenade });
+        if (!result.ok) this.events.onToast(result.reason);
+      }
       if (input.reload && this.player.equipment.heldItem === 'gun' && startReload(this.weaponState)) this.audio.reload();
       this.placeCamera();
       if (input.fire && this.player.equipment.heldItem === 'knife') this.slash(playerActor, actors);

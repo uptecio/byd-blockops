@@ -157,6 +157,15 @@ export class OnlineArena {
     let input = null;
     if (!this.suspended && this.room.phase === 'playing' && game.player.dead <= 0 && game.player.health > 0) {
       input = game.input.read();
+      if (input.grenadePickerPressed) { game.events.onEquipmentPicker?.(); if (this.suspended) input = null; }
+      if (input?.knifePressed) {
+        this.requestEquipment({ kind: 'held-item', heldItem: game.player.equipment.heldItem === 'knife' ? 'gun' : 'knife' });
+        game.input.zoom = false;
+      }
+      if (input?.throwPressed) this.requestEquipment({ kind: 'throw', grenadeType: game.player.equipment.selectedGrenade });
+      if (input && game.player.equipment.heldItem === 'knife') input.zoom = input.reload = false;
+    }
+    if (input) {
       const sensitivity = .0026 * game.settings.sensitivity / (input.zoom ? Math.sqrt(game.weapon.zoom) : 1);
       game.yaw -= input.lookX * sensitivity; game.pitch = THREE.MathUtils.clamp(game.pitch - input.lookY * sensitivity, -1.25, 1.25);
       for (const key of ['firePressed', 'jump', 'reload']) this.pending[key] = this.pending[key] || !!input[key];

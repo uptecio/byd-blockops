@@ -9,6 +9,7 @@ export class Input {
     this.jump = false;
     this.reload = false;
     this.zoom = false;
+    this.knifePressed = this.throwPressed = this.grenadePickerPressed = false;
     this.pointers = new Map();
     const stick = document.getElementById('joystick');
     this.knob = document.getElementById('joystick-knob');
@@ -33,6 +34,7 @@ export class Input {
       stickPointer = null; this.move.x = this.move.y = 0; this.knob.style.transform = '';
     };
     for (const event of ['pointerup', 'pointercancel', 'lostpointercapture']) stick.addEventListener(event, stopStick);
+    stick.addEventListener('pointercancel', () => this.clear());
     for (const id of ['aim-zone', 'fire-button']) {
       const element = document.getElementById(id);
       element.addEventListener('pointerdown', e => {
@@ -51,19 +53,31 @@ export class Input {
         this.pointers.delete(e.pointerId);
         this.fire = this.keys.has('KeyF') || [...this.pointers.values()].some(p => p.fire);
       };
-      for (const event of ['pointerup', 'pointercancel', 'lostpointercapture']) element.addEventListener(event, release);
+      element.addEventListener('pointerup', release);
+      for (const event of ['pointercancel', 'lostpointercapture']) element.addEventListener(event, e => {
+        if (event === 'pointercancel' || this.pointers.has(e.pointerId)) this.clear();
+      });
     }
     for (const [id, action] of [['jump-button', 'jump'], ['reload-button', 'reload']]) {
       document.getElementById(id).addEventListener('pointerdown', e => {
-        if (this.enabled) { e.preventDefault(); this[action] = true; }
+        if (this.enabled && !e.currentTarget.disabled) { e.preventDefault(); this[action] = true; }
       });
+    }
+    for (const [id, action] of [['knife-button', 'knifePressed'], ['throw-button', 'throwPressed'], ['grenade-type-button', 'grenadePickerPressed']]) {
+      const button = document.getElementById(id);
+      button.addEventListener('pointerdown', e => { if (this.enabled && !button.disabled) { e.preventDefault(); button.setPointerCapture(e.pointerId); this[action] = true; } });
+      button.addEventListener('pointercancel', () => this.clear());
     }
     document.getElementById('zoom-button').addEventListener('click', () => { if (this.enabled) this.zoom = !this.zoom; });
     window.addEventListener('keydown', e => {
       if (e.code === 'Escape') { onPause(); return; }
       if (!this.enabled) return;
-      if (['KeyW','KeyA','KeyS','KeyD','KeyF','KeyR','Space','KeyE','ArrowUp','ArrowDown','ArrowLeft','ArrowRight'].includes(e.code)) e.preventDefault();
+      if (['KeyW','KeyA','KeyS','KeyD','KeyF','KeyR','Space','KeyE','KeyQ','KeyG','KeyT','ArrowUp','ArrowDown','ArrowLeft','ArrowRight'].includes(e.code)) e.preventDefault();
+      const fresh = !e.repeat && !this.keys.has(e.code);
       this.keys.add(e.code);
+      if (fresh && e.code === 'KeyQ') this.knifePressed = true;
+      if (fresh && e.code === 'KeyG') this.throwPressed = true;
+      if (fresh && e.code === 'KeyT') this.grenadePickerPressed = true;
       if (e.code === 'KeyF') { this.fire = true; if (!e.repeat) this.firePressed = true; }
       if (e.code === 'KeyR' && !e.repeat) this.reload = true;
       if (e.code === 'Space' && !e.repeat) this.jump = true;
@@ -71,10 +85,13 @@ export class Input {
     });
     window.addEventListener('keyup', e => { this.keys.delete(e.code); if (e.code === 'KeyF') this.fire = [...this.pointers.values()].some(p => p.fire); });
     window.addEventListener('blur', () => { stickPointer = null; this.clear(); });
+    document.addEventListener('visibilitychange', () => { if (document.hidden) this.clear(); });
+    document.addEventListener('pointercancel', () => this.clear());
     this.resetStick = () => { stickPointer = null; };
   }
   clear() {
     this.keys.clear(); this.pointers.clear(); this.fire = this.firePressed = this.jump = this.reload = this.zoom = false;
+    this.knifePressed = this.throwPressed = this.grenadePickerPressed = false;
     this.move.x = this.move.y = this.look.x = this.look.y = 0;
     this.knob.style.transform = ''; if (this.resetStick) this.resetStick();
   }
@@ -83,8 +100,9 @@ export class Input {
     let x = this.move.x + Number(this.keys.has('KeyD') || this.keys.has('ArrowRight')) - Number(this.keys.has('KeyA') || this.keys.has('ArrowLeft'));
     let y = this.move.y + Number(this.keys.has('KeyW') || this.keys.has('ArrowUp')) - Number(this.keys.has('KeyS') || this.keys.has('ArrowDown'));
     const length = Math.hypot(x, y); if (length > 1) { x /= length; y /= length; }
-    const result = { x, y, lookX: this.look.x, lookY: this.look.y, fire: this.fire || this.firePressed, firePressed: this.firePressed, jump: this.jump, reload: this.reload, zoom: this.zoom };
+    const result = { x, y, lookX: this.look.x, lookY: this.look.y, fire: this.fire || this.firePressed, firePressed: this.firePressed, jump: this.jump, reload: this.reload, zoom: this.zoom, knifePressed: this.knifePressed, throwPressed: this.throwPressed, grenadePickerPressed: this.grenadePickerPressed };
     this.look.x = this.look.y = 0; this.jump = this.reload = this.firePressed = false;
+    this.knifePressed = this.throwPressed = this.grenadePickerPressed = false;
     return result;
   }
 }

@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { MultiplayerUI } from '../src/multiplayer-ui.js';
 import { RoomManager } from '../server/rooms.js';
 import { createHeadlessGame, cleanupGame } from './helpers/game-fixture.js';
+import { createInputFixture } from './helpers/input-fixture.js';
 
 class Element extends EventTarget {
   constructor() { super(); this.value = ''; this.hidden = false; this.dataset = {}; this.children = []; this.classList = { toggle() {} }; }
@@ -125,4 +126,63 @@ test('a remote start while lobby settings are open keeps that overlay and contro
   assert.equal(body.dataset.mode, 'lobby'); assert.equal(modes.includes('playing'), false);
   assert.equal(document.getElementById('settings-screen').hidden, false);
   assert.equal(ui.arena.suspended, true); assert.equal(game.input.enabled, false);
+});
+test('real online input queues knife and one throw, while T immediately sends neutral controls', t => {
+  const { ui, game, manager, receive, sent } = fixture(t); manager.start('p1'); receive(); sent.length = 0;
+  game.input.knifePressed = true; game.input.throwPressed = true; game.input.firePressed = true;
+  ui.update(.05);
+  assert.deepEqual(sent.filter(packet => packet.type === 'equipment-action').map(packet => packet.kind), ['held-item', 'throw']);
+  assert.equal(sent.findLast(packet => packet.type === 'input').firePressed, true, 'equipment edges do not drain fire');
+  assert.equal(game.player.equipment.heldItem, 'gun', 'queued actions cannot grant local knife');
+  ui.update(.05); assert.equal(sent.filter(packet => packet.kind === 'throw').length, 1);
+  sent.length = 0; game.events.onEquipmentPicker = () => ui.pause();
+  game.input.grenadePickerPressed = game.input.throwPressed = game.input.fire = true; ui.update(.05);
+  assert.equal(ui.arena.suspended, true); assert.equal(sent.some(packet => packet.type === 'equipment-action'), false);
+  assert.equal(sent.filter(packet => packet.type === 'input').every(packet => !packet.fire && !packet.firePressed && !packet.reload && !packet.jump), true);
+});
+
+async function equipmentFixture(t) {
+  const dom = createInputFixture(); t.after(dom.restore);
+  const game = createHeadlessGame(); t.after(() => cleanupGame(game)); game.start('m4a1', { bots: 1 }); game.pause();
+  const { EquipmentUI } = await import('../src/equipment-ui.js');
+  const messages = [];
+  const ui = new EquipmentUI({ getView: () => ({ ...game.getEquipmentView(), lifeId: game.player.lifeId, roundId: game.modeState, alive: game.player.health > 0 }),
+    onAction: action => game.requestEquipment(action), onPicker: () => { game.pause(); dom.input.clear(); }, onToast: message => messages.push(message) });
+  return { ...dom, game, ui, messages };
+}
+test('preview then cancellation and plain Return to Match never equip a gun', async t => {
+  const { game, ui } = await equipmentFixture(t);
+  ui.previewGun('mp5', 'armory'); ui.close(); assert.equal(ui.confirmGun(), null);
+  assert.equal(game.player.equipment.activeGunId, 'm4a1'); assert.equal(game.player.equipment.startingGunRemoved, false);
+});
+test('confirming an owned gun preserves ammunition and removed original shows loot denial', async t => {
+  const { game, ui, messages, buttons } = await equipmentFixture(t);
+  game.requestEquipment({ kind: 'equip-gun', weaponId: 'mp5', source: 'armory' }); game.weaponState.ammo = 7; game.weaponState.reserve = 12;
+  ui.previewGun('awp', 'armory'); assert.equal(ui.confirmGun().ok, true);
+  ui.previewGun('mp5', 'carried'); assert.equal(ui.confirmGun().ok, true); assert.equal(game.weaponState.ammo, 7); assert.equal(game.weaponState.reserve, 12);
+  ui.previewGun('m4a1', 'armory'); ui.render(); assert.equal(buttons.get('equipment-selection-status').textContent, 'Find this gun as loot');
+  assert.equal(ui.confirmGun().ok, false); assert.equal(messages.at(-1), 'Find this gun as loot'); assert.equal(game.player.equipment.activeGunId, 'mp5');
+});
+test('Armory gun cards explain unavailable original and owned ammunition directly on touch', async t => {
+  const { game, ui } = await equipmentFixture(t);
+  game.requestEquipment({ kind: 'equip-gun', weaponId: 'mp5', source: 'armory' }); game.weaponState.ammo = 7; game.weaponState.reserve = 12;
+  const original = document.getElementById('original-card'); original.dataset.weapon = 'm4a1';
+  const carried = document.getElementById('owned-card'); carried.dataset.weapon = 'mp5'; ui.render();
+  assert.equal(original.querySelector('.weapon-type').textContent, 'Find this gun as loot');
+  assert.equal(carried.querySelector('.weapon-type').textContent, 'CARRIED · 7 / 12');
+});
+test('a changed life or round discards pending preview before confirmation', async t => {
+  const { game, ui } = await equipmentFixture(t); ui.previewGun('mp5', 'armory'); game.resetPlayer();
+  assert.equal(ui.confirmGun(), null); assert.equal(game.player.equipment.activeGunId, 'm4a1');
+  ui.previewGun('awp', 'armory'); game.start('m4a1', { bots: 1 }); assert.equal(ui.confirmGun(), null);
+});
+test('grenade picker clears combat, selects without throwing and requires explicit resume', async t => {
+  const { game, ui, input, buttons } = await equipmentFixture(t); game.player.equipment.grenades.smoke = 1;
+  input.fire = input.throwPressed = true; ui.openPicker(); assert.equal(input.read().fire, false); assert.equal(buttons.get('grenade-picker').hidden, false);
+  assert.equal(ui.selectType('smoke').ok, true); assert.equal(game.player.equipment.selectedGrenade, 'smoke'); assert.equal(game.player.equipment.grenades.smoke, 1);
+  assert.equal(game.active, false); ui.close(); assert.equal(buttons.get('grenade-picker').hidden, true);
+});
+test('an empty grenade picker focuses its enabled Return button', async t => {
+  const { ui } = await equipmentFixture(t); const resume = document.getElementById('grenade-picker-resume'); ui.openPicker();
+  assert.equal(document.activeElement, resume);
 });
