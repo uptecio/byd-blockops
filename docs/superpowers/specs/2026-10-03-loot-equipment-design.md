@@ -2,7 +2,7 @@
 
 Add usable guns, a knife, and explosive, smoke and flash grenades to the existing touch-controlled arena game. Players start fighting with their chosen gun, collect equipment while moving through the map, and lose collected equipment when eliminated. The intended loop is fight, collect, choose equipment, and fight again without a backpack-management screen.
 
-The user approved the gameplay summary on 2026-10-03. This written specification is a draft for review, not an implementation approval or a completed release. The approved choices are recorded below. Sections labelled Proposed make the remaining behaviour and balance decisions explicit for review.
+The user approved both the gameplay summary and this written specification on 2026-10-03. The sections labelled Proposed record the detailed defaults included in that approval; balance values are initial playtest settings. The implementation plan still needs review and an execution-method choice before product code changes. This document is not a completed release.
 
 ## Approved gameplay
 
@@ -131,4 +131,4 @@ Do not change the live game while designing or testing. Back up the previous ass
 
 ## Review status
 
-The gameplay summary is approved. The proposed details in this written specification await user review. After that approval, write the implementation plan for review and execution-method selection required by Superpowers. No product code, live assets, server process or APK is changed by this design document.
+The gameplay summary and written specification are approved. The next step is review of the implementation plan and an execution-method choice required by Superpowers. No product code, live assets, server process or APK is changed by this design document.
