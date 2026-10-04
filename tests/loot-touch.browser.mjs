@@ -54,7 +54,7 @@ try {
     await page.locator('#grenade-type-button').click();
     await page.locator('#grenade-picker').waitFor({ state: 'visible' });
     const paused = await ammo(), timer = await page.locator('#timer').textContent();
-    await page.locator('[data-grenade-type="flash"]').click();
+    await page.locator('#grenade-options [data-grenade-type="flash"]').click();
     assert.equal(await count(), 2, 'type picker selection preserves grenade inventory');
     await page.waitForTimeout(700);
     assert.equal(await ammo(), paused); assert.equal(await page.locator('#timer').textContent(), timer, 'solo picker pauses equipment and match timers');

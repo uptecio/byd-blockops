@@ -35,6 +35,7 @@ export function renderMatchHud(view, ownId) {
 export function renderMatchResults(view, ownId, { best } = {}) {
   if (!view) return;
   const zombies = view.modeId === 'zombies';
+  document.querySelector('.results-dialog')?.classList.toggle('zombie-results', zombies);
   if ($('result-kills-label')) $('result-kills-label').textContent = zombies ? 'WAVES COMPLETED' : 'ELIMINATIONS';
   if ($('result-deaths-label')) $('result-deaths-label').textContent = zombies ? 'ZOMBIES DEFEATED' : 'DEATHS';
   if ($('zombie-best')) $('zombie-best').hidden = !zombies;

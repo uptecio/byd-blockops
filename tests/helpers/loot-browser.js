@@ -197,7 +197,7 @@ export async function moveTo(page, peer, x, z) {
 export async function selectGrenade(page, type) {
   await page.locator('#grenade-type-button').click();
   await page.locator('#grenade-picker').waitFor({ state: 'visible' });
-  await page.locator(`[data-grenade-type="${type}"]`).click();
+  await page.locator(`#grenade-options [data-grenade-type="${type}"]`).click();
   await page.locator('#grenade-picker-resume').click();
   await page.waitForSelector('body[data-mode="playing"]');
 }

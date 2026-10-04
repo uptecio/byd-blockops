@@ -17,6 +17,7 @@
     "test:loot:touch": "node tests/loot-touch.browser.mjs",
     "test:webview": "node tests/webview-startup.browser.mjs && node tests/webview-layout.browser.mjs && node tests/runtime-errors.browser.mjs",
     "test:inventory": "node tests/inventory.browser.mjs",
+    "test:zombies": "node tests/zombies.browser.mjs && node tests/zombies-layout.browser.mjs",
     "apk": "npm run build && bash scripts/build-apk.sh",
     "test:apk": "node android/tests/package-smoke.mjs"
   },

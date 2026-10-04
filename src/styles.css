@@ -47,6 +47,7 @@ h1{font-size:48px}.loadout-panel h2{font-size:36px}.online-heading h2{font-size:
 .score-panel.zombie-score>span{font-size:12px;white-space:nowrap}
 #fire-button:disabled{opacity:.45;border-style:dashed}
 #zombie-best{color:#dafa58;font-size:12px}
+@media(max-height:560px){.zombie-results{padding:18px 24px}.zombie-results h2{margin:8px 0}.zombie-results .result-stats{margin:12px 0}.zombie-results #zombie-best{margin:8px 0}.zombie-results>.primary{margin-top:14px}}
 @media(max-width:650px){.mode-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.zombie-score{min-width:0}.score-panel.zombie-score strong{font-size:17px}.score-panel.zombie-score>span{font-size:10px}}
 .inventory-slots::-webkit-scrollbar-thumb{background:#94b7ca;border-radius:4px}
 .inventory-slot{flex:0 0 auto;position:relative;display:grid;grid-template-columns:14px auto;grid-template-rows:18px 13px 11px;column-gap:3px;align-content:center;width:auto;height:54px;min-width:90px;min-height:44px;padding:5px;border:1px solid #98e2ff88;border-radius:6px;background:#20374b;color:#f3f8fc;text-align:left;pointer-events:auto;touch-action:none}

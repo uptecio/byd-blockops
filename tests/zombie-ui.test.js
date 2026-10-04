@@ -35,10 +35,12 @@ test('results count completed waves rather than unfinished current wave and show
   assert.equal($('result-kills').textContent,0); assert.equal($('result-kills-label').textContent,'WAVES COMPLETED');
   assert.equal($('result-deaths').textContent,12); assert.equal($('result-deaths-label').textContent,'ZOMBIES DEFEATED');
   assert.match($('zombie-best').textContent,/2 WAVES.*14 KILLS/); assert.equal($('zombie-best').hidden,false);
+  assert.equal($('.results-dialog').classList.contains('zombie-results'),true);
   renderMatchResults({ ...v,modeId:'ffa',winnerId:'local',winnerTeamId:null },'local');
   assert.equal($('result-title').textContent,'YOU WON.'); assert.equal($('result-kills').textContent,12);
   assert.equal($('result-kills-label').textContent,'ELIMINATIONS'); assert.equal($('result-deaths-label').textContent,'DEATHS');
   assert.equal($('zombie-best').hidden,true);
+  assert.equal($('.results-dialog').classList.contains('zombie-results'),false);
 });
 test('ordinary minimal result fixture stays supported and shipped markup contains all new labels',t=>{
   const $=dom(t),previous=globalThis.document.getElementById;
