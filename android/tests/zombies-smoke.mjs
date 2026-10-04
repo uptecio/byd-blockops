@@ -123,7 +123,7 @@ try {
     }} finally {await key('keyUp',code);}
   };
   await walk('KeyW',3); await walk('KeyA',6);
-  assert.equal(await evaluate('document.querySelectorAll("[data-inventory-key=\"grenade:frag\"]").length'),1,'Real movement collects visible numbered loot');
+  assert.equal(await evaluate(`document.querySelectorAll('[data-inventory-key="grenade:frag"]').length`),1,'Real movement collects visible numbered loot');
   await evaluate(`document.querySelector('[data-inventory-key="grenade:frag"]').click()`);
   assert.equal(await evaluate(`document.querySelector('[data-inventory-key="grenade:frag"]').getAttribute('aria-pressed')`),'true');
   const ammo=()=>evaluate('Number(document.getElementById("ammo-count").textContent)');
@@ -162,4 +162,3 @@ try {
   if(socket)socket.close();
   if(forwarded)await command('forward','--remove','tcp:9228');
 }
-
