@@ -153,7 +153,8 @@ try {
   await tap('again-button');await wait(s=>s.mode==='playing');
   assert.equal(await evaluate('document.getElementById("kills").textContent'),'WAVE 1');
   assert.equal(await evaluate('document.getElementById("health-count").textContent'),'100');
-  await tap('home-button');await tap('confirm-home');await wait(s=>s.mode==='home');
+  await tap('home-button');await wait(s=>s.mode==='confirm-home');
+  await tap('confirm-home');await wait(s=>s.mode==='home');
   assert.deepEqual(errors,[],'No JavaScript or CSP errors');
   assert.deepEqual(remote,[],'Zombie mode loads no remote resources');
   assert.deepEqual(webSockets,[],'Zombie mode never connects online');
