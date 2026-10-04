@@ -2,7 +2,7 @@
 
 Add an offline Zombie Survival mode to Block Ops. Play alone on any existing map, collect and switch weapons using the current inventory, clear increasingly large zombie waves, recover between waves, and survive until death. Keep existing solo bot matches and online multiplayer working as they do now.
 
-The user approved the gameplay summary on 2026-10-04. This written specification is awaiting their review; implementation has not started. Details labelled Proposed are initial design and playtest defaults, not additional choices already confirmed by the user.
+The user approved the gameplay summary and this written specification on 2026-10-04. Details labelled Proposed are the initial design and playtest defaults included in that approval. The implementation plan still needs review and an execution-method choice before product code changes; implementation has not started.
 
 ## Approved gameplay
 
