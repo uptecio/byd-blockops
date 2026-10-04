@@ -17,6 +17,7 @@ import { createGearCombatState, throwGrenade, stepGearCombat, meleeTarget, smoke
 import { GEAR_BALANCE } from './equipment-catalog.js';
 import { GearView, createKnifeModel } from './gear-view.js';
 import { hasOwn } from './has-own.js';
+import { ZombieRuntime } from './zombie-runtime.js';
 
 export function disposeModel(model) {
   if (!model) return;
@@ -102,6 +103,7 @@ export class ArenaGame {
     if (action.kind === 'held-item') return setHeldItem(actor.equipment, action.heldItem);
     if (action.kind === 'select-grenade') return selectGrenade(actor.equipment, action.grenadeType);
     if (!this.active) return { ok: false, reason: 'Cannot throw while paused' };
+    if (this.zombieRuntime && !this.zombieRuntime.canAttack()) return { ok: false, reason: 'Get ready for the next wave' };
     return throwGrenade(this.gearCombatState, actor, action.grenadeType, { solids: this.world.solids });
   }
   loadMap(mapId) {
@@ -119,9 +121,15 @@ export class ArenaGame {
     this.scene.fog = new THREE.Fog(map.environment.fog, 42, 95);
   }
   start(id, settings = {}) {
+    this.zombieRuntime?.dispose(); this.zombieRuntime = null;
     this.settings = { sensitivity: 1, bots: 5, difficulty: 'normal', mapId: DEFAULT_MAP_ID, modeId: 'ffa', skinId: DEFAULT_SKIN_ID, ...settings };
     const count = Math.max(0, Math.min(8, Math.trunc(this.settings.bots) || 0)); // zero reserved for online adapter
     getSkin(this.settings.skinId);
+    if (this.settings.modeId === 'zombies') {
+      this.zombieRuntime = new ZombieRuntime(this);
+      this.zombieRuntime.start(getWeapon(id).id, this.settings);
+      return;
+    }
     const ids = ['local', ...Array.from({ length: count }, (_, i) => `bot-${i}`)];
     const teams = assignTeams(ids, this.settings.modeId);
     this.modeState = createModeState({ modeId: this.settings.modeId, map: getMap(this.settings.mapId), participants: ids.map(id => ({ id, teamId: teams[id] })) });
@@ -169,12 +177,13 @@ export class ArenaGame {
     return [{ id: this.player.id, name: this.player.name, teamId: this.player.teamId, x: this.player.x, y: this.player.jump, z: this.player.z,
       alive: this.player.health > 0 && this.player.dead <= 0, protectedRemaining: this.player.protected, lifeId: this.player.lifeId, skinId: this.player.skinId,
       yaw: this.yaw, pitch: this.pitch, flashRemaining: this.player.flashRemaining ?? 0, equipment: this.player.equipment, health: this.player.health },
-    ...this.bots.map(bot => ({ id: bot.id, name: bot.name, teamId: bot.teamId, x: bot.model.position.x, y: bot.model.position.y, z: bot.model.position.z,
+    ...(this.zombieRuntime ? this.zombieRuntime.actors() : this.bots.map(bot => ({ id: bot.id, name: bot.name, teamId: bot.teamId, x: bot.model.position.x, y: bot.model.position.y, z: bot.model.position.z,
       alive: bot.health > 0 && bot.respawn <= 0, protectedRemaining: bot.protected, lifeId: bot.lifeId, skinId: bot.skinId,
       yaw: bot.yaw, pitch: 0, flashRemaining: bot.flashRemaining, equipment: bot.equipment, health: bot.health,
-      lastGrenadeAttempt: bot.lastGrenadeAttempt, carryingFlag: Object.values(this.modeState.flags ?? {}).some(flag => flag.carrierId === bot.id) }))];
+      lastGrenadeAttempt: bot.lastGrenadeAttempt, carryingFlag: Object.values(this.modeState.flags ?? {}).some(flag => flag.carrierId === bot.id) })))];
   }
   refreshMatchView(actors = this.getActors()) {
+    if (this.zombieRuntime) { this.zombieRuntime.refreshView(); return; }
     this.matchView = { ...getModeSnapshot(this.modeState), players: actors.map(actor => ({ id: actor.id, name: actor.name, teamId: actor.teamId,
       kills: this.modeState.stats[actor.id].kills, deaths: this.modeState.stats[actor.id].deaths, skinId: actor.skinId })) };
     const own = this.modeState.stats.local;
@@ -202,7 +211,12 @@ export class ArenaGame {
   }
   resume() { if (this.hasRound && !this.match.ended) { this.active = true; this.lastFire = false; this.input.setEnabled(true); } }
   pause() { this.active = false; this.input.setEnabled(false); this.lastFire = false; }
-  quit() { this.pause(); this.hasRound = false; this.gearView?.clear(); }
+  quit() {
+    this.pause(); this.hasRound = false; this.gearView?.clear();
+    if (this.zombieRuntime) {
+      this.zombieRuntime.record(); this.zombieRuntime.dispose(); this.zombieRuntime = null;
+    }
+  }
   clearEffects() { for (const effect of this.effects) { effect.line.removeFromParent(); effect.line.geometry.dispose(); effect.line.material.dispose(); } this.effects = []; }
   placeCamera() {
     this.camera.position.set(this.player.x, 1.65 + this.player.jump, this.player.z);
@@ -213,8 +227,9 @@ export class ArenaGame {
     this.time += dt;
     if (this.active) {
       this.gearEvents = []; this.pickupEvents = [];
-      this.simulate(Math.min(dt, this.modeState.timeLeft));
-      tickMode(this.modeState, dt, this.getActors()); this.refreshMatchView(); this.finishRound();
+      this.simulate(this.zombieRuntime ? dt : Math.min(dt, this.modeState.timeLeft));
+      if (!this.zombieRuntime) tickMode(this.modeState, dt, this.getActors());
+      this.refreshMatchView(); this.finishRound();
     }
     if (this.hasRound) this.refreshGearView(this.active ? dt : 0);
     this.hudTimer -= dt;
@@ -230,6 +245,8 @@ export class ArenaGame {
     if (this.modeState.ended) return;
     const input = this.input.read();
     if (input.grenadePickerPressed) { this.events.onEquipmentPicker?.(); if (!this.active) return; }
+    this.zombieRuntime?.beginStep(dt);
+    if (this.modeState.ended) return;
     this.simulationTime += dt;
     tickLoot(this.lootState, dt);
     tickEquipment(this.player.equipment, dt);
@@ -266,8 +283,9 @@ export class ArenaGame {
       }
       if (input.reload && this.player.equipment.heldItem === 'gun' && startReload(this.weaponState)) this.audio.reload();
       this.placeCamera();
-      if (input.fire && this.player.equipment.heldItem === 'knife') this.slash(playerActor, actors);
-      else if (input.fire && this.player.equipment.attackLockRemaining <= 0 && (this.weapon.automatic || input.firePressed)) {
+      const canAttack = !this.zombieRuntime || this.zombieRuntime.canAttack();
+      if (canAttack && input.fire && this.player.equipment.heldItem === 'knife') this.slash(playerActor, actors);
+      else if (canAttack && input.fire && this.player.equipment.attackLockRemaining <= 0 && (this.weapon.automatic || input.firePressed)) {
         if (tryFire(this.weaponState)) this.shoot(zoom, actors);
         else if (!this.lastFire && this.weaponState.ammo === 0) this.events.onToast(this.weaponState.reserve ? 'TAP RELOAD' : 'OUT OF AMMO · CHANGE LOADOUT');
       }
@@ -283,10 +301,11 @@ export class ArenaGame {
     }
     for (const actor of actors) if (this.actorEntity(actor.id).health <= 0) actor.alive = false;
     this.recoil *= Math.exp(-dt * 13);
-    this.updateBots(dt, actors);
+    if (this.zombieRuntime) this.zombieRuntime.updateEnemies(dt, actors);
+    else this.updateBots(dt, actors);
     if (!this.modeState.ended) {
       const result = stepGearCombat(this.gearCombatState, actors, dt, {
-        solids: this.world.solids, isEnemy: (sourceId, targetId) => areEnemies(this.modeState, sourceId, targetId),
+        solids: this.world.solids, isEnemy: (sourceId, targetId) => this.isEnemy(sourceId, targetId),
       });
       for (const hit of result.damage) {
         if (this.modeState.ended) break;
@@ -304,7 +323,7 @@ export class ArenaGame {
       this.presentGearEvents(this.gearCombatState.events.splice(0));
     }
     if (!this.modeState.ended) {
-      const pickups = collectLoot(this.lootState, actors, { solids: this.world.solids })
+      const pickups = collectLoot(this.lootState, this.zombieRuntime ? [playerActor] : actors, { solids: this.world.solids })
         .map(event => ({ ...event, id: ++this.gearEventId }));
       this.pickupEvents.push(...pickups); this.gearEvents.push(...pickups);
       for (const event of pickups) if (event.playerId === 'local') this.audio.pickup?.();
@@ -319,6 +338,7 @@ export class ArenaGame {
       effect.line.material.opacity = effect.life / .12;
       return true;
     });
+    this.zombieRuntime?.finishStep();
   }
   presentGearEvents(events) {
     for (const event of events) {
@@ -332,6 +352,7 @@ export class ArenaGame {
     this.gearWorld = { loot: this.lootState ? lootDTO(this.lootState) : [], ...gearCombatDTO(this.gearCombatState) };
     this.gearView.sync(this.gearWorld);
     for (const bot of this.bots) {
+      if (this.zombieRuntime) continue;
       const attachment = bot.model.getObjectByName('weapon'), equipment = bot.equipment;
       if (attachment.userData.weaponId !== equipment.activeGunId || (bot.model.userData.heldItem ?? 'gun') !== equipment.heldItem) {
         for (const child of [...attachment.children]) disposeModel(child);
@@ -346,15 +367,18 @@ export class ArenaGame {
     this.objectives.update({ flags: this.matchView?.flags, actors: this.getActors(), viewerId: this.player.id, actorVisibility });
   }
   actorEntity(id) { return id === this.player.id ? this.player : this.bots.find(bot => bot.id === id); }
-  slash(actor, actors) {
-    if (this.modeState.ended || !actor.alive || (actor.id !== 'local' && actor.flashRemaining > 0)
+  isEnemy(sourceId, targetId) {
+    return this.zombieRuntime ? this.zombieRuntime.isEnemy(sourceId, targetId) : areEnemies(this.modeState, sourceId, targetId);
+  }
+  slash(actor, actors = this.getActors()) {
+    if (this.modeState.ended || (this.zombieRuntime && !this.zombieRuntime.canAttack()) || !actor.alive || (actor.id !== 'local' && actor.flashRemaining > 0)
       || !beginMelee(actor.equipment).ok) return;
     this.gearCombatState.events.push({ type: 'melee', playerId: actor.id });
     const eye = other => ({ x: other.x, y: other.y + 1.35, z: other.z });
     const candidates = actor.id === 'local' ? actors
       : actors.filter(other => !smokeBlocksSight(eye(actor), eye(other), this.gearCombatState.smokes));
     const targetId = meleeTarget(actor, candidates, { solids: this.world.solids,
-      isEnemy: (sourceId, victimId) => areEnemies(this.modeState, sourceId, victimId) });
+      isEnemy: (sourceId, victimId) => this.isEnemy(sourceId, victimId) });
     if (targetId) {
       const victim = this.actorEntity(targetId);
       const landed = this.damageActor(actor.id, victim, GEAR_BALANCE.knife.damage, actors);
@@ -461,14 +485,15 @@ export class ArenaGame {
     this.refreshMatchView(actors);
   }
   damageActor(attackerId, victim, damage, actors) {
-    if (this.modeState.ended || !areEnemies(this.modeState, attackerId, victim.id) || victim.health <= 0
+    if (this.modeState.ended || !victim || !this.isEnemy(attackerId, victim.id) || victim.health <= 0
       || (victim.dead ?? victim.respawn) > 0 || victim.protected > 0) return false;
     victim.health = Math.max(0, victim.health - damage);
     const record = actors?.find(actor => actor.id === victim.id);
     if (record) { record.health = victim.health; record.alive = victim.health > 0; }
     if (victim.id === 'local') this.damageFlash = .3;
-    else victim.bar.scale.x = victim.health / 100;
+    else victim.bar.scale.x = (this.zombieRuntime ? .65 : 1) * victim.health / 100;
     if (victim.health === 0) {
+      if (this.zombieRuntime) { this.zombieRuntime.onEliminated(victim, actors); return true; }
       const position = victim.id === 'local' ? victim : victim.model.position;
       addDeathDrops(this.lootState, { actorId: victim.id, lifeId: victim.lifeId, position,
         items: deathItems(victim.equipment), solids: this.world.solids });
@@ -488,7 +513,7 @@ export class ArenaGame {
     return true;
   }
   shoot(zoom, actors) {
-    if (this.modeState.ended) return;
+    if (this.modeState.ended || (this.zombieRuntime && !this.zombieRuntime.canAttack())) return;
     this.audio.shoot(this.weapon); this.shotFlash = .055;
     this.camera.updateMatrixWorld(true);
     const origin = this.camera.getWorldPosition(new THREE.Vector3());
@@ -500,7 +525,7 @@ export class ArenaGame {
       const ray = new THREE.Ray(origin, direction);
       let closest = this.weapon.range, victim = null, hitPoint = null;
       for (const bot of this.bots) {
-        if (bot.respawn > 0 || bot.protected > 0 || !areEnemies(this.modeState, 'local', bot.id)) continue;
+        if (bot.health <= 0 || bot.respawn > 0 || bot.protected > 0 || !this.isEnemy('local', bot.id)) continue;
         const p = bot.model.position;
         const box = new THREE.Box3(new THREE.Vector3(p.x - .32, p.y + .05, p.z - .32), new THREE.Vector3(p.x + .32, p.y + 1.84, p.z + .32));
         const hit = ray.intersectBox(box, new THREE.Vector3());

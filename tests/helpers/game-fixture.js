@@ -27,6 +27,7 @@ export function createHeadlessGame() {
 }
 
 export function cleanupGame(game) {
+  game.zombieRuntime?.dispose();
   game.clearEffects();
   for (const bot of game.bots) disposeModel(bot.model);
   disposeModel(game.weaponModel);
