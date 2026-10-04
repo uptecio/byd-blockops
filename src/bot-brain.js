@@ -2,6 +2,7 @@ import { hasLineOfSight } from './collision.js';
 import { areEnemies } from './modes.js';
 import { smokeBlocksSight } from './gear-combat.js';
 import { getWeapon } from './weapons.js';
+import { hasOwn } from './has-own.js';
 
 const point = ({ x, z }) => ({ x, z });
 const distance = (a, b) => Math.hypot(a.x - b.x, a.z - b.z);
@@ -10,10 +11,10 @@ const stableNearest = (origin, actors) => actors.slice().sort((a, b) => distance
   || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))[0];
 
 export function chooseBotIntent(actor, { actors, state, map, role, smokes = [], lastKnownTargets = new Map() }) {
-  if (!validPoint(actor) || !actor.alive || state.ended || !Object.hasOwn(state.stats, actor.id)) {
+  if (!validPoint(actor) || !actor.alive || state.ended || !hasOwn(state.stats, actor.id)) {
     return { goal: null, targetId: null };
   }
-  const living = actors.filter(a => validPoint(a) && a.alive && Object.hasOwn(state.stats, a.id)
+  const living = actors.filter(a => validPoint(a) && a.alive && hasOwn(state.stats, a.id)
     && a.teamId === state.stats[a.id].teamId);
   const enemies = living.filter(enemy => areEnemies(state, actor.id, enemy.id));
   // Ground-level actor Y becomes a chest-height shooting ray, including jumps.

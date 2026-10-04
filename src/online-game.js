@@ -76,7 +76,12 @@ export class OnlineArena {
     if (own.reloadRemaining > 0 && game.weaponState.reloadRemaining === 0 && !this.suspended) game.audio.reload();
     game.syncPlayerEquipment();
     // Always reconcile complete public arrays, including removals during menus.
-    game.gearWorld = structuredClone(room.gear);
+    // RoomClient validated these plain DTOs; only loot items have nested records.
+    game.gearWorld = {
+      loot: room.gear.loot.map(record => ({ ...record, item: { ...record.item } })),
+      projectiles: room.gear.projectiles.map(record => ({ ...record })),
+      smokes: room.gear.smokes.map(record => ({ ...record })),
+    };
     game.gearView?.sync(game.gearWorld);
     const present = new Set();
     for (const player of room.players) {

@@ -110,7 +110,7 @@ export class MultiplayerUI {
     $('room-map').disabled = $('room-mode').disabled = !host || room.phase === 'playing';
     $('room-settings-help').textContent = room.phase === 'playing' ? 'Map and mode are fixed for this round.' : host ? 'Choose the next round’s map and mode.' : 'The host chooses map and mode between rounds.';
     const sorted = [...room.players].sort((a, b) => b.kills - a.kills || a.deaths - b.deaths);
-    $('room-roster').replaceChildren(); $('online-scoreboard').replaceChildren();
+    $('room-roster').textContent = ''; $('online-scoreboard').textContent = '';
     for (const player of sorted) {
       const row = document.createElement('div'); row.className = 'roster-player';
       if (player.teamId) row.dataset.team = player.teamId;

@@ -10,8 +10,26 @@ import { getMap } from './maps.js';
 import { getMode } from './modes.js';
 import { renderMatchHud, renderMatchResults } from './match-ui.js';
 import { EquipmentUI } from './equipment-ui.js';
+import { installRuntimeErrors } from './runtime-errors.js';
 
 const $ = id => document.getElementById(id);
+let mode = 'home', settingsOrigin = 'home', game, preview, home, multiplayer, equipmentUI, audio, input, toastUntil = 0, confirmation = null;
+let backgroundSuspended = false, frameRequest = null;
+const runtimeErrors = installRuntimeErrors(stopAfterFatal);
+
+function stopAfterFatal() {
+  mode = 'fatal'; confirmation = null;
+  // Each subsystem gets a shutdown attempt even when another is broken.
+  for (const stop of [
+    () => cancelAnimationFrame(frameRequest),
+    () => input?.setEnabled(false),
+    () => game?.pause(),
+    () => multiplayer?.client.close(), // Also cancels not-yet-welcomed joins.
+    () => multiplayer?.arena?.pause(),
+    () => { if (audio) audio.enabled = false; },
+  ]) { try { stop(); } catch { /* Preserve the original visible failure. */ } }
+}
+
 const storageKey = 'block-ops-v1';
 const defaults = { sensitivity: 1, controlSize: 1, bots: 5, difficulty: 'normal', sound: true };
 let saved = {};
@@ -27,14 +45,13 @@ const settings = {
 };
 let selection = validateSelection(saved.selection, saved.weaponId);
 let selected = getWeapon(selection.weaponId), activeClass = selected.classId;
-let mode = 'home', settingsOrigin = 'home', game, preview, home, multiplayer, equipmentUI, toastUntil = 0, confirmation = null;
-let backgroundSuspended = false;
-const audio = new GameAudio();
-const input = new Input(() => pauseGame());
+audio = new GameAudio();
+input = new Input(() => pauseGame());
 const classNames = { assault: 'ASSAULT', smg: 'SMG', shotgun: 'SHOTGUN', sniper: 'SNIPER', marksman: 'MARKSMAN', lmg: 'LMG', sidearm: 'SIDEARM' };
 const traits = { assault: 'Versatile. Reliable. Ready for anything.', smg: 'Fast hands. Close quarters. No hesitation.', shotgun: 'Get close. Make every shot count.', sniper: 'One sightline. One perfect shot.', marksman: 'Precision at your own pace.', lmg: 'Big magazines. Keep the pressure on.', sidearm: 'Travel light. Hit above your weight.' };
 function persist() { try { localStorage.setItem(storageKey, JSON.stringify({ weaponId: selection.weaponId, selection, settings })); } catch { /* Play remains available without storage. */ } }
 function setMode(next) {
+  if (runtimeErrors.failed) return;
   // A remote start may create/enable an arena while native rendering is
   // suspended. Re-pause it synchronously and retain that state on foreground.
   if (next === 'playing' && (backgroundSuspended || document.hidden)) { backgroundSuspended = true; next = 'paused'; }
@@ -104,7 +121,7 @@ function pauseGame() {
   if (mode === 'grenade-picker') { setMode('paused'); $('resume-button').focus({ preventScroll: true }); return; }
   if (mode === 'playing') { setMode('paused'); $('resume-button').focus({ preventScroll: true }); }
 }
-function suspendForBackground() { backgroundSuspended = true; input.clear(); equipmentUI?.close(); if (mode === 'grenade-picker') setMode('paused'); else pauseGame(); }
+function suspendForBackground() { if (runtimeErrors.failed) return; backgroundSuspended = true; input.clear(); equipmentUI?.close(); if (mode === 'grenade-picker') setMode('paused'); else pauseGame(); }
 window.pauseGame = suspendForBackground;
 document.addEventListener('visibilitychange', () => { if (document.hidden) suspendForBackground(); });
 window.addEventListener('blur', suspendForBackground);
@@ -161,7 +178,7 @@ function renderArmorySession() {
   if (equipmentUI?.currentSelection()) $('play-button').innerHTML = 'EQUIP & RETURN <span>↗</span>';
 }
 function deploy(forceNew = false) {
-  if (!game) return;
+  if (!game || runtimeErrors.failed) return;
   if (multiplayer && multiplayer.isConnected()) {
     if (equipmentUI.currentSelection()) equipmentUI.confirmGun(); else multiplayer.deploy();
     document.activeElement.blur(); return;
@@ -185,7 +202,6 @@ $('resume-button').addEventListener('click', () => {
   audio.unlock(); if (multiplayer && multiplayer.isActive()) multiplayer.resume(); else game.resume(); setMode('playing'); document.activeElement.blur();
 });
 for (const id of ['loadout-button', 'pause-loadout', 'results-loadout']) $(id).addEventListener('click', showArmory);
-$('retry-button').addEventListener('click', () => location.reload());
 function updateSettings() {
   audio.enabled = settings.sound;
   $('game-ui').style.setProperty('--control-scale', settings.controlSize);
@@ -250,7 +266,7 @@ function onHud(current) {
   $('respawn-count').textContent = Math.ceil(current.player.dead);
   if (performance.now() > toastUntil) $('toast').textContent = '';
 }
-function showFatal(message) { if (multiplayer && multiplayer.isConnected()) multiplayer.leave(); if (game) game.pause(); $('fatal-message').textContent = message; $('fatal-screen').hidden = false; }
+function showFatal(error) { runtimeErrors.report(error); }
 renderSelected(); updateSettings();
 try {
   game = new ArenaGame($('arena'), input, audio, {
@@ -275,6 +291,7 @@ try {
   preview = new WeaponPreview($('weapon-preview'));
   let previous = performance.now();
   function frame(now) {
+    if (runtimeErrors.failed) return;
     const dt = Math.min(.05, (now - previous) / 1000); previous = now;
     if (!document.hidden) {
       if (multiplayer && multiplayer.isActive()) multiplayer.update(dt);
@@ -289,7 +306,7 @@ try {
       if (mode === 'home' && $('settings-screen').hidden) home.renderPreview(now / 1000);
     }
     if (now > toastUntil) $('toast').textContent = '';
-    requestAnimationFrame(frame);
+    if (!runtimeErrors.failed) frameRequest = requestAnimationFrame(frame);
   }
-  requestAnimationFrame(frame);
-} catch (error) { console.error(error); showFatal('The arena could not initialise. This device needs a working WebGL-capable Android System WebView. Try reloading the game.'); }
+  frameRequest = requestAnimationFrame(frame);
+} catch (error) { console.error(error); runtimeErrors.report(error, 'Initialisation error'); }

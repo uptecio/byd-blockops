@@ -16,6 +16,7 @@ import { createLootState, tickLoot, collectLoot, addDeathDrops, lootDTO } from '
 import { createGearCombatState, throwGrenade, stepGearCombat, meleeTarget, smokeBlocksSight, gearCombatDTO } from './gear-combat.js';
 import { GEAR_BALANCE } from './equipment-catalog.js';
 import { GearView, createKnifeModel } from './gear-view.js';
+import { hasOwn } from './has-own.js';
 
 export function disposeModel(model) {
   if (!model) return;
@@ -94,8 +95,8 @@ export class ArenaGame {
     if (!action || typeof action !== 'object' || Array.isArray(action)) return { ok: false, reason: 'Invalid equipment action' };
     const fields = { 'equip-gun': ['kind', 'weaponId', 'source'], 'held-item': ['kind', 'heldItem'],
       'select-grenade': ['kind', 'grenadeType'], throw: ['kind', 'grenadeType'] };
-    const keys = Object.hasOwn(fields, action.kind) ? fields[action.kind] : null;
-    if (!keys || Reflect.ownKeys(action).length !== keys.length || !keys.every(key => Object.hasOwn(action, key)))
+    const keys = hasOwn(fields, action.kind) ? fields[action.kind] : null;
+    if (!keys || Reflect.ownKeys(action).length !== keys.length || !keys.every(key => hasOwn(action, key)))
       return { ok: false, reason: 'Invalid equipment action' };
     if (action.kind === 'equip-gun') return equipGun(actor.equipment, action.weaponId, { source: action.source });
     if (action.kind === 'held-item') return setHeldItem(actor.equipment, action.heldItem);

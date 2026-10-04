@@ -7,6 +7,7 @@ import { setTimeout as delay } from 'node:timers/promises';
 // Raw CDP avoids browser automation's artificial document visibility override.
 // Install the debug APK on a disposable emulator before running this test.
 const serial = process.env.ANDROID_TEST_SERIAL;
+const artifacts = process.env.ANDROID_TEST_ARTIFACTS || 'artifacts/loot-review';
 assert.ok(serial && process.env.ANDROID_TEST_AVD, 'Explicit task-owned emulator serial and AVD name are required');
 assert.match(serial, /^emulator-\d+$/, 'Only disposable emulators are in scope');
 const sdk = process.env.ANDROID_SDK_ROOT || process.env.ANDROID_HOME || `${process.env.HOME}/Android/Sdk`;
@@ -105,14 +106,15 @@ try {
     assert.ok(bounds.width >= 44 && bounds.height >= 44, `${id} remains a native touch target`);
     assert.ok(bounds.x >= 0 && bounds.y >= 0 && bounds.x + bounds.width <= bounds.viewportWidth && bounds.y + bounds.height <= Math.min(bounds.viewportHeight, bounds.footerTop), `${id} fits the actual native viewport above its footer`);
   }
-  await mkdir('artifacts/loot-review', { recursive: true });
+  await mkdir(artifacts, { recursive: true });
   const homeShot = await run(adb, ['-s', serial, 'exec-out', 'screencap', '-p'], { encoding: 'buffer', maxBuffer: 10000000, timeout: 10000 });
-  await writeFile('artifacts/loot-review/android-home.png', homeShot.stdout);
+  await writeFile(`${artifacts}/android-home.png`, homeShot.stdout);
   await evaluate('document.querySelector("[data-mode-id=ffa]").click(); document.getElementById("home-armory").click()');
   assert.equal(await evaluate('document.querySelectorAll(".weapon-card").length'), 4);
   await evaluate('document.getElementById("armory-home").click()');
   await wait(current => current.mode === 'home');
-  await evaluate(`document.querySelector('[data-map="courtyard"]').click(); document.getElementById('home-settings').click(); document.getElementById('bots').value='1'; document.getElementById('difficulty').value='easy'; document.getElementById('settings-done').click()`);
+  await evaluate(`document.querySelector('[data-map="courtyard"]').click(); document.getElementById('home-settings').click(); document.getElementById('bots').value='1'; document.getElementById('bots').dispatchEvent(new Event('input',{bubbles:true})); document.getElementById('difficulty').value='easy'; document.getElementById('difficulty').dispatchEvent(new Event('change',{bubbles:true})); document.getElementById('settings-done').click()`);
+  assert.deepEqual(await evaluate(`(() => { const settings=JSON.parse(localStorage.getItem('block-ops-v1')).settings; return {bots:settings.bots,difficulty:settings.difficulty}; })()`), { bots: 1, difficulty: 'easy' }, 'Native pickup route must apply its one-easy-bot setup through the real settings handlers');
   // Observe animation time only; inputs and equipment use the shipped UI.
   await evaluate(`(() => { window.__nativeSeconds=0; const raf=window.requestAnimationFrame.bind(window); let previous; window.requestAnimationFrame=callback=>raf(now=>{ if(previous!==undefined && document.body.dataset.mode==='playing') window.__nativeSeconds+=Math.min(.05,(now-previous)/1000); previous=now; callback(now); }); })()`);
   await tap('home-solo');
@@ -142,9 +144,9 @@ try {
   await evaluate('document.getElementById("loadout-button").click(); document.querySelector(\'[data-equipment-tab="carried"]\').click()');
   assert.ok(await evaluate('document.querySelectorAll("[data-carried-weapon]").length') > 1, 'Real solo walk collects a distinct gun');
   await evaluate('document.getElementById("armory-cancel").click(); document.getElementById("resume-button").click()');
-  await mkdir('artifacts/loot-review', { recursive: true });
+  await mkdir(artifacts, { recursive: true });
   const shot = await run(adb, ['-s', serial, 'exec-out', 'screencap', '-p'], { encoding: 'buffer', maxBuffer: 10000000, timeout: 10000 });
-  await writeFile('artifacts/loot-review/android-gameplay.png', shot.stdout);
+  await writeFile(`${artifacts}/android-gameplay.png`, shot.stdout);
   await shell('input', 'keyevent', 'KEYCODE_BACK');
   const paused = await wait(current => current.mode === 'paused' && current.pause);
   await delay(1500); assert.equal((await state()).timer, paused.timer, 'Back freezes combat');

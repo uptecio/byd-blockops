@@ -1,5 +1,6 @@
 import { WEAPONS, TOTAL_AMMO, createWeaponState, tickWeapon } from './weapons.js';
 import { GRENADE_TYPES, GEAR_BALANCE } from './equipment-catalog.js';
+import { hasOwn } from './has-own.js';
 
 const guns = new Map(WEAPONS.map(gun => [gun.id, gun]));
 const equipmentKeys = [
@@ -18,7 +19,7 @@ function hasKeys(value, keys) {
   const prototype = Object.getPrototypeOf(value);
   return (prototype === Object.prototype || prototype === null)
     && Reflect.ownKeys(value).length === keys.length
-    && keys.every(key => Object.hasOwn(value, key));
+    && keys.every(key => hasOwn(value, key));
 }
 
 function validAmmo(weaponId, ammo, reserve) {

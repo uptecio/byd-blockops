@@ -68,7 +68,8 @@ export class EquipmentUI {
     const grenadeSignature = JSON.stringify([counts, view.selectedGrenade, alive]);
     if (grenadeSignature !== this.grenadeSignature) {
       this.grenadeSignature = grenadeSignature;
-      $('grenade-options').replaceChildren(...Object.entries(types).map(([id, label]) => {
+      $('grenade-options').textContent = '';
+      $('grenade-options').append(...Object.entries(types).map(([id, label]) => {
         const button = document.createElement('button'); button.className = 'secondary'; button.dataset.grenadeType = id;
         button.textContent = `${label} · ${counts[id]}`; button.disabled = !alive || !counts[id]; button.setAttribute('aria-pressed', id === view.selectedGrenade); return button;
       }));
@@ -80,7 +81,8 @@ export class EquipmentUI {
     const carriedSignature = JSON.stringify([owned, view.activeGunId, pending?.weaponId, alive]);
     if (carriedSignature !== this.carriedSignature) {
       this.carriedSignature = carriedSignature;
-      $('carried-guns').replaceChildren(...owned.map(gun => {
+      $('carried-guns').textContent = '';
+      $('carried-guns').append(...owned.map(gun => {
         const button = document.createElement('button'); button.className = 'carried-gun secondary'; button.dataset.carriedWeapon = gun.weaponId;
         button.textContent = `${getWeapon(gun.weaponId).name} · ${gun.ammo} / ${gun.reserve}${gun.weaponId === view.activeGunId ? ' · ACTIVE' : ''}`;
         button.disabled = !alive; button.setAttribute('aria-pressed', pending?.weaponId === gun.weaponId); return button;

@@ -8,6 +8,8 @@ import { createInputFixture } from './helpers/input-fixture.js';
 class Element extends EventTarget {
   constructor() { super(); this.value = ''; this.hidden = false; this.dataset = {}; this.children = []; this.classList = { toggle() {} }; }
   append(...items) { this.children.push(...items); }
+  set textContent(value) { this.text = String(value); this.children = []; }
+  get textContent() { return this.text || ''; }
   replaceChildren(...items) { this.children = items; }
   getContext() { return null; }
 }

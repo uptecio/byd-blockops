@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { chromium } from 'playwright';
 import { startServer } from '../server/server.mjs';
+import { emulateLegacyWebView } from './helpers/legacy-webview.js';
 
 // Catch ignored selections, wrong team/spawn assignment, stale room snapshots,
 // incorrect mode HUD, and inputs retained after a Home transition.
@@ -25,6 +26,7 @@ const until = async (predicate, label) => {
 try {
   browser = await chromium.launch({ headless: true, args: ['--no-sandbox', '--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader'] });
   const contexts = await Promise.all([browser.newContext({ viewport: { width: 1200, height: 700 } }), browser.newContext({ viewport: { width: 1200, height: 700 } })]);
+  if (process.env.LEGACY_WEBVIEW === '1') await Promise.all(contexts.map(emulateLegacyWebView));
   const pages = await Promise.all(contexts.map(context => context.newPage()));
   const rooms = [null, null];
   pages.forEach((page, index) => {
@@ -37,6 +39,10 @@ try {
   const home = page => page.waitForSelector('body[data-mode="home"]');
   const hud = async (page, mode, online) => {
     await page.waitForSelector('body[data-mode="playing"]');
+    if (process.env.LEGACY_WEBVIEW === '1') {
+      await page.waitForFunction(() => window.__legacyProbe.arenaDraws > 0, null, { timeout: 10000 });
+      assert.equal(await page.locator('#fatal-screen').isHidden(), true);
+    }
     assert.match(await page.locator('#hud-mode').textContent(), new RegExp(`${online ? 'ONLINE' : 'SOLO'} / ${mode.label}`));
     if (mode.team) assert.match(await page.locator('#hud-mode').textContent(), /RED/);
     assert.equal((await page.locator('.score-target').textContent()).trim(), `/ ${mode.target}`);
@@ -97,9 +103,19 @@ try {
     await guest.locator('#room-code-input').fill(code); await guest.locator('#join-room').click();
     await until(() => rooms.every(room => room?.code === code && room.players.length === 2), 'both clients observe current room');
     assert.equal(await guest.locator('#start-online').isDisabled(), true);
+    if (process.env.LEGACY_WEBVIEW === '1') {
+      for (const page of pages) await page.evaluate(() => { window.__legacyProbe.arenaDraws = 0; });
+    }
     await host.locator('#start-online').click();
     await until(() => rooms.every(room => room?.code === code && room.phase === 'playing'), 'both clients start selected configuration');
     await hud(host, mode, true);
+    if (process.env.LEGACY_WEBVIEW === '1') {
+      for (const page of pages) {
+        await page.waitForFunction(() => window.__legacyProbe.arenaDraws > 0, null, { timeout:10000 });
+        assert.equal(await page.locator('#fatal-screen').isHidden(), true);
+        assert.deepEqual(await page.evaluate(() => window.__legacyProbe.lost), []);
+      }
+    }
     const room = rooms[0], own = room.players.find(player => player.name === 'MatrixHost'), friend = room.players.find(player => player.name === 'MatrixGuest');
     assert.equal(room.gear.loot.length, 16, `${mapId}/${mode.id}: fixed loot enabled online`);
     assert.equal(room.gear.loot.filter(record => record.item.kind === 'gun').length, 8);

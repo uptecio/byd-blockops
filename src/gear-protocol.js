@@ -1,6 +1,7 @@
 import { equipmentFromDTO } from './equipment.js';
 import { WEAPONS, TOTAL_AMMO } from './weapons.js';
 import { GEAR_BALANCE, GRENADE_TYPES } from './equipment-catalog.js';
+import { hasOwn } from './has-own.js';
 
 const guns = new Map(WEAPONS.map(gun => [gun.id, gun]));
 const id = value => typeof value === 'string' && value.trim().length > 0 && value.length <= 128;
@@ -9,7 +10,7 @@ const positive = value => count(value) && value > 0;
 const timer = (value, maximum) => Number.isFinite(value) && value >= 0 && value <= maximum;
 const keys = (value, fields) => value !== null && typeof value === 'object' && !Array.isArray(value)
   && [Object.prototype, null].includes(Object.getPrototypeOf(value))
-  && Reflect.ownKeys(value).length === fields.length && fields.every(field => Object.hasOwn(value, field));
+  && Reflect.ownKeys(value).length === fields.length && fields.every(field => hasOwn(value, field));
 const position = value => ['x', 'y', 'z'].every(axis => Number.isFinite(value[axis]));
 const grenade = value => GRENADE_TYPES.includes(value);
 
@@ -71,7 +72,7 @@ export function validGearWorld(value) {
 
 export function validEquipmentAction(packet) {
   const fields = { 'equip-gun': ['weaponId', 'source'], 'held-item': ['heldItem'], 'select-grenade': ['grenadeType'], throw: ['grenadeType'] };
-  if (!packet || !Object.hasOwn(fields, packet.kind) || !keys(packet, ['type', 'seq', 'lifeId', 'kind', ...fields[packet.kind]])
+  if (!packet || !hasOwn(fields, packet.kind) || !keys(packet, ['type', 'seq', 'lifeId', 'kind', ...fields[packet.kind]])
     || packet.type !== 'equipment-action' || !positive(packet.seq) || !positive(packet.lifeId)) return false;
   if (packet.kind === 'equip-gun') return guns.has(packet.weaponId) && ['armory', 'inventory'].includes(packet.source);
   if (packet.kind === 'held-item') return ['gun', 'knife'].includes(packet.heldItem);
@@ -80,7 +81,7 @@ export function validEquipmentAction(packet) {
 
 export function validGearEvent(event) {
   const fields = { pickup: ['itemId', 'item'], melee: [], 'grenade-throw': ['grenadeId', 'grenadeType'], 'grenade-burst': ['grenadeId', 'grenadeType', 'position'] };
-  if (!event || !Object.hasOwn(fields, event.type) || !keys(event, ['id', 'type', 'playerId', ...fields[event.type]])
+  if (!event || !hasOwn(fields, event.type) || !keys(event, ['id', 'type', 'playerId', ...fields[event.type]])
     || !positive(event.id) || !id(event.playerId)) return false;
   if (event.type === 'pickup') return id(event.itemId) && validItem(event.item);
   if (event.type === 'melee') return true;

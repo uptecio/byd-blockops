@@ -4,6 +4,7 @@ import { MODES } from './modes.js';
 import { SKINS, DEFAULT_SKIN_ID } from './skins.js';
 import { PROTOCOL_VERSION } from './protocol.js';
 import { validEquipmentAction, validEquipmentSnapshot, validGearEvent, validGearWorld } from './gear-protocol.js';
+import { hasOwn } from './has-own.js';
 
 const weaponIds = new Set(WEAPONS.map(weapon => weapon.id));
 const mapIds = new Set(MAPS.map(map => map.id));
@@ -13,7 +14,7 @@ const teams = ['red', 'blue'];
 const validId = id => typeof id === 'string' && id.trim().length > 0;
 const count = value => Number.isSafeInteger(value) && value >= 0;
 const exactKeys = (value, keys) => value && typeof value === 'object' && !Array.isArray(value)
-  && Object.keys(value).length === keys.length && keys.every(key => Object.hasOwn(value, key));
+  && Object.keys(value).length === keys.length && keys.every(key => hasOwn(value, key));
 const updateRequired = 'Update required: install the latest Block Ops APK or reload the game.';
 const finitePoint = point => exactKeys(point, ['x', 'y', 'z']) && ['x', 'y', 'z'].every(key => Number.isFinite(point[key]));
 
@@ -166,7 +167,7 @@ export class RoomClient {
     const own = this.room?.players.find(player => player.id === this.id);
     if (!own || !action || this.actionSeq >= Number.MAX_SAFE_INTEGER) return false;
     const packet = { type: 'equipment-action', seq: this.actionSeq + 1, lifeId: own.lifeId, ...action };
-    if (!validEquipmentAction(packet) || Object.hasOwn(action, 'type') || Object.hasOwn(action, 'seq') || Object.hasOwn(action, 'lifeId')) return false;
+    if (!validEquipmentAction(packet) || hasOwn(action, 'type') || hasOwn(action, 'seq') || hasOwn(action, 'lifeId')) return false;
     if (!this.send(packet)) return false;
     this.actionSeq = packet.seq;
     return true;

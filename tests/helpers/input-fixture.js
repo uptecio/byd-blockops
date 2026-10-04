@@ -7,6 +7,8 @@ export class InputElement extends EventTarget {
   getBoundingClientRect() { return { left: 0, top: 0, width: 100, height: 100 }; }
   setAttribute(key, value) { this[key] = String(value); }
   append(...items) { this.children.push(...items); }
+  set textContent(value) { this.text = String(value); this.children = []; }
+  get textContent() { return this.text || ''; }
   replaceChildren(...items) { this.children = items; }
   querySelector() { return this.label ||= new InputElement(); }
   focus() { globalThis.document.activeElement = this; }

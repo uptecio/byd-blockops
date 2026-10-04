@@ -9,6 +9,7 @@ import { cleanupOwnedOnlineSession } from './online-cleanup.mjs';
 // public WSS server, a second independent peer, and raw WebView CDP (no focus
 // emulation, injected game state, or production-only test hooks).
 const serial = process.env.ANDROID_TEST_SERIAL;
+const artifacts = process.env.ANDROID_TEST_ARTIFACTS || 'artifacts/loot-review';
 assert.ok(serial && process.env.ANDROID_TEST_AVD, 'Explicit task-owned emulator serial and AVD name are required');
 assert.match(serial, /^emulator-\d+$/, 'Only disposable emulators are in scope');
 const configuration = JSON.parse(await readFile('game-server.json', 'utf8'));
@@ -126,9 +127,9 @@ try {
       packet => Boolean(packet?.room), 'Native receives authoritative state after the neutral-input pong')).room;
   };
   const screenshot = async name => {
-    await mkdir('artifacts/loot-review', { recursive: true });
+    await mkdir(artifacts, { recursive: true });
     const shot = await run(adb, ['-s', serial, 'exec-out', 'screencap', '-p'], { encoding: 'buffer', maxBuffer: 10000000, timeout: 10000 });
-    await writeFile(`artifacts/loot-review/${name}`, shot.stdout);
+    await writeFile(`${artifacts}/${name}`, shot.stdout);
   };
   await send('Runtime.enable'); await send('Log.enable'); await send('Network.enable'); await send('Page.enable');
   // Test-local access to the real wire for an ordinary ping, as in browser
