@@ -6,6 +6,7 @@ import { MODES } from './modes.js';
 import { SKINS } from './skins.js';
 import { renderMatchResults } from './match-ui.js';
 import { WEAPONS } from './weapons.js';
+import { onlineSelection } from './solo-modes.js';
 
 const $ = id => document.getElementById(id);
 export class MultiplayerUI {
@@ -60,9 +61,10 @@ export class MultiplayerUI {
     this.busy = true; $('create-room').disabled = $('join-room').disabled = true; this.status('Connecting to the game server…');
     try {
       const server = $('server-address').value.trim();
-      await this.client.connect(server, { type, code, name, ...this.getSelection() });
+      const selection = this.getSelection(), fallback = type === 'create' && selection.modeId === 'zombies';
+      await this.client.connect(server, { type, code, name, ...onlineSelection(selection) });
       try { localStorage.setItem('block-ops-online', JSON.stringify({ name, server })); } catch {}
-      this.status('Connected · Share your room code or invite link.');
+      this.status(fallback ? 'Zombies is solo only. Your online room uses Free For All.' : 'Connected · Share your room code or invite link.');
     } catch (error) { this.status(error.message || 'Could not connect. Check your connection and server address.', true); }
     finally { this.busy = false; $('create-room').disabled = $('join-room').disabled = false; }
   }

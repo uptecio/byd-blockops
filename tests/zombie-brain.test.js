@@ -123,3 +123,12 @@ test('separation cannot cross a thin wall and never mutates input actors', () =>
   }
   assert.equal(JSON.stringify([a,other,ctx.player]),before);
 });
+
+test('nearby player behind a thin wall still causes a detour rather than a contact-distance stall', () => {
+  const solids=[{ x:0,z:0,w:.01,d:3,height:3 }], arena=map({ solids });
+  const ctx=context({ actor:actor({ x:-.41 }),player:player({ x:.4,z:0 }),solids,navigation:createNavigation(arena,{ radius:.4 }) });
+  const result=stepZombieBrain(createZombieBrain('walker'),ctx);
+  assert.ok(Math.hypot(result.x-ctx.actor.x,result.z-ctx.actor.z)>0);
+  assert.equal(result.attack,false);
+  assert.ok(canOccupy(result.x,result.z,.4,solids));
+});

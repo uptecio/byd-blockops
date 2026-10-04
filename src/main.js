@@ -7,7 +7,8 @@ import { GameAudio } from './audio.js';
 import { MultiplayerUI } from './multiplayer-ui.js';
 import { HomeUI, validateSelection } from './home-ui.js';
 import { getMap } from './maps.js';
-import { getMode } from './modes.js';
+import { getSoloMode } from './solo-modes.js';
+import { createZombieRecords } from './zombie-records.js';
 import { renderMatchHud, renderMatchResults } from './match-ui.js';
 import { EquipmentUI } from './equipment-ui.js';
 import { installRuntimeErrors } from './runtime-errors.js';
@@ -31,6 +32,9 @@ function stopAfterFatal() {
 }
 
 const storageKey = 'block-ops-v1';
+let recordStorage;
+try { recordStorage = window.localStorage; } catch { /* The storage getter itself can be denied. */ }
+const zombieRecords = createZombieRecords(recordStorage);
 const defaults = { sensitivity: 1, controlSize: 1, bots: 5, difficulty: 'normal', sound: true };
 let saved = {};
 try { saved = JSON.parse(localStorage.getItem(storageKey) || '{}') || {}; } catch { /* Corrupt/unavailable storage uses defaults. */ }
@@ -171,9 +175,13 @@ function showArmory() {
 function renderArmorySession() {
   const mapId = multiplayer?.isConnected() ? multiplayer.room.mapId : selection.mapId;
   const modeId = multiplayer?.isConnected() ? multiplayer.room.modeId : selection.modeId;
+  const zombies = modeId === 'zombies', modeInfo = getSoloMode(modeId);
   $('armory-map').textContent = getMap(mapId).name.toUpperCase();
-  $('armory-mode').textContent = `${getMode(modeId).name.toUpperCase()} · ${multiplayer?.isConnected() ? 'ONLINE FRIENDS' : 'SOLO VS BOTS'}`;
-  $('session-target').textContent = `${getMode(modeId).scoreLimit} ${modeId === 'ctf' ? 'CAPTURES' : modeId === 'tdm' ? 'TEAM KILLS' : 'ELIMINATIONS'}`;
+  $('armory-mode').textContent = `${modeInfo.name.toUpperCase()} · ${multiplayer?.isConnected() ? 'ONLINE FRIENDS' : zombies ? 'SOLO ONLY' : 'SOLO VS BOTS'}`;
+  $('session-target').textContent = zombies ? 'SURVIVE WAVES' : `${modeInfo.scoreLimit} ${modeId === 'ctf' ? 'CAPTURES' : modeId === 'tdm' ? 'TEAM KILLS' : 'ELIMINATIONS'}`;
+  $('session-duration').textContent = zombies ? 'ENDLESS' : '3 MIN';
+  $('session-duration-label').textContent = zombies ? 'WAVE SURVIVAL' : 'QUICK ROUNDS';
+  $('bot-count-label').textContent = zombies ? 'WALKERS + RUNNERS' : `${settings.bots} BOT${settings.bots === 1 ? '' : 'S'}`;
   $('play-button').innerHTML = multiplayer && multiplayer.isConnected() ? (multiplayer.room.phase === 'playing' ? 'RETURN TO MATCH <span>↗</span>' : 'BACK TO ROOM <span>↗</span>') : game && game.hasRound && !game.match.ended ? 'RETURN TO MATCH <span>↗</span>' : 'DEPLOY <span>↗</span>';
   if (equipmentUI?.currentSelection()) $('play-button').innerHTML = 'EQUIP & RETURN <span>↗</span>';
 }
@@ -250,6 +258,9 @@ class WeaponPreview {
 }
 function onHud(current) {
   equipmentUI?.render();
+  const recovery = current.getMatchView()?.survival?.phase === 'recovery';
+  $('fire-button').disabled = recovery;
+  $('throw-button').disabled = $('throw-button').disabled || recovery;
   renderMatchHud(current.getMatchView(), multiplayer?.isActive() ? multiplayer.client.id : 'local');
   $('health-count').textContent = Math.ceil(current.player.health);
   $('health-bar').style.width = `${current.player.health}%`;
@@ -257,7 +268,7 @@ function onHud(current) {
   $('hud-weapon').textContent = current.weapon.name;
   $('ammo-count').textContent = current.weaponState.ammo;
   $('reserve-count').textContent = current.weaponState.reserve;
-  $('reload-status').textContent = current.weaponState.reloadRemaining > 0 ? `RELOADING ${current.weaponState.reloadRemaining.toFixed(1)}s` : current.weaponState.ammo === 0 ? 'TAP RELOAD' : '';
+  $('reload-status').textContent = recovery ? 'GET READY · ATTACKS PAUSED' : current.weaponState.reloadRemaining > 0 ? `RELOADING ${current.weaponState.reloadRemaining.toFixed(1)}s` : current.weaponState.ammo === 0 ? 'TAP RELOAD' : '';
   $('hit-marker').style.opacity = current.hitFlash > 0 ? 1 : 0;
   $('damage-flash').style.opacity = Math.min(1, current.damageFlash * 4);
   $('scope-overlay').hidden = !(input.zoom && current.heldItem === 'gun' && current.weapon.classId === 'sniper');
@@ -271,7 +282,8 @@ renderSelected(); updateSettings();
 try {
   game = new ArenaGame($('arena'), input, audio, {
     onHud,
-    onEnd: () => { renderMatchResults(game.getMatchView(), 'local'); setMode('results'); },
+    onEnd: () => { renderMatchResults(game.getMatchView(), 'local', { best:zombieRecords.best(game.settings.mapId) }); setMode('results'); },
+    onSurvivalRecord: ({ mapId,waves,kills }) => zombieRecords.record(mapId,{ waves,kills }),
     onToast: message => { $('toast').textContent = message; toastUntil = performance.now() + 1900; },
     onFatal: showFatal,
   });

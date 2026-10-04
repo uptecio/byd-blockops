@@ -1,4 +1,4 @@
-import { canOccupy, moveCircle } from './collision.js';
+import { canOccupy, moveCircle, hasLineOfSight } from './collision.js';
 import { meleeTarget, smokeBlocksSight } from './gear-combat.js';
 import { ZOMBIE_BALANCE as balance } from './zombie-survival.js';
 
@@ -50,10 +50,11 @@ export function stepZombieBrain(brain,{ actor,player,zombies,navigation,solids,s
     brain.pathRemaining=balance.pathInterval;
   }
   // Stop at touching distance; never move the human to resolve crowding.
-  if (brain.waypoint && distance(actor,brain.goal) > .9) {
+  const clearGoal=hasLineOfSight(eye(actor),{ ...brain.goal,y:actor.y+1.6 },solids);
+  if (brain.waypoint && (!clearGoal || distance(actor,brain.goal) > .9)) {
     const dx=brain.waypoint.x-actor.x,dz=brain.waypoint.z-actor.z,length=Math.hypot(dx,dz);
     if (length > 1e-9) {
-      const step=Math.min(config.speed*dt,length,Math.max(0,distance(actor,brain.goal)-.9));
+      const step=Math.min(config.speed*dt,length,clearGoal ? Math.max(0,distance(actor,brain.goal)-.9) : Infinity);
       Object.assign(result,moveCircle(actor,dx/length*step,dz/length*step,radius,solids));
     }
   }

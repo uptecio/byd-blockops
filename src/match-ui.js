@@ -3,6 +3,19 @@ import { getMode } from './modes.js';
 const $ = id => document.getElementById(id);
 export function renderMatchHud(view, ownId) {
   if (!view) return;
+  const zombies = view.modeId === 'zombies';
+  document.querySelector('.score-panel').classList.toggle('zombie-score', zombies);
+  if (zombies) {
+    const state = view.survival, recovery = state.phase === 'recovery';
+    $('hud-mode').textContent = 'SOLO / ZOMBIE SURVIVAL';
+    $('kills').textContent = `WAVE ${state.wave}`;
+    document.querySelector('.score-target').textContent = recovery ? 'WAVE CLEAR' : `${state.remaining} LEFT`;
+    document.querySelector('.score-panel').classList.toggle('team-score', false);
+    $('timer').textContent = recovery ? `NEXT WAVE IN ${Math.ceil(state.recoveryRemaining)}` : `${state.kills} KILLS`;
+    $('objective-status').textContent = recovery ? 'HEALTH + AMMO RESTORED · MOVE, LOOT & EQUIP' : '';
+    $('objective-status').hidden = !recovery;
+    return;
+  }
   const mode = getMode(view.modeId), own = view.players.find(player => player.id === ownId);
   const remaining = Math.max(0, Math.ceil(view.timeLeft));
   $('timer').textContent = `${String(Math.floor(remaining / 60)).padStart(2, '0')}:${String(remaining % 60).padStart(2, '0')}`;
@@ -19,8 +32,20 @@ export function renderMatchHud(view, ownId) {
   $('objective-status').textContent = objective;
   $('objective-status').hidden = !objective;
 }
-export function renderMatchResults(view, ownId) {
+export function renderMatchResults(view, ownId, { best } = {}) {
   if (!view) return;
+  const zombies = view.modeId === 'zombies';
+  if ($('result-kills-label')) $('result-kills-label').textContent = zombies ? 'WAVES COMPLETED' : 'ELIMINATIONS';
+  if ($('result-deaths-label')) $('result-deaths-label').textContent = zombies ? 'ZOMBIES DEFEATED' : 'DEATHS';
+  if ($('zombie-best')) $('zombie-best').hidden = !zombies;
+  if (zombies) {
+    $('result-title').textContent = 'RUN OVER.';
+    $('result-mode').textContent = 'ZOMBIE SURVIVAL';
+    $('result-kills').textContent = view.survival.completedWaves;
+    $('result-deaths').textContent = view.survival.kills;
+    if ($('zombie-best')) $('zombie-best').textContent = `MAP BEST · ${best?.waves ?? 0} WAVES · ${best?.kills ?? 0} KILLS`;
+    return;
+  }
   const own = view.players.find(player => player.id === ownId), winner = view.players.find(player => player.id === view.winnerId);
   $('result-kills').textContent = own?.kills || 0; $('result-deaths').textContent = own?.deaths || 0;
   let title = 'DRAW.';

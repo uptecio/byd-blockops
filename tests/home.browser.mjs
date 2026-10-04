@@ -38,7 +38,7 @@ try {
   await page.goto(base);
   await page.waitForSelector('body[data-mode="home"]', { timeout: 5000 });
   assert.equal(await page.locator('[data-map]').count(), 8, 'all eight bundled maps can be selected');
-  assert.equal(await page.locator('[data-mode-id]').count(), 3, 'all three match modes are separate from navigation');
+  assert.equal(await page.locator('[data-mode-id]').count(), 4, 'three ordinary modes and solo Zombies are separate from navigation');
   assert.equal(await page.locator('[data-skin]').count(), 8, 'all eight skins are unlocked');
   await page.waitForFunction(() => document.getElementById('character-preview').width > 1);
   await page.locator('[data-map="space-station"]').click();
