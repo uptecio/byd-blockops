@@ -4,9 +4,45 @@ const $ = id => document.getElementById(id);
 const types = { frag: 'Explosive', smoke: 'Smoke', flash: 'Flash' };
 
 export class EquipmentUI {
-  constructor({ getView, onAction, onPicker, onToast }) {
-    Object.assign(this, { getView, onAction, onPicker, onToast });
+  constructor({ getView, onAction, onPicker, onToast, canSelectInventory = () => false }) {
+    Object.assign(this, { getView, onAction, onPicker, onToast, canSelectInventory });
     this.pendingSelection = null; this.tab = 'armory';
+    this.inventoryEntries = new Map(); this.inventoryGesture = null;
+    const inventory = $('inventory-slots');
+    if (inventory) {
+      inventory.addEventListener('pointerdown', event => {
+        const button = event.target.closest('[data-inventory-key]'); if (!button) return;
+        const entry = this.inventoryEntries.get(button.dataset.inventoryKey); if (!entry) return;
+        this.inventoryGesture = { button, pointerId: event.pointerId, x: event.clientX, y: event.clientY,
+          scrollLeft: inventory.scrollLeft, lifeId: entry.lifeId, roundId: entry.roundId,
+          allowed: this.canSelectInventory() && !button.disabled, moved: false, cancelled: false, ended: false };
+      });
+      const trackGesture = event => {
+        const gesture = this.inventoryGesture;
+        if (!gesture || event.pointerId !== gesture.pointerId || gesture.cancelled || gesture.ended) return;
+        const view = this.getView();
+        if (!gesture.allowed || !this.canSelectInventory() || !view.roundId || view.alive === false
+          || gesture.lifeId !== view.lifeId || gesture.roundId !== view.roundId) { gesture.cancelled = true; return; }
+        const dx = event.clientX - gesture.x, dy = event.clientY - gesture.y;
+        if (dx * dx + dy * dy > 64) gesture.moved = true;
+        if (gesture.moved && Math.abs(dx) > 8) inventory.scrollLeft = Math.max(0, gesture.scrollLeft - dx);
+        if (inventory.scrollLeft !== gesture.scrollLeft) gesture.moved = true;
+      };
+      document.addEventListener('pointermove', trackGesture);
+      document.addEventListener('pointerup', event => {
+        trackGesture(event);
+        if (this.inventoryGesture?.pointerId === event.pointerId) this.inventoryGesture.ended = true;
+      });
+      document.addEventListener('pointercancel', () => { if (this.inventoryGesture) this.inventoryGesture.cancelled = true; });
+      inventory.addEventListener('scroll', () => {
+        if (this.inventoryGesture && inventory.scrollLeft !== this.inventoryGesture.scrollLeft) this.inventoryGesture.moved = true;
+      });
+      inventory.addEventListener('click', event => {
+        const button = event.target.closest('[data-inventory-key]'); if (!button) return;
+        const gesture = event.detail === 0 ? null : this.inventoryGesture; this.inventoryGesture = null;
+        this.selectInventory(button, gesture);
+      });
+    }
     $('equipment-tabs').addEventListener('click', event => {
       const button = event.target.closest('[data-equipment-tab]'); if (!button) return;
       this.tab = button.dataset.equipmentTab; this.render();
@@ -49,9 +85,68 @@ export class EquipmentUI {
     if (!result?.ok) this.onToast(result?.reason || 'Unable to select grenade');
     this.render(); return result;
   }
-  close() { this.pendingSelection = null; $('grenade-picker').hidden = true; }
+  close() {
+    this.pendingSelection = null; $('grenade-picker').hidden = true;
+    if (this.inventoryGesture) this.inventoryGesture.cancelled = true;
+  }
+  selectInventory(button, gesture) {
+    const view = this.getView(), entry = this.inventoryEntries.get(button.dataset.inventoryKey);
+    if (!entry || entry.button !== button || button.disabled || !this.canSelectInventory() || !view.roundId || view.alive === false
+      || entry.lifeId !== view.lifeId || entry.roundId !== view.roundId) return;
+    if (gesture && (gesture.button !== button || !gesture.allowed || gesture.moved || gesture.cancelled
+      || gesture.lifeId !== view.lifeId || gesture.roundId !== view.roundId)) return;
+    let action;
+    if (entry.kind === 'gun' && (view.owned || []).some(gun => gun.weaponId === entry.id))
+      action = { kind: 'equip-gun', weaponId: entry.id, source: 'inventory' };
+    else if (entry.kind === 'knife' && view.knife) action = { kind: 'held-item', heldItem: 'knife' };
+    else if (entry.kind === 'grenade' && view.grenades?.[entry.id] > 0) action = { kind: 'select-grenade', grenadeType: entry.id };
+    if (!action) return;
+    const result = this.onAction(action);
+    if (!result?.ok) this.onToast(result?.reason || 'Unable to change equipment');
+    this.render(); return result;
+  }
+  renderInventory(view) {
+    const inventory = $('inventory-slots'); if (!inventory) return;
+    const items = (view.owned || []).map(gun => ({ key: `gun:${gun.weaponId}`, kind: 'gun', id: gun.weaponId,
+      name: getWeapon(gun.weaponId).name, count: `${gun.ammo} / ${gun.reserve}`, held: view.heldItem === 'gun' && view.activeGunId === gun.weaponId }));
+    if (view.knife) items.push({ key: 'knife', kind: 'knife', name: 'Knife', count: 'x1', held: view.heldItem === 'knife' });
+    for (const id of Object.keys(types)) if (view.grenades?.[id] > 0)
+      items.push({ key: `grenade:${id}`, kind: 'grenade', id, name: types[id], count: `x${view.grenades[id]}`, throwSelected: view.selectedGrenade === id });
+    const keys = new Set(items.map(item => item.key)), scrollLeft = inventory.scrollLeft;
+    for (const [key, entry] of this.inventoryEntries) if (!keys.has(key)) {
+      inventory.removeChild(entry.button); this.inventoryEntries.delete(key);
+    }
+    const disabled = !this.canSelectInventory() || !view.roundId || view.alive === false;
+    const gesture = this.inventoryGesture;
+    if (gesture && (disabled || gesture.lifeId !== view.lifeId || gesture.roundId !== view.roundId)) gesture.cancelled = true;
+    items.forEach((item, index) => {
+      let entry = this.inventoryEntries.get(item.key);
+      if (!entry) {
+        const button = document.createElement('button'); button.type = 'button'; button.className = 'inventory-slot';
+        button.dataset.inventoryKey = item.key; button.dataset.inventoryKind = item.kind;
+        if (item.kind === 'gun') button.dataset.weaponId = item.id;
+        if (item.kind === 'grenade') button.dataset.grenadeType = item.id;
+        const labels = {};
+        for (const name of ['number', 'name', 'count', 'status']) {
+          const label = document.createElement('span'); label.className = `inventory-${name}`; labels[name] = label; button.append(label);
+        }
+        entry = { button, labels }; this.inventoryEntries.set(item.key, entry);
+      }
+      Object.assign(entry, { kind: item.kind, id: item.id, lifeId: view.lifeId, roundId: view.roundId });
+      const { button, labels } = entry, status = item.held ? 'HELD' : item.throwSelected ? 'THROW' : '';
+      for (const [name, text] of Object.entries({ number: String(index + 1), name: item.name, count: item.count, status }))
+        if (labels[name].textContent !== text) labels[name].textContent = text;
+      labels.status.hidden = !status; button.disabled = disabled;
+      button.dataset.held = String(!!item.held); button.dataset.throwSelected = String(!!item.throwSelected);
+      button.setAttribute('aria-pressed', !!(item.held || item.throwSelected));
+      button.setAttribute('aria-label', `${index + 1}. ${item.name}, ${item.count}${status ? `, ${status}` : ''}`);
+      if (inventory.children[index] !== button) inventory.insertBefore(button, inventory.children[index] || null);
+    });
+    if (inventory.scrollLeft !== scrollLeft) inventory.scrollLeft = scrollLeft;
+  }
   render() {
     const view = this.getView(), pending = this.currentSelection(view), owned = view.owned || [];
+    this.renderInventory(view);
     const alive = view.alive !== false, knife = view.heldItem === 'knife';
     $('knife-button').disabled = !alive || !view.knife;
     $('knife-button').setAttribute('aria-pressed', knife);

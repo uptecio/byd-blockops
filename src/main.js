@@ -277,6 +277,7 @@ try {
   });
   multiplayer = new MultiplayerUI({ getGame: () => game, getSettings: () => settings, getSelected: () => selected, getSelection: () => selection, onSkin: skinId => selectConfiguration({ ...selection, skinId }), onConfiguration: next => { selection = validateSelection({ ...selection, ...next }); persist(); home.render(); }, onRoomSettings: () => { if (mode === 'armory') renderArmorySession(); }, onRemoteStart: () => { if (backgroundSuspended || document.hidden) setMode('paused'); }, onHome: requestHome, onMode: setMode, onLoadout: showArmory, onToast: message => { $('toast').textContent = message; toastUntil = performance.now() + 1900; } });
   equipmentUI = new EquipmentUI({ getView: equipmentView,
+    canSelectInventory: () => mode === 'playing' && input.enabled && !backgroundSuspended && !document.hidden,
     onAction: action => multiplayer?.isActive() ? action.kind === 'equip-gun' && mode === 'armory'
       ? multiplayer.deploy({ equipWeaponId: action.weaponId, source: action.source }) : multiplayer.arena.requestEquipment(action) : game.requestEquipment(action),
     onPicker: open => { input.clear(); setMode(open ? 'grenade-picker' : 'paused'); },

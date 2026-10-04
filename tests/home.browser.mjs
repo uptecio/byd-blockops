@@ -45,7 +45,7 @@ try {
   await page.locator('[data-mode-id="ctf"]').click();
   await page.locator('[data-skin="space-guard"]').click();
   await page.locator('#home-armory').click();
-  assert.match(await page.locator('#armory .app-footer').textContent(), /v0\.4\.1 BYD TEST/, 'visible build identity distinguishes the BYD compatibility test APK');
+  assert.match(await page.locator('#armory .app-footer').textContent(), /v0\.4\.2 LOOT INVENTORY/, 'visible build identity distinguishes the inventory browser release');
   await page.locator('[data-class="sniper"]').click();
   await page.locator('[data-weapon="awp"]').click();
   await page.locator('#armory-home').click();
