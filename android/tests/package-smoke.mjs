@@ -7,8 +7,8 @@ import { createHash } from 'node:crypto';
 import { resolve, join } from 'node:path';
 
 const run = promisify(execFile);
-const apk = resolve(process.env.ANDROID_APK_PATH || 'artifacts/block-ops-v0.5.0-zombies.apk');
-const dist = resolve(process.env.DIST_DIR || 'artifacts/zombies-review/dist');
+const apk = resolve(process.env.ANDROID_APK_PATH || 'artifacts/block-ops-v0.5.1-zombies.apk');
+const dist = resolve(process.env.DIST_DIR || 'artifacts/zombie-damage-review/dist');
 const sdk = process.env.ANDROID_SDK_ROOT || process.env.ANDROID_HOME || `${process.env.HOME}/Android/Sdk`;
 const versions = (await readdir(join(sdk, 'build-tools'))).sort((a, b) => b.localeCompare(a, undefined, { numeric: true }));
 let buildTools;
@@ -22,8 +22,8 @@ const { stdout: badging } = await run(join(buildTools, 'aapt'), ['dump', 'badgin
 // Catches accidentally packaging the previous release or changing its Android compatibility.
 test('zombie APK metadata identifies the new test build', () => {
   assert.match(badging, /package: name='au\.local\.blockops'/);
-  assert.match(badging, /versionCode='6'/);
-  assert.match(badging, /versionName='0\.5\.0'/);
+  assert.match(badging, /versionCode='7'/);
+  assert.match(badging, /versionName='0\.5\.1'/);
   assert.match(badging, /sdkVersion:'26'/);
   assert.match(badging, /targetSdkVersion:'36'/);
   assert.deepEqual([...badging.matchAll(/^uses-permission: name='([^']+)'/gm)].map(match => match[1]), ['android.permission.INTERNET']);

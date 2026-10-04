@@ -4,6 +4,7 @@ import { createHeadlessGame, cleanupGame } from './helpers/game-fixture.js';
 import { pickupEquipment, equipmentDTO } from '../src/equipment.js';
 import { OnlineArena } from '../src/online-game.js';
 import { RoomManager } from '../server/rooms.js';
+import { createZombieBrain } from '../src/zombie-brain.js';
 
 function arena(t,gun='m4a1') {
   const game=createHeadlessGame(); t.after(()=>cleanupGame(game));
@@ -62,6 +63,39 @@ test('two real knife slashes kill a zombie without loot or duplicate death', t=>
   assert.equal(game.lootState.drops.length,0);
 });
 
+for (const kind of ['walker','runner']) {
+  for (const [wave,health,remaining] of [[1,100,90],[2,100,85],[3,100,80],[4,100,75],
+    [18,100,5],[19,100,0],[20,150,45],[100,1000,495]]) {
+    test(`${kind} wave ${wave} slash scales damage without a cap`, t=>{
+      const game=arena(t),z=target(game);
+      game.modeState.wave=wave;
+      z.kind=kind; z.brain=createZombieBrain(kind); z.brain.attackRemaining=0;
+      z.model.position.set(0,0,8.9); game.player.health=health;
+      game.update(.01);
+      assert.equal(game.player.health,remaining);
+      assert.equal(game.modeState.ended,remaining===0);
+      if (remaining>0) {
+        game.update(.01);
+        assert.equal(game.player.health,remaining,'the attack interval still prevents another immediate hit');
+      }
+    });
+  }
+}
+
+test('zombie damage follows the next wave after recovery and resets on replay', t=>{
+  const game=arena(t);
+  clearWave(game); game.update(10);
+  assert.equal(game.modeState.wave,2);
+  let z=target(game);
+  z.model.position.set(0,0,8.9); z.brain.attackRemaining=0;
+  game.update(.01); assert.equal(game.player.health,85);
+  game.start('m4a1',{modeId:'zombies',mapId:'courtyard',skinId:'shadow-ninja'});
+  z=target(game);
+  z.model.position.set(0,0,8.9); z.brain.attackRemaining=0;
+  game.update(.01); assert.equal(game.player.health,90);
+  assert.equal(game.modeState.wave,1);
+});
+
 test('frag uses existing falloff and cap, smoke/flash affect only pursuit and slash', t=>{
   const game=arena(t),z=target(game);
   game.player.equipment.grenades.frag=1;
@@ -76,7 +110,7 @@ test('frag uses existing falloff and cap, smoke/flash affect only pursuit and sl
   game.update(.05); assert.equal(game.player.health,health);
   game.gearCombatState.smokes=[]; game.player.protected=1; game.update(.05);
   assert.equal(game.player.health,health);
-  game.player.protected=0; game.update(.05); assert.equal(game.player.health,health-20);
+  game.player.protected=0; game.update(.05); assert.equal(game.player.health,health-10);
 });
 
 test('recovery retains inventory and choice, refills 500 each and blocks all attacks for ten seconds', t=>{

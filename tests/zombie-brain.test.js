@@ -1,7 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createZombieBrain, selectZombieSpawn, stepZombieBrain } from '../src/zombie-brain.js';
-import { ZOMBIE_BALANCE } from '../src/zombie-survival.js';
 import { MAPS } from '../src/maps.js';
 import { createNavigation } from '../src/navigation.js';
 import { canOccupy } from '../src/collision.js';
@@ -54,10 +53,9 @@ for (const arena of MAPS) test(`${arena.id}: spawns can approach authored and le
 });
 
 test('walkers and runners have specified speed, delayed first slash and repeat intervals', () => {
-  for (const [kind,speed,interval,damage] of [['walker',2.1,1.2,20],['runner',3.4,.9,15]]) {
+  for (const [kind,speed,interval] of [['walker',2.1,1.2],['runner',3.4,.9]]) {
     const brain = createZombieBrain(kind), moving = context({ actor:actor({ kind }) });
     assert.equal(brain.attackRemaining,interval);
-    assert.equal(ZOMBIE_BALANCE[kind].damage,damage);
     assert.ok(Math.abs(stepZombieBrain(brain,moving).z + speed*.05) < 1e-9);
     const attacking = createZombieBrain(kind), near = context({ actor:actor({ kind }), player:player({ z:-1 }) });
     for (let i=0;i<Math.round(interval/.05)-1;i++) assert.equal(stepZombieBrain(attacking,near).attack,false);

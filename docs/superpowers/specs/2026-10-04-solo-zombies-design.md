@@ -4,6 +4,8 @@ Add an offline Zombie Survival mode to Block Ops. Play alone on any existing map
 
 The user approved the gameplay summary, this written specification and its implementation plan on 2026-10-04, choosing Native execution. Details labelled Proposed are the initial design and playtest defaults included in that approval. Implementation progress is recorded separately; this design is not a release claim.
 
+Approved balance amendment (0.5.1): both zombie types now deal `10 + 5 × (wave − 1)` damage per successful hit, without a cap. The user confirmed the resulting one-hit kill from full health at wave 19. Movement speed, attack intervals and all other rules stay unchanged; this supersedes the original fixed 20/15 damage values.
+
 ## Approved gameplay
 
 - Endless waves, with no three-minute limit or final victory wave.
@@ -48,10 +50,10 @@ Use these initial balance values, separate from ordinary bot difficulty settings
 
 | Type | Health | Movement speed in game units per second | Slash damage | Minimum interval between hits |
 | --- | --- | --- | --- | --- |
-| Walker | 100 | 2.1 | 20 | 1.2 seconds |
-| Runner | 100 | 3.4 | 15 | 0.9 seconds |
+| Walker | 100 | 2.1 | 10 + 5 × (wave − 1) | 1.2 seconds |
+| Runner | 100 | 3.4 | 10 + 5 × (wave − 1) | 0.9 seconds |
 
-Zombie health stays at 100; challenge grows through wave size and the runner mixture. A valid headshot stays lethal. Preserve all existing player gun, knife and grenade damage. In particular, a knife still deals 50 and an explosive grenade still deals at most 90; do not silently strengthen grenades for this mode.
+Zombie health stays at 100; challenge grows through wave size, the runner mixture and uncapped per-hit damage. A valid headshot stays lethal. Preserve all existing player gun, knife and grenade damage. In particular, a knife still deals 50 and an explosive grenade still deals at most 90; do not silently strengthen grenades for this mode.
 
 Zombies target only the human. They do not fight each other, collect loot, carry inventory, create gun death drops or respawn after death. New spawn identities must not reuse a dead enemy's identity during the run. Use zombie-specific slash timers and damage, not the player's equipment-dependent knife action.
 

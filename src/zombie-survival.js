@@ -2,8 +2,9 @@ import { getMap } from './maps.js';
 
 export const ZOMBIE_BALANCE = Object.freeze({
   maxAlive: 8, spawnInterval: 1, recoverySeconds: 10, spawnDistance: 8, separation: .8, pathInterval: .15,
-  walker: Object.freeze({ health: 100, speed: 2.1, damage: 20, interval: 1.2 }),
-  runner: Object.freeze({ health: 100, speed: 3.4, damage: 15, interval: .9 }),
+  baseDamage: 10, damagePerWave: 5,
+  walker: Object.freeze({ health: 100, speed: 2.1, interval: 1.2 }),
+  runner: Object.freeze({ health: 100, speed: 3.4, interval: .9 }),
 });
 
 export function waveConfig(wave) {

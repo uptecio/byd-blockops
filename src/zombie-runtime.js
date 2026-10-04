@@ -71,7 +71,8 @@ export class ZombieRuntime {
       zombie.bar.rotation.y=game.yaw-zombie.model.rotation.y;
       if (next.attack) {
         zombie.slashRemaining=.2;
-        game.damageActor(zombie.id,game.player,ZOMBIE_BALANCE[zombie.kind].damage,actors);
+        const damage=ZOMBIE_BALANCE.baseDamage+(this.state.wave-1)*ZOMBIE_BALANCE.damagePerWave;
+        game.damageActor(zombie.id,game.player,damage,actors);
       }
       animateZombieModel(zombie.model,{ time:game.simulationTime,moving,slashing:zombie.slashRemaining>0 });
     }
