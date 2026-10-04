@@ -89,7 +89,15 @@ export class ZombieRuntime {
     game.bots=game.bots.filter(z => { if (z.health>0) return true; disposeModel(z.model); return false; });
     for (const event of settleSurvival(this.state,game.player.health>0)) {
       if (event.type === 'recovery') {
+        // The preparation break starts clean, without spending or rerolling loot.
+        const combat=game.gearCombatState;
+        combat.projectiles.length=0; combat.smokes.length=0; combat.events.length=0; combat.reservedSmoke=0;
+        game.gearEvents=game.pickupEvents.slice();
+        game.clearEffects(); game.gearView?.clear();
+        game.player.flashRemaining=0; game.shotFlash=0; game.hitFlash=0; game.damageFlash=0; game.recoil=0;
+        game.muzzle.visible=false;
         game.player.health=100; refillOwnedAmmo(game.player.equipment); game.syncPlayerEquipment();
+        game.refreshGearView();
         game.audio.zombieRecovery?.(); game.events.onToast('WAVE CLEAR · HEALTH & AMMO RESTORED'); this.record();
       } else if (event.type === 'ended') this.record();
     }

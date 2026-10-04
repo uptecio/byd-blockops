@@ -107,6 +107,43 @@ test('recovery retains inventory and choice, refills 500 each and blocks all att
   assert.equal(game.weaponState.ammo+game.weaponState.reserve,3,'switching alone never refills');
 });
 
+test('recovery removes pending smoke and combat visuals while retaining loot and equipment', t=>{
+  const game=arena(t),loot=game.lootState,e=game.player.equipment;
+  game.player.protected=1000;
+  for(let i=0;i<4;i++) {
+    game.update(1.01);for(const z of game.bots)game.damageActor('local',z,100);game.zombieRuntime.finishStep();
+  }
+  game.update(1.01);
+  assert.equal(game.modeState.queued,0);assert.equal(game.bots.length,1);
+  pickupEquipment(e,{kind:'knife'});e.grenades.smoke=2;e.selectedGrenade='smoke';
+  assert.equal(game.requestEquipment({kind:'throw',grenadeType:'smoke'}).ok,true);
+  game.gearCombatState.smokes.push({id:'existing',x:0,y:1.6,z:0,radius:3,remaining:8});
+  game.gearView.event({id:999,type:'grenade-burst',grenadeType:'frag',position:{x:0,y:0,z:0}});
+  game.refreshGearView();
+  const slots=loot.slots.map(s=>({id:s.id,present:s.present}));
+  assert.ok(game.gearView.loot.size>0);assert.ok(game.gearView.projectiles.size>0);
+  assert.ok(game.gearView.smokes.size>0);assert.ok(game.gearView.bursts.size>0);
+  game.tracer(game.camera.position.clone(),game.camera.position.clone().addScalar(1),'#ffffff');
+  const tracer=game.effects[0].line;let released=0;
+  tracer.geometry.addEventListener('dispose',()=>released++);
+  game.player.flashRemaining=3;
+  game.damageActor('local',game.bots[0],100);game.zombieRuntime.finishStep();
+  assert.equal(game.modeState.phase,'recovery');
+  assert.equal(game.gearCombatState.projectiles.length,0);
+  assert.equal(game.gearCombatState.smokes.length,0);assert.equal(game.gearCombatState.reservedSmoke,0);
+  assert.equal(game.gearCombatState.events.length,0);assert.equal(game.effects.length,0);
+  assert.equal(tracer.parent,null);assert.equal(released,1);
+  assert.equal(game.player.flashRemaining,0);
+  assert.equal(game.gearView.projectiles.size,0);assert.equal(game.gearView.smokes.size,0);
+  assert.equal(game.gearView.bursts.size,0);assert.equal(game.gearView.flash.visible,false);
+  assert.ok(game.gearView.loot.size>0,'map loot stays visible immediately after cleanup');
+  assert.equal(game.lootState,loot);assert.deepEqual(loot.slots.map(s=>({id:s.id,present:s.present})),slots);
+  assert.equal(game.player.equipment,e);assert.equal(e.knife,true);assert.equal(e.grenades.smoke,1);
+  assert.equal(e.selectedGrenade,'smoke');assert.equal(game.weaponState.ammo+game.weaponState.reserve,500);
+  game.update(2.05);assert.equal(game.modeState.phase,'recovery');
+  assert.equal(game.gearCombatState.smokes.length,0);assert.equal(game.gearCombatState.projectiles.length,0);
+});
+
 test('human death ends once, takes priority over wave recovery and cannot resume or respawn', t=>{
   const game=arena(t),records=[]; let ended=0;
   game.events.onEnd=()=>ended++; game.events.onSurvivalRecord=r=>records.push(r);
