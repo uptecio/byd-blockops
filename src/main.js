@@ -259,7 +259,7 @@ class WeaponPreview {
 function onHud(current) {
   equipmentUI?.render();
   const recovery = current.getMatchView()?.survival?.phase === 'recovery';
-  $('fire-button').disabled = recovery;
+  $('fire-button').disabled = $('fire-button').disabled || recovery;
   $('throw-button').disabled = $('throw-button').disabled || recovery;
   renderMatchHud(current.getMatchView(), multiplayer?.isActive() ? multiplayer.client.id : 'local');
   $('health-count').textContent = Math.ceil(current.player.health);

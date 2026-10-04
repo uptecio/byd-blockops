@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
+import { runInNewContext } from 'node:vm';
 import { renderMatchHud, renderMatchResults } from '../src/match-ui.js';
 
 function dom(t) {
@@ -50,4 +51,26 @@ test('ordinary minimal result fixture stays supported and shipped markup contain
   const html=readFileSync(new URL('../index.html',import.meta.url),'utf8');
   for(const id of ['home-mode-help','session-duration','session-duration-label','result-kills-label','result-deaths-label','zombie-best','bot-settings-note'])
     assert.ok(html.includes(`id="${id}"`),id);
+});
+
+test('main HUD adds recovery suppression without undoing equipment death or throw locks',t=>{
+  const node=dom(t),$=id=>{const result=node(id);result.style??={};return result;};
+  // Execute the actual private composition callback without booting main's
+  // renderer. EquipmentUI's separately-tested output is the boundary input.
+  const source=readFileSync(new URL('../src/main.js',import.meta.url),'utf8');
+  const callback=source.match(/function onHud\(current\) \{[\s\S]*?\n\}/)?.[0];
+  assert.ok(callback,'production HUD callback is present');
+  let equipmentBlocked=false,phase;
+  const onHud=runInNewContext(`(${callback})`,{$,equipmentUI:{render(){
+    $('fire-button').disabled=equipmentBlocked;$('throw-button').disabled=equipmentBlocked;
+  }},renderMatchHud(){},multiplayer:null,input:{zoom:false},performance:{now:()=>0},toastUntil:1});
+  const game={getMatchView:()=>phase?{survival:{phase}}:{modeId:'ffa'},
+    player:{health:100,dead:0},weapon:{name:'M4A1'},weaponState:{ammo:30,reserve:470,reloadRemaining:0},
+    hitFlash:0,damageFlash:0,heldItem:'gun'};
+  for(const [nextPhase,blocked,expected] of [[undefined,true,true],['fighting',true,true],
+    ['recovery',false,true],['fighting',false,false],[undefined,false,false]]) {
+    phase=nextPhase;equipmentBlocked=blocked;onHud(game);
+    assert.equal($('fire-button').disabled,expected,`${phase||'ordinary'} preserves existing attack eligibility`);
+    assert.equal($('throw-button').disabled,expected);
+  }
 });
