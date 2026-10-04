@@ -28,6 +28,8 @@ export class GameAudio {
   reload() { this.tone(230, .12, .025, 'square', .5); }
   pickup() { this.tone(660, .13, .035, 'triangle', 1.6); }
   swing() { this.tone(260, .14, .025, 'sawtooth', .25); }
+  zombieWave() { this.tone(150, .35, .045, 'triangle', .55); }
+  zombieRecovery() { this.tone(440, .28, .035, 'triangle', 1.8); }
   grenade(type) {
     if (type === 'frag') this.tone(85, .3, .07, 'sawtooth', .25);
     else if (type === 'smoke') this.tone(180, .24, .025, 'triangle', .4);
