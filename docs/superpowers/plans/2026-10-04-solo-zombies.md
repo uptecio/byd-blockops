@@ -8,7 +8,7 @@
 
 **Tech Stack:** JavaScript ES modules, Node test runner, Three.js 0.160.1, esbuild targeting ES2017, existing Playwright and Playwright CLI, Android Java 17 WebView wrapper with minimum SDK 26 and compile/target SDK 36. No new dependencies.
 
-**Spec:** `docs/superpowers/specs/2026-10-04-solo-zombies-design.md`, approved 2026-10-04. Read it in full before execution. This plan is awaiting user review and an execution-method choice; its unchecked tasks are not claims of work performed.
+**Spec:** `docs/superpowers/specs/2026-10-04-solo-zombies-design.md`, approved 2026-10-04. Read it in full before execution. The user approved this plan and chose Native execution on 2026-10-04. Unchecked tasks are not claims of work performed; the execution ledger records verified completion.
 
 ## Global Constraints
 
@@ -256,4 +256,4 @@ The recommended approach for this plan is **Native**: the primary agent implemen
 
 The alternative is **Subagent-driven**: separate implementers and reviewers handle each testable task, with task-by-task review gates and a final whole-change review. This adds independent checks earlier but more coordination and fresh contexts.
 
-The user must review this plan and choose the execution approach before product implementation begins.
+The user reviewed this plan and chose Native execution on 2026-10-04.

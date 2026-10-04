@@ -142,6 +142,14 @@ export function resetEquipment(e) {
   Object.assign(e, fresh);
 }
 
+// Recovery replenishes existing guns without resetting ownership or selections.
+export function refillOwnedAmmo(e) {
+  for (const [id, state] of e.owned) Object.assign(state, createWeaponState(id));
+  e.throwRemaining = 0;
+  e.attackLockRemaining = 0;
+  e.meleeRemaining = 0;
+}
+
 export function equipmentDTO(e) {
   return {
     startingGunId: e.startingGunId, activeGunId: e.activeGunId, heldItem: e.heldItem,
