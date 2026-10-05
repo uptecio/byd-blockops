@@ -2,7 +2,7 @@
 
 Date: 2026-10-05
 
-Status: conversational design approved; written spec awaiting user review.
+Status: written spec approved by the user on 2026-10-05; implementation plan pending review.
 
 Baseline: `171367c` / Block Ops 0.5.1. No implementation or deployment is approved by this document alone.
 
@@ -35,9 +35,9 @@ The game-design skill informs the recovery choice, clear feedback, predictable s
 
 Alternatives considered: immediate-use pickups versus carried packs; random versus fixed supply locations. Carried packs were selected by the user to match the inventory. Fixed locations were approved for learnable emergency routes, accepting less location variety between matches.
 
-## Detailed rules proposed for written-spec approval
+## Detailed rules
 
-The following make the approved behaviour precise. Values not separately selected in conversation are implementation defaults presented for review here, not claims that they have shipped.
+The following make the approved behaviour precise. Implementation defaults below were included in the written spec approved by the user; they are not claims that the feature has shipped.
 
 ### Vitals and damage
 
@@ -142,7 +142,7 @@ Required verification after implementation:
 
 ## Delivery boundary
 
-This is design-only work. The written spec needs user approval before writing the implementation plan; the written plan then needs review and an execution-method choice before code changes. Do not rebuild the APK, mutate the running browser server, restart a tunnel, install dependencies or publish a release during spec review.
+This spec is approved and the implementation plan is being prepared. The written plan still needs user review and an execution-method choice before code changes. Do not rebuild the APK, mutate the running browser server, restart a tunnel, install dependencies or publish a release during planning/review.
 
 The later implementation plan must include candidate build/version/hash evidence and an explicit browser/APK handoff. Preserve existing release artifacts and rollback snapshots. At an authorized release, revalidate the exact server and hosting identity, wait for rooms to be empty, and never kick players or restart the tunnel merely to update assets. Do not merge, push or include unrelated dirty worktree files without authority.
 
