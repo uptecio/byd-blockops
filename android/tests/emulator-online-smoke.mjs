@@ -7,7 +7,7 @@ import { setTimeout as delay } from 'node:timers/promises';
 import { cleanupOwnedOnlineSession } from './online-cleanup.mjs';
 
 // Run after installing the debug APK on a disposable emulator. Uses the real
-// public WSS server, a second independent peer, and raw WebView CDP (no focus
+// explicitly selected WSS server, a second independent peer, and raw WebView CDP (no focus
 // emulation, injected game state, or production-only test hooks).
 const serial = process.env.ANDROID_TEST_SERIAL;
 const artifacts = process.env.ANDROID_TEST_ARTIFACTS || 'artifacts/loot-review';
@@ -110,7 +110,7 @@ try {
   };
   const click = id => evaluate(`document.getElementById(${JSON.stringify(id)}).click()`);
   const tap = async id => {
-    const point = await evaluate(`(() => { const r = document.getElementById(${JSON.stringify(id)}).getBoundingClientRect(); return { x: (r.x + r.width / 2) * devicePixelRatio, y: (r.y + r.height / 2) * devicePixelRatio }; })()`);
+    const point = await evaluate(`(() => { const r = document.querySelector(${JSON.stringify(id.startsWith('[') ? id : '#'+id)}).getBoundingClientRect(); return { x: (r.x + r.width / 2) * devicePixelRatio, y: (r.y + r.height / 2) * devicePixelRatio }; })()`);
     await shell('input', 'tap', String(Math.round(point.x)), String(Math.round(point.y)));
   };
   const state = () => evaluate('document.getElementById("room-code") ? ({mode:document.body.dataset.mode,hidden:document.hidden,code:document.getElementById("room-code").textContent,players:document.querySelectorAll(".roster-player").length,status:document.getElementById("connection-status").textContent,ammo:Number(document.getElementById("ammo-count").textContent),reserve:Number(document.getElementById("reserve-count").textContent),pauseTitle:document.querySelector("#pause-screen h2").textContent}) : ({mode:"loading"})');
@@ -141,18 +141,8 @@ try {
       constructor(...args){super(...args);window.__nativeRoomSocket=this;}
     };
   })()` });
-  if (process.env.GAME_TEST_SERVER_URL && server !== bundledServer) {
-    await evaluate('localStorage.removeItem("block-ops-online")'); await reload();
-    await until(state, current => current.mode === 'home', 'Bundled default check loads Home');
-    await click('home-online');
-    assert.equal(await evaluate('document.getElementById("server-address").value'), bundledServer, 'Candidate retains the validated live origin as bundled default');
-    const health = await (await fetch(`${bundledServer}/health`, { signal: AbortSignal.timeout(10000) })).json();
-    assert.equal(health.ok, true, 'Bundled default remains available before coordinated rollout');
-    await click('create-room');
-    await until(state, current => /update required/i.test(current.status), 'Protocol-2 live default accurately rejects protocol-3 candidate before rollout');
-    await click('online-back');
-    console.log('PASS bundled default: live HTTPS health available; real APK protocol-3 request gets update-required from protocol-2 release.');
-  }
+  // A staging override never probes or creates a room on the bundled live default.
+  // Live-default acceptance belongs to a separately authorized rollout window.
   for (const modeId of ['ffa', 'tdm', 'ctf']) {
   verifyDeparture = undefined;
   await evaluate('localStorage.removeItem("block-ops-online")');
@@ -189,7 +179,7 @@ try {
   const hostNativeId = latest.players.find(player => player.id !== peerId).id;
   verifyDeparture = () => until(() => latest, room => room?.code === lobby.code && !room.players.some(player => player.id === hostNativeId), 'Observer verifies owned native host departure before teardown');
   assert.equal(latest.mapId, mapId); assert.equal(latest.modeId, modeId);
-  assert.ok(nativePackets.some(packet => packet.type === 'welcome' && packet.protocol === PROTOCOL_VERSION), 'Real native client completes protocol-3 handshake');
+  assert.ok(nativePackets.some(packet => packet.type === 'welcome' && packet.protocol === PROTOCOL_VERSION), 'Real native client completes protocol-4 handshake');
   assert.equal(latest.players.find(player => player.id === peerId).skinId, 'robo-unit');
   assert.equal(latest.players.find(player => player.id !== peerId).skinId, 'space-guard');
   await until(state, current => current.players === 2, 'Native roster reflects peer');
@@ -207,12 +197,8 @@ try {
     assert.match(await evaluate('document.getElementById("objective-status").textContent'), /RED FLAG: HOME.*BLUE FLAG: HOME/);
   }
   const before = { ...native() };
-  if (modeId === 'ffa') {
-    const equipment = () => nativePackets.findLast(packet => packet.equipment?.equipment)?.equipment.equipment;
-    const events = [];
-    const receive = event => { const packet = JSON.parse(event.data); if (packet.room?.events) events.push(...packet.room.events); };
-    peer.addEventListener('message', receive);
-    const drive = async (axis, target, positive, negative) => {
+  const equipment = () => nativePackets.findLast(packet => packet.equipment?.equipment)?.equipment.equipment;
+  const drive = async (axis, target, positive, negative) => {
       // Remote snapshots lag real native inputs. Short pulses, followed by
       // neutral settling, bound overshoot without injecting actor positions.
       const deadline = Date.now() + 30000;
@@ -225,7 +211,68 @@ try {
         await delay(650);
       }
       assert.ok(Math.abs(target - native()[axis]) <= .6, `Native real walk settles at ${axis}=${target}: ${JSON.stringify(native())}`);
+  };
+  // Turn through ordinary native aim events, then use settled axis pulses.
+  const alignNative=async()=>{
+  for(let attempt=0;attempt<12 && Math.abs(native().yaw)>.025;attempt++) {
+    const pixels=Math.max(-150,Math.min(150,native().yaw/.0026));
+    await send('Input.dispatchMouseEvent',{type:'mouseMoved',x:600,y:180});
+    await send('Input.dispatchMouseEvent',{type:'mousePressed',x:600,y:180,button:'left',buttons:1,clickCount:1});
+    await send('Input.dispatchMouseEvent',{type:'mouseMoved',x:600+pixels,y:180,buttons:1});
+    await send('Input.dispatchMouseEvent',{type:'mouseReleased',x:600+pixels,y:180,button:'left',buttons:0,clickCount:1});await delay(300);
+  }
+  assert.ok(Math.abs(native().yaw)<.03,'real native aim faces the central lane');
+  };
+  await alignNative();
+  await drive('x',0,'KeyD','KeyA');await drive('z',17,'KeyS','KeyW');
+  await drive('x',-5,'KeyD','KeyA');await until(equipment,e=>e?.supplies.health>=1,'native health pack collected');
+  await drive('x',5,'KeyD','KeyA');await until(equipment,e=>e?.supplies.armour>=1,'native armour pack collected');
+  await drive('x',0,'KeyD','KeyA');const armourStock=equipment().supplies.armour;
+  await tap('[data-inventory-key="supply:armour"]');await until(equipment,e=>e?.supplyUse?.type==='armour','native starts authoritative supply use');
+  await shell('input','keyevent','KEYCODE_BACK');await until(state,s=>s.mode==='paused','real Back keeps online use live');
+  await until(native,p=>p.armour===50,'independent peer sees applied armour during native menu');
+  await until(equipment,e=>e.supplies.armour===armourStock-1&&!e.supplyUse,'native acknowledges exactly one used armour pack');
+  await tap('resume-button');await until(state,s=>s.mode==='playing','resume supply match');
+  if(modeId==='ffa') {
+    const friend=()=>latest.players.find(p=>p.id===peerId);
+    const drivePeer=async(x,z)=>{
+      const deadline=Date.now()+20000;
+      while(Date.now()<deadline) {
+        const p=friend(),dx=x-p.x,dz=z-p.z,d=Math.hypot(dx,dz);
+        if(d<.25){peerSend({type:'input',x:0,y:0,yaw:0,pitch:0});return;}
+        peerSend({type:'input',x:dx/d,y:-dz/d,yaw:0,pitch:0});await delay(80);
+      }
+      assert.fail('independent peer failed ordinary movement to firing position');
     };
+    await drivePeer(0,15);
+    peerSend({type:'equipment-action',seq:1,lifeId:friend().lifeId,kind:'equip-gun',weaponId:'g17',source:'armory'});
+    await until(friend,p=>p.weaponId==='g17','independent peer selects single-fire pistol');
+    for(const [armour,health] of [[27,100],[4,100],[0,81]]) {
+      const p=friend(),target=native(),dx=target.x-p.x,dz=target.z-p.z;
+      const aim={yaw:Math.atan2(-dx,-dz),pitch:Math.atan2(target.y+1-(p.y+1.65),Math.hypot(dx,dz))};
+      peerSend({type:'input',...aim,x:0,y:0,fire:true,firePressed:true});await delay(40);
+      peerSend({type:'input',...aim,x:0,y:0,fire:false,firePressed:false});
+      await until(native,p=>p.armour===armour&&p.health===health,'native and independent peer agree armour damage');await delay(240);
+    }
+    const healthStock=equipment().supplies.health;
+    await tap('[data-inventory-key="supply:health"]');await until(equipment,e=>e?.supplyUse?.type==='health','native starts injured healing');
+    await until(native,p=>p.health===100,'authoritative native health effect');
+    await until(equipment,e=>e.supplies.health===healthStock-1,'one native health pack consumed');
+    await drive('x',-5,'KeyD','KeyA');await until(equipment,e=>e.supplies.health>=1,'unused pack recollected for death drop');await drive('x',0,'KeyD','KeyA');
+    const p=friend(),target=native(),life=target.lifeId;
+    peerSend({type:'input',x:0,y:0,yaw:Math.atan2(p.x-target.x,p.z-target.z),pitch:0,fire:true,firePressed:true});await delay(40);
+    peerSend({type:'input',x:0,y:0,yaw:Math.atan2(p.x-target.x,p.z-target.z),pitch:0,fire:false,firePressed:false});
+    await until(()=>latest.gear.loot,loot=>loot.some(l=>l.source==='drop'&&l.item.kind==='supply'&&l.item.supplyType==='health'),'independent peer sees unused supply drop');
+    await until(native,p=>p.lifeId>life,'native respawns with a new life');
+    await until(equipment,e=>e.supplies.health===0&&e.supplies.armour===0&&!e.supplyUse,'native life clears supply inventory');
+    assert.equal(native().armour,0);
+    await alignNative();
+  }
+  console.log(`PASS native supplies ${modeId}: real pickup/use/menu and authoritative armour${modeId==='ffa'?', damage/heal/drop/death':''}`);
+  if (modeId === 'ffa') {
+    const events = [];
+    const receive = event => { const packet = JSON.parse(event.data); if (packet.room?.events) events.push(...packet.room.events); };
+    peer.addEventListener('message', receive);
     await drive('z', 12, 'KeyS', 'KeyW'); await drive('x', -6, 'KeyD', 'KeyA');
     await until(equipment, value => value?.grenades.frag === 1, 'Native real walk receives authoritative grenade inventory');
     await until(() => events, value => value.some(event => event.type === 'pickup' && event.playerId === hostNativeId && event.itemId === 'map:courtyard:frag:1'), 'Independent peer observes identical native pickup');
@@ -239,7 +286,7 @@ try {
     await tap('knife-button'); await until(native, value => value.heldItem === 'knife', 'Independent peer sees native held knife');
     await tap('knife-button'); await until(native, value => value.heldItem === 'gun', 'Native returns to its gun');
     peer.removeEventListener('message', receive);
-    console.log('PASS native protocol-3 pickup, Throw/knife controls and independent authoritative pickup/projectile/held-item state.');
+    console.log('PASS native protocol-4 pickup, Throw/knife controls and independent authoritative pickup/projectile/held-item state.');
   }
   await key('keyDown', 'KeyW', 'w'); await delay(700); await key('keyUp', 'KeyW', 'w');
   await until(native, player => Math.hypot(player.x - before.x, player.z - before.z) > .4, 'Native input moves authoritative player');
@@ -366,8 +413,7 @@ try {
   incompatible.send(JSON.stringify({ type: 'create', protocol: 3, name: 'Outdated', weaponId: 'm4a1' }));
   await until(() => rejection, value => /update required/i.test(value || ''), 'Old client must be rejected clearly');
   assert.deepEqual(errors, [], 'No JavaScript or CSP errors');
-  const defaultWsURL = `${bundledServer.replace(/^https:/, 'wss:').replace(/\/$/, '')}/ws`;
-  assert.ok(sockets.length >= 2 && sockets.every(url => url === wsURL || url === defaultWsURL), 'Only bundled-default and explicitly staged secure WebSockets are opened');
+  assert.ok(sockets.length >= 2 && sockets.every(url => url === wsURL), 'Only the explicitly selected secure WebSocket endpoint is opened');
   assert.deepEqual(remote, [], 'No remote HTTP assets or requests');
 } catch (error) {
   originalError = error;
@@ -391,4 +437,4 @@ try {
     originalError,
   });
 }
-console.log('Native online smoke passed: protocol 3 WSS, real pickups/equipment actions/shared peer state, all modes, teams/flags, create/join, authoritative input, Home cancel/leave, live lifecycle clock, incompatible client rejection and verified owned cleanup.');
+console.log('Native online smoke passed: protocol 4 WSS, real pickups/equipment actions/shared peer state, all modes, teams/flags, create/join, authoritative input, Home cancel/leave, live lifecycle clock, incompatible client rejection and verified owned cleanup.');

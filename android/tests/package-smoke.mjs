@@ -7,8 +7,8 @@ import { createHash } from 'node:crypto';
 import { resolve, join } from 'node:path';
 
 const run = promisify(execFile);
-const apk = resolve(process.env.ANDROID_APK_PATH || 'artifacts/block-ops-v0.5.1-zombies.apk');
-const dist = resolve(process.env.DIST_DIR || 'artifacts/zombie-damage-review/dist');
+const apk = resolve(process.env.ANDROID_APK_PATH || 'artifacts/block-ops-v0.6.0-health-armour.apk');
+const dist = resolve(process.env.DIST_DIR || 'dist');
 const sdk = process.env.ANDROID_SDK_ROOT || process.env.ANDROID_HOME || `${process.env.HOME}/Android/Sdk`;
 const versions = (await readdir(join(sdk, 'build-tools'))).sort((a, b) => b.localeCompare(a, undefined, { numeric: true }));
 let buildTools;
@@ -20,23 +20,23 @@ assert.ok(buildTools, 'SDK aapt and apksigner must be available');
 const { stdout: badging } = await run(join(buildTools, 'aapt'), ['dump', 'badging', apk]);
 
 // Catches accidentally packaging the previous release or changing its Android compatibility.
-test('zombie APK metadata identifies the new test build', () => {
+test('health and armour APK metadata identifies the new test build', () => {
   assert.match(badging, /package: name='au\.local\.blockops'/);
-  assert.match(badging, /versionCode='7'/);
-  assert.match(badging, /versionName='0\.5\.1'/);
+  assert.match(badging, /versionCode='8'/);
+  assert.match(badging, /versionName='0\.6\.0'/);
   assert.match(badging, /sdkVersion:'26'/);
   assert.match(badging, /targetSdkVersion:'36'/);
   assert.deepEqual([...badging.matchAll(/^uses-permission: name='([^']+)'/gm)].map(match => match[1]), ['android.permission.INTERNET']);
   assert.doesNotMatch(badging, /^native-code:/m, 'APK remains independent of CPU architecture');
 });
 
-test('zombie APK retains valid Android debug signing', async () => {
+test('health and armour APK retains valid Android debug signing', async () => {
   const { stdout } = await run(join(buildTools, 'apksigner'), ['verify', '--verbose', '--print-certs', apk]);
   assert.match(stdout, /^Verifies\r?$/m);
   assert.match(stdout, /Signer #1 certificate DN: .*CN=Android Debug/);
 });
 
-test('zombie APK bundles the exact reviewed offline assets', async () => {
+test('health and armour APK bundles the exact reviewed offline assets', async () => {
   for (const name of ['index.html', 'game.js', 'styles.css', 'THREE-LICENSE.txt']) {
     const expected = await readFile(join(dist, name));
     assert.ok(expected.length > 0, `${name} must not be empty`);

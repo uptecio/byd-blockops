@@ -45,7 +45,7 @@ try {
   await page.locator('[data-mode-id="ctf"]').click();
   await page.locator('[data-skin="space-guard"]').click();
   await page.locator('#home-armory').click();
-  assert.match(await page.locator('#armory .app-footer').textContent(), /v0\.5\.1 SOLO ZOMBIES/, 'visible build identity distinguishes the zombie browser release');
+  assert.match(await page.locator('#armory .app-footer').textContent(), /v0\.6\.0 HEALTH \+ ARMOUR/, 'visible build identity distinguishes the supply browser release');
   await page.locator('[data-class="sniper"]').click();
   await page.locator('[data-weapon="awp"]').click();
   await page.locator('#armory-home').click();

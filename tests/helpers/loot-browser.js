@@ -1,14 +1,16 @@
 import assert from 'node:assert/strict';
 import { chromium } from 'playwright';
 import { startServer } from '../../server/server.mjs';
+import { emulateLegacyWebView } from './legacy-webview.js';
 
-export async function fixture(viewport = { width: 1200, height: 700 }) {
+export async function fixture(viewport = { width: 1200, height: 700 }, { legacy = false } = {}) {
   const server = await startServer({ port: 0, distDir: process.env.DIST_DIR || 'dist' });
   const browser = await chromium.launch({ headless: true, args: ['--no-sandbox', '--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader'] });
   const errors = [], assets = [], packets = [[], []];
   const pages = [];
   for (let i = 0; i < 2; i++) {
     const context = await browser.newContext({ viewport, hasTouch: true });
+    if (legacy) await emulateLegacyWebView(context);
     const page = await context.newPage();
     await page.addInitScript(() => {
       // Passive timing/resource instrumentation, never arena state or inputs.
@@ -22,7 +24,9 @@ export async function fixture(viewport = { width: 1200, height: 700 }) {
         }
         callback(now);
       });
-      for (const prototype of [WebGLRenderingContext.prototype, WebGL2RenderingContext.prototype]) {
+      for (const constructor of [window.WebGLRenderingContext, window.WebGL2RenderingContext]) {
+        if (!constructor) continue;
+        const prototype = constructor.prototype;
         for (const kind of ['Buffer', 'Texture', 'Program', 'Shader', 'Framebuffer', 'Renderbuffer']) {
           const create = prototype[`create${kind}`], remove = prototype[`delete${kind}`];
           if (!create || !remove) continue;

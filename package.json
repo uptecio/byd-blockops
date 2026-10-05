@@ -1,6 +1,6 @@
 {
   "name": "block-ops-offline",
-  "version": "0.5.1",
+  "version": "0.6.0",
   "private": true,
   "type": "module",
   "scripts": {
@@ -18,6 +18,7 @@
     "test:webview": "node tests/webview-startup.browser.mjs && node tests/webview-layout.browser.mjs && node tests/runtime-errors.browser.mjs",
     "test:inventory": "node tests/inventory.browser.mjs",
     "test:zombies": "node tests/zombies.browser.mjs && node tests/zombies-layout.browser.mjs",
+    "test:supplies": "node tests/supplies.browser.mjs && node tests/supplies-layout.browser.mjs",
     "apk": "npm run build && bash scripts/build-apk.sh",
     "test:apk": "node android/tests/package-smoke.mjs"
   },
