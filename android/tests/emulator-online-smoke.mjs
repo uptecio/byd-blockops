@@ -212,16 +212,19 @@ try {
       }
       assert.ok(Math.abs(target - native()[axis]) <= .6, `Native real walk settles at ${axis}=${target}: ${JSON.stringify(native())}`);
   };
-  // Turn through ordinary native aim events, then use settled axis pulses.
+  // Use real Android touch swipes. Back-to-back CDP mouse gestures can be
+  // coalesced in the WebView; observe actual outgoing aim before another swipe.
   const alignNative=async()=>{
-  for(let attempt=0;attempt<12 && Math.abs(native().yaw)>.025;attempt++) {
-    const pixels=Math.max(-150,Math.min(150,native().yaw/.0026));
-    await send('Input.dispatchMouseEvent',{type:'mouseMoved',x:600,y:180});
-    await send('Input.dispatchMouseEvent',{type:'mousePressed',x:600,y:180,button:'left',buttons:1,clickCount:1});
-    await send('Input.dispatchMouseEvent',{type:'mouseMoved',x:600+pixels,y:180,buttons:1});
-    await send('Input.dispatchMouseEvent',{type:'mouseReleased',x:600+pixels,y:180,button:'left',buttons:0,clickCount:1});await delay(300);
-  }
-  assert.ok(Math.abs(native().yaw)<.03,'real native aim faces the central lane');
+    const outgoing=()=>nativeSent.findLast(packet=>packet.type==='input'&&packet.lifeId===native().lifeId);
+    await until(outgoing,packet=>Boolean(packet),'current native life sends actual controls before aim');
+    const deadline=Date.now()+30000,ratio=await evaluate('devicePixelRatio');
+    while(Math.abs(outgoing().yaw)>.025&&Date.now()<deadline) {
+      const yaw=outgoing().yaw,pixels=Math.max(-150,Math.min(150,yaw/.0026));
+      await shell('input','swipe',String(Math.round(600*ratio)),String(Math.round(180*ratio)),String(Math.round((600+pixels)*ratio)),String(Math.round(180*ratio)),'300');
+      await until(outgoing,packet=>Math.abs(packet.yaw-yaw)>.002,'real Android aim swipe reaches outgoing controls');
+    }
+    assert.ok(Math.abs(outgoing().yaw)<.03,'real Android swipes face the central lane');
+    await until(native,player=>Math.abs(player.yaw)<.03,'independent peer observes settled native aim');
   };
   await alignNative();
   await drive('x',0,'KeyD','KeyA');await drive('z',17,'KeyS','KeyW');
@@ -250,8 +253,8 @@ try {
     for(const [armour,health] of [[27,100],[4,100],[0,81]]) {
       const p=friend(),target=native(),dx=target.x-p.x,dz=target.z-p.z;
       const aim={yaw:Math.atan2(-dx,-dz),pitch:Math.atan2(target.y+1-(p.y+1.65),Math.hypot(dx,dz))};
-      peerSend({type:'input',...aim,x:0,y:0,fire:true,firePressed:true});await delay(40);
-      peerSend({type:'input',...aim,x:0,y:0,fire:false,firePressed:false});
+      peerSend({type:'input',lifeId:p.lifeId,...aim,x:0,y:0,fire:true,firePressed:true});await delay(40);
+      peerSend({type:'input',lifeId:p.lifeId,...aim,x:0,y:0,fire:false,firePressed:false});
       await until(native,p=>p.armour===armour&&p.health===health,'native and independent peer agree armour damage');await delay(240);
     }
     const healthStock=equipment().supplies.health;
@@ -260,10 +263,18 @@ try {
     await until(equipment,e=>e.supplies.health===healthStock-1,'one native health pack consumed');
     await drive('x',-5,'KeyD','KeyA');await until(equipment,e=>e.supplies.health>=1,'unused pack recollected for death drop');await drive('x',0,'KeyD','KeyA');
     const p=friend(),target=native(),life=target.lifeId;
-    peerSend({type:'input',x:0,y:0,yaw:Math.atan2(p.x-target.x,p.z-target.z),pitch:0,fire:true,firePressed:true});await delay(40);
-    peerSend({type:'input',x:0,y:0,yaw:Math.atan2(p.x-target.x,p.z-target.z),pitch:0,fire:false,firePressed:false});
+    peerSend({type:'input',lifeId:p.lifeId,x:0,y:0,yaw:Math.atan2(p.x-target.x,p.z-target.z),pitch:0,fire:true,firePressed:true});await delay(40);
+    peerSend({type:'input',lifeId:p.lifeId,x:0,y:0,yaw:Math.atan2(p.x-target.x,p.z-target.z),pitch:0,fire:false,firePressed:false});
     await until(()=>latest.gear.loot,loot=>loot.some(l=>l.source==='drop'&&l.item.kind==='supply'&&l.item.supplyType==='health'),'independent peer sees unused supply drop');
     await until(native,p=>p.lifeId>life,'native respawns with a new life');
+    // The independent peer can see a respawn before the WebView does. Wait
+    // for its real outbound input to acknowledge the life, then order a state
+    // snapshot after that input before aiming the newly spawned camera.
+    await until(()=>nativeSent.findLast(packet=>packet.type==='input'),
+      packet=>packet?.lifeId===native().lifeId,'native client reconciles respawn before real aim');
+    const reconciledRoom=await roomAfterInputBarrier();
+    const reconciled=reconciledRoom.players.find(player=>player.id===hostNativeId);
+    await until(native,p=>p.lifeId===reconciled.lifeId&&Math.abs(p.yaw-reconciled.yaw)<.025,'peer observes reconciled native respawn aim');
     await until(equipment,e=>e.supplies.health===0&&e.supplies.armour===0&&!e.supplyUse,'native life clears supply inventory');
     assert.equal(native().armour,0);
     await alignNative();
