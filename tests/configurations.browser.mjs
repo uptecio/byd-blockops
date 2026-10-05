@@ -117,10 +117,11 @@ try {
       }
     }
     const room = rooms[0], own = room.players.find(player => player.name === 'MatrixHost'), friend = room.players.find(player => player.name === 'MatrixGuest');
-    assert.equal(room.gear.loot.length, 16, `${mapId}/${mode.id}: fixed loot enabled online`);
+    assert.equal(room.gear.loot.length, 20, `${mapId}/${mode.id}: fixed loot enabled online`);
     assert.equal(room.gear.loot.filter(record => record.item.kind === 'gun').length, 8);
     assert.equal(room.gear.loot.filter(record => record.item.kind === 'knife').length, 2);
     for (const type of ['frag', 'smoke', 'flash']) assert.equal(room.gear.loot.filter(record => record.item.grenadeType === type).length, 2);
+    for (const type of ['health', 'armour']) assert.equal(room.gear.loot.filter(record => record.item.supplyType === type).length, 2);
     assert.equal(room.mapId, mapId); assert.equal(room.modeId, mode.id);
     assert.equal(own.skinId, 'space-guard'); assert.equal(friend.skinId, 'robo-unit');
     assert.equal(own.teamId, mode.team); assert.equal(friend.teamId, mode.id === 'ffa' ? null : 'blue');
