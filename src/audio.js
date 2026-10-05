@@ -27,6 +27,11 @@ export class GameAudio {
   kill() { this.tone(520, .18, .07, 'triangle', 2); }
   reload() { this.tone(230, .12, .025, 'square', .5); }
   pickup() { this.tone(660, .13, .035, 'triangle', 1.6); }
+  supplyComplete(type) {
+    if (!this.enabled) return;
+    if (type === 'health') this.tone(540, .2, .035, 'sine', 1.7);
+    else if (type === 'armour') this.tone(360, .2, .035, 'triangle', 1.5);
+  }
   swing() { this.tone(260, .14, .025, 'sawtooth', .25); }
   zombieWave() { this.tone(150, .35, .045, 'triangle', .55); }
   zombieRecovery() { this.tone(440, .28, .035, 'triangle', 1.8); }

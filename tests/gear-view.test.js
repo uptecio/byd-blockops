@@ -9,6 +9,7 @@ import { createHeadlessGame, cleanupGame } from './helpers/game-fixture.js';
 import { recordElimination } from '../src/modes.js';
 import { OnlineArena } from '../src/online-game.js';
 import { RoomManager } from '../server/rooms.js';
+import { pickupEquipment } from '../src/equipment.js';
 
 const empty = () => ({ loot: [], projectiles: [], smokes: [] });
 const loot = () => lootDTO(createLootState({ mapId: 'courtyard', seed: 1, startingGunIds: ['ak47'] }));
@@ -198,11 +199,55 @@ test('both supply models use distinct cached boxes and all 68 permitted pickups 
   for (const template of [health, armour]) {
     template.traverse(mesh => { if (mesh.geometry) assert.equal(mesh.geometry.type, 'BoxGeometry'); });
     const bounds = new THREE.Box3().setFromObject(template);
-    assert.ok(bounds.max.x - bounds.min.x <= .7 && bounds.max.z - bounds.min.z <= .7);
+    assert.ok(bounds.min.x >= -.34 && bounds.max.x <= .34 && bounds.min.z >= -.34 && bounds.max.z <= .34);
   }
   const counts = new Map();
   for (const resource of resources(view.group)) { counts.set(resource, 0); resource.addEventListener('dispose', () => counts.set(resource, counts.get(resource) + 1)); }
   view.dispose(); view.dispose(); assert.ok([...counts.values()].every(n => n === 1));
+});
+
+test('solo supply use lowers the held model and restores after cancellation completion and a new life', t => {
+  const game = createHeadlessGame(); t.after(() => cleanupGame(game)); game.start('m4a1', { bots: 0 }); game.update(.01);
+  const rest = game.weaponModel.position.y;
+  pickupEquipment(game.player.equipment, { kind:'supply', supplyType:'armour' });
+  game.requestEquipment({ kind:'use-supply', supplyType:'armour' }); game.update(.01);
+  assert.ok(game.weaponModel.position.y < rest - .15);
+  game.requestEquipment({ kind:'cancel-supply' }); game.update(.01); assert.equal(game.weaponModel.position.y, rest);
+  game.requestEquipment({ kind:'use-supply', supplyType:'armour' }); game.update(5); game.update(.01);
+  assert.equal(game.weaponModel.position.y, rest);
+  pickupEquipment(game.player.equipment, { kind:'supply', supplyType:'armour' });
+  game.requestEquipment({ kind:'use-supply', supplyType:'armour' }); game.update(.01); game.resetPlayer(); game.update(.01);
+  assert.equal(game.weaponModel.position.y, rest);
+  game.weaponState.ammo = 0; game.input.reload = true; game.update(.01);
+  assert.ok(game.weaponModel.position.y < rest, 'existing reload lowering remains');
+});
+
+test('online held model follows acknowledged supply use even while menus are open', t => {
+  const game = createHeadlessGame(); t.after(() => cleanupGame(game));
+  const manager = new RoomManager({ random:()=>.5 }), room = manager.create('self','Viewer');
+  manager.join('other',room.code,'Peer'); manager.start('self');
+  const online = new OnlineArena(game, { send:()=>true }); t.after(() => online.stop());
+  const snapshot = () => ({ ...manager.snapshot(room), selfEquipment:manager.equipmentSnapshot('self') });
+  online.start(snapshot(),'self',{}); online.update(.01); const rest = game.weaponModel.position.y;
+  const player = room.players.get('self'); pickupEquipment(player.equipment, { kind:'supply',supplyType:'armour' });
+  manager.equipmentAction('self', { type:'equipment-action',seq:1,lifeId:player.lifeId,kind:'use-supply',supplyType:'armour' });
+  online.sync(snapshot()); online.pause(); online.update(.01); assert.ok(game.weaponModel.position.y < rest - .15);
+  manager.tick(5); online.sync(snapshot()); online.update(.01); assert.equal(game.weaponModel.position.y, rest);
+  assert.equal(game.player.armour, 50);
+});
+
+test('supply pose clears on death round end or quit even if no further live frame runs', t => {
+  const game = createHeadlessGame(); t.after(() => cleanupGame(game));
+  for (const exit of ['death','timeout','quit']) {
+    game.start('m4a1', { bots:1 }); game.botTuning.speed = 0; game.botTuning.accuracy = 0;
+    pickupEquipment(game.player.equipment, { kind:'supply', supplyType:'armour' });
+    game.requestEquipment({ kind:'use-supply', supplyType:'armour' }); game.update(.01);
+    if (exit === 'death') { game.player.protected = 0; game.damageActor(game.bots[0].id, game.player, 200); }
+    else if (exit === 'quit') game.quit();
+    else { game.modeState.timeLeft = .01; game.update(.01); }
+    assert.equal(game.player.equipment.supplyUse, null);
+    assert.equal(game.weaponModel.position.y, -.27, exit);
+  }
 });
 
 test('winning solo knife swing drains presentation once without advancing pending grenade damage', t => {

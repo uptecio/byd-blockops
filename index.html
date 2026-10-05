@@ -66,10 +66,11 @@
   </section>
   <section id="game-ui" hidden aria-label="Game controls">
     <div id="aim-zone" aria-label="Drag to look around"></div>
-    <div class="hud-top"><div class="health-panel"><span id="hud-mode" class="eyebrow">SOLO / BOTS</span><div class="health-row"><span>✚</span><strong id="health-count">100</strong><div class="health-track"><i id="health-bar"></i></div></div></div><div class="score-panel"><strong><span id="kills">0</span><span class="score-target"> / 15</span></strong><span id="timer">03:00</span></div><div class="hud-actions"><button id="home-button" class="hud-button home-hud">HOME</button><button id="loadout-button" class="hud-button" aria-label="Change weapon">▤ <span>LOADOUT</span></button><button id="pause-button" class="hud-button" aria-label="Pause">Ⅱ</button></div></div>
+    <div class="hud-top"><div class="health-panel"><span id="hud-mode" class="eyebrow">SOLO / BOTS</span><div class="health-row"><span>✚</span><strong id="health-count">100</strong><div class="health-track"><i id="health-bar"></i></div></div><div class="armour-row"><span>ARMOUR</span><strong id="armour-count">0</strong><div class="armour-track"><i id="armour-bar"></i></div></div></div><div class="score-panel"><strong><span id="kills">0</span><span class="score-target"> / 15</span></strong><span id="timer">03:00</span></div><div class="hud-actions"><button id="home-button" class="hud-button home-hud">HOME</button><button id="loadout-button" class="hud-button" aria-label="Change weapon">▤ <span>LOADOUT</span></button><button id="pause-button" class="hud-button" aria-label="Pause">Ⅱ</button></div></div>
     <section id="loot-inventory" aria-label="Collected loot">
       <div class="inventory-heading"><h2>LOOT</h2><span id="inventory-hint">Tap to equip · Swipe for more</span></div>
       <div id="inventory-slots" class="inventory-slots" role="group" aria-label="Collected loot"></div>
+      <div id="supply-use-status" hidden><span id="supply-use-label"></span><div class="supply-use-track"><i id="supply-use-progress" role="progressbar" aria-label="Supply use progress" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"></i></div></div>
     </section>
     <div id="objective-status" class="objective-status" hidden></div>
     <div id="online-scoreboard" class="online-scoreboard" hidden aria-label="Live leaderboard"></div>

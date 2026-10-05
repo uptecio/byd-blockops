@@ -86,9 +86,13 @@ export class ArenaGame {
       ?? { weaponId: equipment.activeGunId, ammo: 0, reserve: 0, cooldown: 0, reloadRemaining: 0 };
     if (this.weapon.id !== equipment.activeGunId || this.heldItem !== equipment.heldItem)
       this.presentHeldItem(equipment.activeGunId, equipment.heldItem);
+    if (!isUsingSupply(equipment)) this.weaponModel.position.y = -.27;
   }
   getEquipmentView() { return equipmentDTO(this.player.equipment); }
-  clearSupplyCombat() { this.input.clearCombat(); this.lastFire = false; }
+  clearSupplyCombat() {
+    this.input.clearCombat(); this.lastFire = false;
+    if (this.weaponModel && !isUsingSupply(this.player.equipment)) this.weaponModel.position.y = -.27;
+  }
   requestEquipment(action) {
     if (!this.hasRound || this.modeState.ended || this.player.health <= 0 || this.player.dead > 0)
       return { ok: false, reason: 'Cannot change equipment while inactive' };
@@ -230,6 +234,7 @@ export class ArenaGame {
   pause() { this.active = false; this.input.setEnabled(false); this.lastFire = false; }
   quit() {
     for (const actor of [this.player, ...this.bots]) if (actor.equipment) cancelSupplyUse(actor.equipment);
+    this.clearSupplyCombat();
     this.pause(); this.hasRound = false; this.gearView?.clear();
     if (this.zombieRuntime) {
       this.zombieRuntime.record(); this.zombieRuntime.dispose(); this.zombieRuntime = null;
@@ -317,7 +322,7 @@ export class ArenaGame {
       this.camera.fov += (targetFov - this.camera.fov) * Math.min(1, dt * 14); this.camera.updateProjectionMatrix();
       this.weaponModel.visible = !(this.heldItem === 'gun' && zoom && this.weapon.classId === 'sniper');
       const reload = this.heldItem === 'gun' && this.weaponState.reloadRemaining > 0;
-      this.weaponModel.position.set(zoom ? .08 : .28, -.27 - (reload ? .17 : 0) + Math.sin(this.time * 10) * Math.hypot(input.x, input.y) * .012, -.5 + this.recoil * .7);
+      this.weaponModel.position.set(zoom ? .08 : .28, -.27 - (isUsingSupply(this.player.equipment) ? .24 : reload ? .17 : 0) + Math.sin(this.time * 10) * Math.hypot(input.x, input.y) * .012, -.5 + this.recoil * .7);
       this.weaponModel.rotation.z = reload ? Math.sin(this.time * 6) * .15 - .3 : 0;
       this.weaponModel.rotation.x = this.heldItem === 'knife'
         ? -Math.sin(Math.min(1, (GEAR_BALANCE.knife.interval - this.player.equipment.meleeRemaining) / .2) * Math.PI) * .75 : 0;
@@ -368,6 +373,7 @@ export class ArenaGame {
         alive: actor.health > 0 && (actor.dead ?? actor.respawn) <= 0,
       });
       if (actor.id === this.player.id && ['completed', 'cancelled'].includes(result.status)) this.clearSupplyCombat();
+      if (actor.id === this.player.id && result.status === 'completed') this.audio.supplyComplete?.(result.supplyType);
       if (actor.id !== this.player.id && actor.bar) actor.bar.scale.x = actor.health / 100;
     }
   }

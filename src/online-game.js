@@ -225,7 +225,7 @@ export class OnlineArena {
     game.camera.fov += (fov - game.camera.fov) * Math.min(1, dt * 14); game.camera.updateProjectionMatrix();
     game.weaponModel.visible = game.player.dead <= 0 && !(game.heldItem === 'gun' && zoom && game.weapon.classId === 'sniper');
     const reload = game.heldItem === 'gun' && game.weaponState.reloadRemaining > 0;
-    game.weaponModel.position.set(zoom ? .08 : .28, -.27 - (reload ? .17 : 0), -.5 + game.recoil * .7);
+    game.weaponModel.position.set(zoom ? .08 : .28, -.27 - (isUsingSupply(game.player.equipment) ? .24 : reload ? .17 : 0), -.5 + game.recoil * .7);
     game.weaponModel.rotation.z = reload ? Math.sin(game.time * 6) * .15 - .3 : 0;
     game.shotFlash = Math.max(0, game.shotFlash - dt); game.muzzle.visible = game.heldItem === 'gun' && game.shotFlash > 0 && game.weaponModel.visible;
     game.hitFlash = Math.max(0, game.hitFlash - dt); game.damageFlash = Math.max(0, game.damageFlash - dt);

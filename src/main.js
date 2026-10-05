@@ -166,7 +166,7 @@ $('weapon-grid').addEventListener('click', event => {
 function equipmentView() {
   const online = multiplayer?.isActive(), live = online ? multiplayer.room.phase === 'playing' : game?.hasRound && !game.match.ended;
   if (!live) return { owned: [], grenades: { frag: 0, smoke: 0, flash: 0 }, selectedGrenade: 'frag', alive: false, roundId: null };
-  return { ...(online ? multiplayer.arena.getEquipmentView() : game.getEquipmentView()), lifeId: game.player.lifeId, roundId: online ? multiplayer.arena : game.modeState, alive: game.player.health > 0 && game.player.dead <= 0 };
+  return { ...(online ? multiplayer.arena.getEquipmentView() : game.getEquipmentView()), health: game.player.health, armour: game.player.armour, lifeId: game.player.lifeId, roundId: online ? multiplayer.arena : game.modeState, alive: game.player.health > 0 && game.player.dead <= 0 };
 }
 function showArmory() {
   setMode('armory'); selected = getWeapon(equipmentView().activeGunId || selection.weaponId); activeClass = selected.classId; renderSelected(); equipmentUI?.render();
@@ -265,6 +265,8 @@ function onHud(current) {
   $('health-count').textContent = Math.ceil(current.player.health);
   $('health-bar').style.width = `${current.player.health}%`;
   $('health-bar').style.background = current.player.health < 30 ? '#ff7665' : '#46ec88';
+  $('armour-count').textContent = Math.ceil(current.player.armour || 0);
+  $('armour-bar').style.width = `${current.player.armour || 0}%`;
   $('hud-weapon').textContent = current.weapon.name;
   $('ammo-count').textContent = current.weaponState.ammo;
   $('reserve-count').textContent = current.weaponState.reserve;

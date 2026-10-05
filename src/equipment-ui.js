@@ -1,4 +1,5 @@
 import { getWeapon } from './weapons.js';
+import { SUPPLY_TYPES, SUPPLY_NAMES, SUPPLY_BALANCE } from './supplies.js';
 
 const $ = id => document.getElementById(id);
 const types = { frag: 'Explosive', smoke: 'Smoke', flash: 'Flash' };
@@ -100,6 +101,8 @@ export class EquipmentUI {
       action = { kind: 'equip-gun', weaponId: entry.id, source: 'inventory' };
     else if (entry.kind === 'knife' && view.knife) action = { kind: 'held-item', heldItem: 'knife' };
     else if (entry.kind === 'grenade' && view.grenades?.[entry.id] > 0) action = { kind: 'select-grenade', grenadeType: entry.id };
+    else if (entry.kind === 'supply' && view.supplies?.[entry.id] > 0)
+      action = view.supplyUse?.type === entry.id ? { kind: 'cancel-supply' } : { kind: 'use-supply', supplyType: entry.id };
     if (!action) return;
     const result = this.onAction(action);
     if (!result?.ok) this.onToast(result?.reason || 'Unable to change equipment');
@@ -112,6 +115,8 @@ export class EquipmentUI {
     if (view.knife) items.push({ key: 'knife', kind: 'knife', name: 'Knife', count: 'x1', held: view.heldItem === 'knife' });
     for (const id of Object.keys(types)) if (view.grenades?.[id] > 0)
       items.push({ key: `grenade:${id}`, kind: 'grenade', id, name: types[id], count: `x${view.grenades[id]}`, throwSelected: view.selectedGrenade === id });
+    for (const id of SUPPLY_TYPES) if (view.supplies?.[id] > 0)
+      items.push({ key: `supply:${id}`, kind: 'supply', id, name: SUPPLY_NAMES[id], count: `x${view.supplies[id]}`, using: view.supplyUse?.type === id });
     const keys = new Set(items.map(item => item.key)), scrollLeft = inventory.scrollLeft;
     for (const [key, entry] of this.inventoryEntries) if (!keys.has(key)) {
       inventory.removeChild(entry.button); this.inventoryEntries.delete(key);
@@ -126,6 +131,7 @@ export class EquipmentUI {
         button.dataset.inventoryKey = item.key; button.dataset.inventoryKind = item.kind;
         if (item.kind === 'gun') button.dataset.weaponId = item.id;
         if (item.kind === 'grenade') button.dataset.grenadeType = item.id;
+        if (item.kind === 'supply') button.dataset.supplyType = item.id;
         const labels = {};
         for (const name of ['number', 'name', 'count', 'status']) {
           const label = document.createElement('span'); label.className = `inventory-${name}`; labels[name] = label; button.append(label);
@@ -133,12 +139,12 @@ export class EquipmentUI {
         entry = { button, labels }; this.inventoryEntries.set(item.key, entry);
       }
       Object.assign(entry, { kind: item.kind, id: item.id, lifeId: view.lifeId, roundId: view.roundId });
-      const { button, labels } = entry, status = item.held ? 'HELD' : item.throwSelected ? 'THROW' : '';
+      const { button, labels } = entry, status = item.using ? 'TAP TO CANCEL' : item.held ? 'HELD' : item.throwSelected ? 'THROW' : '';
       for (const [name, text] of Object.entries({ number: String(index + 1), name: item.name, count: item.count, status }))
         if (labels[name].textContent !== text) labels[name].textContent = text;
       labels.status.hidden = !status; button.disabled = disabled;
       button.dataset.held = String(!!item.held); button.dataset.throwSelected = String(!!item.throwSelected);
-      button.setAttribute('aria-pressed', !!(item.held || item.throwSelected));
+      button.setAttribute('aria-pressed', !!(item.held || item.throwSelected || item.using));
       button.setAttribute('aria-label', `${index + 1}. ${item.name}, ${item.count}${status ? `, ${status}` : ''}`);
       if (inventory.children[index] !== button) inventory.insertBefore(button, inventory.children[index] || null);
     });
@@ -147,19 +153,25 @@ export class EquipmentUI {
   render() {
     const view = this.getView(), pending = this.currentSelection(view), owned = view.owned || [];
     this.renderInventory(view);
-    const alive = view.alive !== false, knife = view.heldItem === 'knife';
+    const alive = view.alive !== false, knife = view.heldItem === 'knife', use = alive && view.roundId ? view.supplyUse : null;
+    $('supply-use-status').hidden = !use;
+    $('supply-use-label').textContent = use ? `${use.type === 'health' ? 'HEALING' : 'ADDING ARMOUR'} · ${use.remaining.toFixed(1)}s · TAP PACK TO CANCEL` : '';
+    const progress = use ? Math.max(0, Math.min(100, (1 - use.remaining / SUPPLY_BALANCE.useSeconds) * 100)) : 0;
+    $('supply-use-progress').style.width = `${progress}%`;
+    $('supply-use-progress').setAttribute('aria-valuenow', Math.round(progress));
     $('knife-button').disabled = !alive || !view.knife;
     $('knife-button').setAttribute('aria-pressed', knife);
     $('knife-button').textContent = knife ? 'GUN · Q' : 'KNIFE · Q';
     $('fire-button').querySelector('small').textContent = knife ? 'SLASH' : 'FIRE';
     $('fire-button').setAttribute('aria-label', knife ? 'Slash with knife' : 'Fire weapon');
-    $('zoom-button').disabled = $('reload-button').disabled = knife || !alive;
+    $('zoom-button').disabled = knife || !alive;
+    $('reload-button').disabled = knife || !alive || !!use;
     const counts = view.grenades || { frag: 0, smoke: 0, flash: 0 }, total = Object.values(counts).reduce((sum, count) => sum + count, 0);
     $('grenade-type-button').textContent = `${types[view.selectedGrenade] || 'Explosive'} · ${total}/3`;
     $('grenade-type-button').dataset.full = String(total === 3);
     $('throw-button').textContent = `THROW · ${counts[view.selectedGrenade] || 0}`;
-    $('throw-button').disabled = !alive || !counts[view.selectedGrenade] || view.throwRemaining > 0;
-    $('fire-button').disabled = !alive || view.attackLockRemaining > 0;
+    $('throw-button').disabled = !alive || !!use || !counts[view.selectedGrenade] || view.throwRemaining > 0;
+    $('fire-button').disabled = !alive || !!use || view.attackLockRemaining > 0;
     const grenadeSignature = JSON.stringify([counts, view.selectedGrenade, alive]);
     if (grenadeSignature !== this.grenadeSignature) {
       this.grenadeSignature = grenadeSignature;
