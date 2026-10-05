@@ -4,6 +4,7 @@ import { disposeModel } from './game.js';
 import { equipmentDTO, equipmentFromDTO } from './equipment.js';
 import { getWeapon } from './weapons.js';
 import { lootItemLabel } from './loot-labels.js';
+import { isUsingSupply, cancelSupplyUse } from './supplies.js';
 
 const neutral = (yaw, pitch, lifeId) => ({ type: 'input', lifeId, x: 0, y: 0, yaw, pitch, fire: false, firePressed: false, jump: false, reload: false, zoom: false });
 const emptyPending = () => ({ firePressed: false, jump: false, reload: false });
@@ -48,8 +49,16 @@ export class OnlineArena {
     const game = this.game, own = room.players.find(player => player.id === this.id);
     if (!own) return;
     const equipment = equipmentFromDTO(room.selfEquipment.equipment);
+    const previousEquipment = game.player.equipment, previousUse = previousEquipment?.supplyUse;
     const lifeChanged = game.player.lifeId !== own.lifeId;
     const roundChanged = this.room && (this.room.phase !== room.phase || this.room.mapId !== room.mapId || this.room.modeId !== room.modeId);
+    const useChanged = previousUse?.type !== equipment.supplyUse?.type
+      || (previousUse && equipment.supplyUse && equipment.supplyUse.remaining > previousUse.remaining + 1e-8);
+    if (useChanged) { game.clearSupplyCombat(); this.pending.firePressed = this.pending.reload = false; }
+    if (!initial && !lifeChanged && !roundChanged && own.health > 0 && room.phase === 'playing'
+      && previousUse && !equipment.supplyUse
+      && equipment.supplies[previousUse.type] === previousEquipment.supplies[previousUse.type] - 1
+      && own[previousUse.type] > game.player[previousUse.type]) game.audio.supplyComplete?.(previousUse.type);
     if (lifeChanged || roundChanged || own.health <= 0) { game.input.clear(); this.pending = emptyPending(); }
     if (game.world.definition.id !== room.mapId) {
       for (const remote of this.remotes.values()) disposeModel(remote.model);
@@ -63,10 +72,10 @@ export class OnlineArena {
       Object.assign(game.player, { x: own.x, z: own.z, jump: own.y });
       game.yaw = own.yaw; game.pitch = own.pitch; game.recoil = 0; game.input.clear();
     }
-    if (own.health < game.player.health) game.damageFlash = .3;
+    if (own.health < game.player.health || own.armour < game.player.armour) game.damageFlash = .3;
     if (own.respawnRemaining > 0 && this.previousRespawn <= 0) { game.input.clear(); this.pending = emptyPending(); this.onToast('ELIMINATED · RESPAWNING'); }
     this.previousRespawn = own.respawnRemaining;
-    Object.assign(game.player, { id: own.id, lifeId: own.lifeId, name: own.name, teamId: own.teamId, skinId: own.skinId, pendingSkinId: own.pendingSkinId, health: own.health, dead: own.respawnRemaining, protected: own.protectedRemaining, flashRemaining: own.flashRemaining, equipment });
+    Object.assign(game.player, { id: own.id, lifeId: own.lifeId, name: own.name, teamId: own.teamId, skinId: own.skinId, pendingSkinId: own.pendingSkinId, health: own.health, armour: own.armour, dead: own.respawnRemaining, protected: own.protectedRemaining, flashRemaining: own.flashRemaining, equipment });
     game.matchView = {
       mapId: room.mapId, modeId: room.modeId, timeLeft: room.timeLeft, ended: room.phase === 'ended',
       winnerId: room.winnerId, winnerName: room.winnerName, winnerTeamId: room.winnerTeamId,
@@ -152,6 +161,8 @@ export class OnlineArena {
     if (!this.running || this.room.phase !== 'playing' || this.game.player.health <= 0 || this.game.player.dead > 0)
       reason = 'Cannot change equipment while inactive';
     else if (action?.kind === 'throw' && this.suspended) reason = 'Cannot throw while paused';
+    else if (action?.kind === 'use-supply' && this.suspended) reason = 'Cannot use supplies while paused';
+    else if (action?.kind === 'throw' && isUsingSupply(this.game.player.equipment)) reason = 'Finish or cancel supply use first';
     else if (!this.client.sendEquipmentAction(action)) reason = 'Unable to send equipment action';
     if (reason) { this.onToast(reason); return { ok: false, reason }; }
     return { ok: true };
@@ -169,6 +180,10 @@ export class OnlineArena {
         game.input.zoom = false;
       }
       if (input && game.player.equipment.heldItem === 'knife') input.zoom = input.reload = false;
+      if (input && isUsingSupply(game.player.equipment)) {
+        input.fire = input.firePressed = input.reload = input.throwPressed = false;
+        this.pending.firePressed = this.pending.reload = false;
+      }
     }
     if (input) {
       const sensitivity = .0026 * game.settings.sensitivity / (input.zoom ? Math.sqrt(game.weapon.zoom) : 1);
@@ -235,6 +250,7 @@ export class OnlineArena {
   }
   stop() {
     if (this.running) this.pause();
+    if (this.running && this.game.player.equipment) cancelSupplyUse(this.game.player.equipment);
     for (const remote of this.remotes.values()) disposeModel(remote.model);
     this.remotes.clear(); this.game.clearEffects();
     this.game.gearWorld = emptyWorld(); this.game.gearView?.sync(this.game.gearWorld);

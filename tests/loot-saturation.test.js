@@ -1,4 +1,5 @@
 import test from 'node:test';
+import { PROTOCOL_VERSION } from '../src/protocol.js';
 import assert from 'node:assert/strict';
 import { WebSocket } from 'ws';
 import { mkdir, writeFile } from 'node:fs/promises';
@@ -32,7 +33,7 @@ test('eight real sockets bound saturated inventories/packets and disconnect a st
     });
     await new Promise((resolve, reject) => { client.socket.once('open', resolve); client.socket.once('error', reject); });
     client.send = packet => client.socket.send(JSON.stringify(packet));
-    client.send({ type: i ? 'join' : 'create', protocol: 3, code: clients[0].latest?.room.code, name: `Saturation${i}`, weaponId: 'm4a1' });
+    client.send({ type: i ? 'join' : 'create', protocol: PROTOCOL_VERSION, code: clients[0].latest?.room.code, name: `Saturation${i}`, weaponId: 'm4a1' });
     await until(() => client.id, 'real peer joins saturation room');
   }
   clients[0].send({ type: 'start' });

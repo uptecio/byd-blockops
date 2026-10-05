@@ -37,18 +37,18 @@ function validRoom(room) {
   if (room.modeId === 'ffa' ? room.winnerTeamId !== null : room.winnerId !== null) return false;
   const ids = new Set();
   for (const player of room.players) {
-    if (!exactKeys(player, ['id', 'name', 'x', 'z', 'y', 'yaw', 'pitch', 'health', 'kills', 'deaths', 'weaponId', 'teamId', 'skinId', 'pendingSkinId', 'lifeId', 'flashRemaining', 'heldItem', 'ammo', 'reserve', 'reloadRemaining', 'respawnRemaining', 'protectedRemaining'])
+    if (!exactKeys(player, ['id', 'name', 'x', 'z', 'y', 'yaw', 'pitch', 'health', 'armour', 'kills', 'deaths', 'weaponId', 'teamId', 'skinId', 'pendingSkinId', 'lifeId', 'flashRemaining', 'heldItem', 'ammo', 'reserve', 'reloadRemaining', 'respawnRemaining', 'protectedRemaining'])
       || !count(player.lifeId) || player.lifeId === 0 || !['gun', 'knife'].includes(player.heldItem)
       || !Number.isFinite(player.flashRemaining) || player.flashRemaining < 0 || player.flashRemaining > 3) return false;
     if (!player || !validId(player.id) || ids.has(player.id) || typeof player.name !== 'string' || !weaponIds.has(player.weaponId) || !skinIds.has(player.skinId) || (player.pendingSkinId !== null && !skinIds.has(player.pendingSkinId))) return false;
     if (room.modeId === 'ffa' ? player.teamId !== null : !teams.includes(player.teamId)) return false;
     ids.add(player.id);
-    if (!['x', 'y', 'z', 'yaw', 'pitch', 'health', 'kills', 'deaths', 'ammo', 'reserve', 'reloadRemaining', 'respawnRemaining', 'protectedRemaining'].every(key => Number.isFinite(player[key]))) return false;
-    if (['health', 'kills', 'deaths', 'ammo', 'reserve', 'reloadRemaining', 'respawnRemaining', 'protectedRemaining'].some(key => player[key] < 0)) return false;
+    if (!['x', 'y', 'z', 'yaw', 'pitch', 'health', 'armour', 'kills', 'deaths', 'ammo', 'reserve', 'reloadRemaining', 'respawnRemaining', 'protectedRemaining'].every(key => Number.isFinite(player[key]))) return false;
+    if (['health', 'armour', 'kills', 'deaths', 'ammo', 'reserve', 'reloadRemaining', 'respawnRemaining', 'protectedRemaining'].some(key => player[key] < 0)) return false;
     if (!['kills', 'deaths', 'ammo', 'reserve'].every(key => count(player[key]))) return false;
     const gun = WEAPONS.find(gun => gun.id === player.weaponId);
-    if (player.ammo > gun.magazine || player.ammo + player.reserve > TOTAL_AMMO || player.reloadRemaining > gun.reloadTime || player.health > 100) return false;
-    if (player.health === 0 && (player.ammo !== 0 || player.reserve !== 0 || player.reloadRemaining !== 0 || player.heldItem !== 'gun')) return false;
+    if (player.ammo > gun.magazine || player.ammo + player.reserve > TOTAL_AMMO || player.reloadRemaining > gun.reloadTime || player.health > 100 || player.armour > 100) return false;
+    if (player.health === 0 && (player.armour !== 0 || player.ammo !== 0 || player.reserve !== 0 || player.reloadRemaining !== 0 || player.heldItem !== 'gun')) return false;
   }
   if (!ids.has(room.hostId)) return false;
   if (room.modeId !== 'ctf') { if (room.flags !== null) return false; }
@@ -126,7 +126,10 @@ export class RoomClient {
           const own = Array.isArray(packet.room?.players) ? packet.room.players.find(player => player?.id === recipientId) : null;
           const valid = exactKeys(packet, packet.type === 'welcome' ? ['type', 'protocol', 'id', 'room', 'equipment'] : ['type', 'protocol', 'room', 'equipment'])
             && validRoom(packet.room) && validEquipmentSnapshot(packet.equipment, own)
-            && (!welcomed || packet.equipment.lifeId >= this.room.selfEquipment.lifeId);
+            && (!welcomed || (packet.equipment.lifeId >= this.room.selfEquipment.lifeId
+              && packet.equipment.lastActionSeq >= this.room.selfEquipment.lastActionSeq
+              && !(packet.equipment.lifeId === this.room.selfEquipment.lifeId && packet.room.phase === 'playing'
+                && this.room.phase === 'playing' && packet.room.timeLeft > this.room.timeLeft + 1e-8)));
           if (!valid) {
             if (!welcomed) fail('The server sent an invalid room snapshot.'); else this.onError('The server sent an invalid room snapshot.');
             return;

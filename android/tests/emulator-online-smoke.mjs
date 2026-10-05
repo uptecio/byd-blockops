@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { PROTOCOL_VERSION } from '../../src/protocol.js';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
@@ -183,12 +184,12 @@ try {
   };
   await opened(peer);
   const peerSend = packet => peer.send(JSON.stringify(packet));
-  peerSend({ type: 'join', protocol: 3, code: lobby.code, name: 'SocketFriend', weaponId: 'm4a1', skinId: 'robo-unit' });
+  peerSend({ type: 'join', protocol: PROTOCOL_VERSION, code: lobby.code, name: 'SocketFriend', weaponId: 'm4a1', skinId: 'robo-unit' });
   await until(() => latest, room => room?.players.length === 2, 'Independent real peer joins');
   const hostNativeId = latest.players.find(player => player.id !== peerId).id;
   verifyDeparture = () => until(() => latest, room => room?.code === lobby.code && !room.players.some(player => player.id === hostNativeId), 'Observer verifies owned native host departure before teardown');
   assert.equal(latest.mapId, mapId); assert.equal(latest.modeId, modeId);
-  assert.ok(nativePackets.some(packet => packet.type === 'welcome' && packet.protocol === 3), 'Real native client completes protocol-3 handshake');
+  assert.ok(nativePackets.some(packet => packet.type === 'welcome' && packet.protocol === PROTOCOL_VERSION), 'Real native client completes protocol-3 handshake');
   assert.equal(latest.players.find(player => player.id === peerId).skinId, 'robo-unit');
   assert.equal(latest.players.find(player => player.id !== peerId).skinId, 'space-guard');
   await until(state, current => current.players === 2, 'Native roster reflects peer');
@@ -310,7 +311,7 @@ try {
   await until(() => latest, room => room?.players.length === 1, 'Peer observes native departure');
 
   peerSend({ type: 'leave' }); latest = undefined; peerCode = null; verifyDeparture = undefined;
-  peerSend({ type: 'create', protocol: 3, name: 'SocketHost', weaponId: 'm4a1', mapId: 'space-station', modeId, skinId: 'robo-unit' });
+  peerSend({ type: 'create', protocol: PROTOCOL_VERSION, name: 'SocketHost', weaponId: 'm4a1', mapId: 'space-station', modeId, skinId: 'robo-unit' });
   const friendRoom = await until(() => latest, room => room?.players.length === 1 && room.phase === 'lobby' && room.code !== lobby.code, 'Peer creates independent room');
   await click('home-online');
   await evaluate(`document.getElementById("room-code-input").value=${JSON.stringify(friendRoom.code)}`);
@@ -362,7 +363,7 @@ try {
   let rejection;
   incompatible.onmessage = event => { const packet = JSON.parse(event.data); if (packet.type === 'error') rejection = packet.message; };
   await opened(incompatible);
-  incompatible.send(JSON.stringify({ type: 'create', protocol: 2, name: 'Outdated', weaponId: 'm4a1' }));
+  incompatible.send(JSON.stringify({ type: 'create', protocol: 3, name: 'Outdated', weaponId: 'm4a1' }));
   await until(() => rejection, value => /update required/i.test(value || ''), 'Old client must be rejected clearly');
   assert.deepEqual(errors, [], 'No JavaScript or CSP errors');
   const defaultWsURL = `${bundledServer.replace(/^https:/, 'wss:').replace(/\/$/, '')}/ws`;

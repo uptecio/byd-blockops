@@ -1,4 +1,5 @@
 import test from 'node:test';
+import { PROTOCOL_VERSION } from '../src/protocol.js';
 import assert from 'node:assert/strict';
 import { WebSocket } from 'ws';
 import { startServer } from '../server/server.mjs';
@@ -19,9 +20,9 @@ test('two independent sockets create, join, start, move and transfer host', asyn
   const server=await startServer({port:0}); t.after(()=>server.close());
   const a=await connect(server.port), b=await connect(server.port);
   t.after(()=>{a.socket.terminate();b.socket.terminate();});
-  a.send({type:'create',protocol:3,name:'A',weaponId:'m4a1'});
+  a.send({type:'create',protocol: PROTOCOL_VERSION,name:'A',weaponId:'m4a1'});
   const welcome=await a.next(p=>p.type==='welcome');
-  b.send({type:'join',protocol:3,code:welcome.room.code,name:'B',weaponId:'g17'});
+  b.send({type:'join',protocol: PROTOCOL_VERSION,code:welcome.room.code,name:'B',weaponId:'g17'});
   const joined=await b.next(p=>p.type==='welcome');
   assert.notEqual(welcome.id,joined.id); assert.equal(joined.room.players.length,2);
   b.send({type:'start'}); assert.match((await b.next(p=>p.type==='error')).message,/host/i);
@@ -46,8 +47,8 @@ test('HTTP allowlist and malformed WebSocket messages fail safely', async t => {
   assert.equal((await fetch(`${base}/%2e%2e/server/rooms.js`)).status,404);
   const client=await connect(server.port);t.after(()=>client.socket.terminate());
   client.socket.send('{bad JSON');assert.match((await client.next(p=>p.type==='error')).message,/json/i);
-  client.send({type:'create',protocol:3,name:'A',weaponId:'fake'});assert.match((await client.next(p=>p.type==='error')).message,/weapon/i);
-  client.send({type:'create',protocol:3,name:'A',weaponId:'g17'});assert.equal((await client.next(p=>p.type==='welcome')).room.phase,'lobby');
+  client.send({type:'create',protocol: PROTOCOL_VERSION,name:'A',weaponId:'fake'});assert.match((await client.next(p=>p.type==='error')).message,/weapon/i);
+  client.send({type:'create',protocol: PROTOCOL_VERSION,name:'A',weaponId:'g17'});assert.equal((await client.next(p=>p.type==='welcome')).room.phase,'lobby');
 });
 
 test('server closes oversized messages and connections exceeding 100 packets a second', async t => {
@@ -61,33 +62,33 @@ test('server closes oversized messages and connections exceeding 100 packets a s
   assert.equal(await limited,1008);
 });
 
-test('initial protocol must be exactly version 3 and rejected settings leave the connection unjoined', async t => {
+test('initial protocol must be exactly version 4 and rejected settings leave the connection unjoined', async t => {
   const server = await startServer({ port: 0 }); t.after(() => server.close());
   const client = await connect(server.port); t.after(() => client.socket.terminate());
-  for (const protocol of [undefined, 1, 2, 4, '3', null]) {
+  for (const protocol of [undefined, 1, 2, 3, 5, '4', null]) {
     client.send({ type: 'create', protocol, name: 'A', weaponId: 'g17' });
     assert.equal((await client.next(p => p.type === 'error')).message, 'Update required: install the latest Block Ops APK or reload the game.');
   }
   for (const settings of [{ mapId: 'bad' }, { modeId: 'bad' }, { skinId: 'bad' }]) {
-    client.send({ type: 'create', protocol: 3, name: 'A', weaponId: 'g17', ...settings });
+    client.send({ type: 'create', protocol: PROTOCOL_VERSION, name: 'A', weaponId: 'g17', ...settings });
     assert.match((await client.next(p => p.type === 'error')).message, /Unknown/);
   }
   assert.equal((await (await fetch(`http://127.0.0.1:${server.port}/health`)).json()).rooms, 0);
-  client.send({ type: 'create', protocol: 3, name: 'A', weaponId: 'g17', mapId: 'harbor', modeId: 'tdm', skinId: 'space-guard' });
+  client.send({ type: 'create', protocol: PROTOCOL_VERSION, name: 'A', weaponId: 'g17', mapId: 'harbor', modeId: 'tdm', skinId: 'space-guard' });
   const welcome = await client.next(p => p.type === 'welcome');
-  assert.equal(welcome.protocol, 3); assert.equal(welcome.room.mapId, 'harbor'); assert.equal(welcome.room.modeId, 'tdm');
+  assert.equal(welcome.protocol, PROTOCOL_VERSION); assert.equal(welcome.room.mapId, 'harbor'); assert.equal(welcome.room.modeId, 'tdm');
   assert.equal(welcome.room.players[0].skinId, 'space-guard');
-  assert.equal((await client.next(p => p.type === 'state')).protocol, 3);
+  assert.equal((await client.next(p => p.type === 'state')).protocol, PROTOCOL_VERSION);
 });
 
 test('socket configuration, skin settings and duplicate/stale input remain authoritative while paused clients share time', async t => {
   const server = await startServer({ port: 0 }); t.after(() => server.close());
   const a = await connect(server.port), b = await connect(server.port); t.after(() => { a.socket.terminate(); b.socket.terminate(); });
-  a.send({ type: 'create', protocol: 3, name: 'A', weaponId: 'g17', mapId: 'courtyard', modeId: 'tdm', skinId: 'desert-ops' });
+  a.send({ type: 'create', protocol: PROTOCOL_VERSION, name: 'A', weaponId: 'g17', mapId: 'courtyard', modeId: 'tdm', skinId: 'desert-ops' });
   const welcome = await a.next(p => p.type === 'welcome');
   b.send({ type: 'join', protocol: 1, code: welcome.room.code, name: 'B', weaponId: 'g17' });
   assert.match((await b.next(p => p.type === 'error')).message, /Update required/);
-  b.send({ type: 'join', protocol: 3, code: welcome.room.code, name: 'B', weaponId: 'g17', skinId: 'neon-runner' });
+  b.send({ type: 'join', protocol: PROTOCOL_VERSION, code: welcome.room.code, name: 'B', weaponId: 'g17', skinId: 'neon-runner' });
   const joined = await b.next(p => p.type === 'welcome'); assert.equal(joined.room.players.find(p => p.id === joined.id).skinId, 'neon-runner');
   b.send({ type: 'configure', mapId: 'harbor', modeId: 'ctf' }); assert.match((await b.next(p => p.type === 'error')).message, /host/);
   a.send({ type: 'configure', mapId: 'neon-city', modeId: 'tdm' });
@@ -125,9 +126,9 @@ test('real socket late joins see current scores and flags, then carrier disconne
   const server = await startServer({ port: 0 }); t.after(() => server.close());
   const a = await connect(server.port), b = await connect(server.port), c = await connect(server.port);
   t.after(() => { a.socket.terminate(); b.socket.terminate(); c.socket.terminate(); });
-  a.send({ type: 'create', protocol: 3, name: 'A', weaponId: 'g17', mapId: 'courtyard', modeId: 'ctf' });
+  a.send({ type: 'create', protocol: PROTOCOL_VERSION, name: 'A', weaponId: 'g17', mapId: 'courtyard', modeId: 'ctf' });
   const welcome = await a.next(p => p.type === 'welcome');
-  b.send({ type: 'join', protocol: 3, code: welcome.room.code, name: 'B', weaponId: 'g17' });
+  b.send({ type: 'join', protocol: PROTOCOL_VERSION, code: welcome.room.code, name: 'B', weaponId: 'g17' });
   const joined = await b.next(p => p.type === 'welcome');
   a.send({ type: 'start' }); await a.next(p => p.type === 'state' && p.room.phase === 'playing');
   await moveTo(a, welcome.id, 0, 19); await moveTo(a, welcome.id, 0, -18);
@@ -136,7 +137,7 @@ test('real socket late joins see current scores and flags, then carrier disconne
   await a.next(p => p.type === 'state' && p.room.teamScores.red === 1);
   await moveTo(a, welcome.id, 0, -18);
   await a.next(p => p.type === 'state' && p.room.flags.blue.carrierId === welcome.id);
-  c.send({ type: 'join', protocol: 3, code: welcome.room.code, name: 'C', weaponId: 'g17', skinId: 'arctic-scout' });
+  c.send({ type: 'join', protocol: PROTOCOL_VERSION, code: welcome.room.code, name: 'C', weaponId: 'g17', skinId: 'arctic-scout' });
   const late = await c.next(p => p.type === 'welcome');
   assert.equal(late.room.teamScores.red, 1); assert.equal(late.room.flags.blue.carrierId, welcome.id);
   assert.equal(late.room.players.find(p => p.id === late.id).teamId, 'red');
@@ -151,10 +152,10 @@ test('real socket fire cannot damage a teammate', async t => {
   const server = await startServer({ port: 0 }); t.after(() => server.close());
   const a = await connect(server.port), b = await connect(server.port), c = await connect(server.port);
   t.after(() => { a.socket.terminate(); b.socket.terminate(); c.socket.terminate(); });
-  a.send({ type: 'create', protocol: 3, name: 'A', weaponId: 'awp', modeId: 'tdm' });
+  a.send({ type: 'create', protocol: PROTOCOL_VERSION, name: 'A', weaponId: 'awp', modeId: 'tdm' });
   const welcome = await a.next(p => p.type === 'welcome');
-  b.send({ type: 'join', protocol: 3, code: welcome.room.code, name: 'B', weaponId: 'g17' }); await b.next(p => p.type === 'welcome');
-  c.send({ type: 'join', protocol: 3, code: welcome.room.code, name: 'C', weaponId: 'g17' }); const teammate = await c.next(p => p.type === 'welcome');
+  b.send({ type: 'join', protocol: PROTOCOL_VERSION, code: welcome.room.code, name: 'B', weaponId: 'g17' }); await b.next(p => p.type === 'welcome');
+  c.send({ type: 'join', protocol: PROTOCOL_VERSION, code: welcome.room.code, name: 'C', weaponId: 'g17' }); const teammate = await c.next(p => p.type === 'welcome');
   a.send({ type: 'start' });
   const ready = await a.next(p => p.type === 'state' && p.room.phase === 'playing' && p.room.timeLeft < 177.9);
   const shooter = ready.room.players.find(p => p.id === welcome.id), target = ready.room.players.find(p => p.id === teammate.id);
@@ -169,8 +170,8 @@ test('real sockets share one pickup event batch and receive only their own equip
   const server = await startServer({ port: 0 }); t.after(() => server.close());
   const a = await connect(server.port), b = await connect(server.port);
   t.after(() => { a.socket.terminate(); b.socket.terminate(); });
-  a.send({ type: 'create', protocol: 3, name: 'A', weaponId: 'ak47' }); const wa = await a.next(p => p.type === 'welcome');
-  b.send({ type: 'join', protocol: 3, code: wa.room.code, name: 'B', weaponId: 'g17' }); const wb = await b.next(p => p.type === 'welcome');
+  a.send({ type: 'create', protocol: PROTOCOL_VERSION, name: 'A', weaponId: 'ak47' }); const wa = await a.next(p => p.type === 'welcome');
+  b.send({ type: 'join', protocol: PROTOCOL_VERSION, code: wa.room.code, name: 'B', weaponId: 'g17' }); const wb = await b.next(p => p.type === 'welcome');
   assert.equal(wa.equipment.playerId, wa.id); assert.equal(wb.equipment.playerId, wb.id);
   assert.deepEqual(wb.equipment.equipment.owned.map(g => g.weaponId), ['g17']);
   assert.ok(wb.room.players.every(p => p.equipment === undefined && p.inventory === undefined));
@@ -199,13 +200,13 @@ test('real socket late joins reassign full gun slots for the newcomer original g
   const server = await startServer({ port: 0 }); t.after(() => server.close());
   const a = await connect(server.port), b = await connect(server.port), c = await connect(server.port);
   t.after(() => { a.socket.terminate(); b.socket.terminate(); c.socket.terminate(); });
-  a.send({ type: 'create', protocol: 3, name: 'A', weaponId: 'ak47' }); const wa = await a.next(p => p.type === 'welcome');
-  b.send({ type: 'join', protocol: 3, code: wa.room.code, name: 'B', weaponId: 'g17' }); await b.next(p => p.type === 'welcome');
+  a.send({ type: 'create', protocol: PROTOCOL_VERSION, name: 'A', weaponId: 'ak47' }); const wa = await a.next(p => p.type === 'welcome');
+  b.send({ type: 'join', protocol: PROTOCOL_VERSION, code: wa.room.code, name: 'B', weaponId: 'g17' }); await b.next(p => p.type === 'welcome');
   a.send({ type: 'start' }); const state = await a.next(p => p.type === 'state' && p.room.phase === 'playing');
   const available = new Set(state.room.gear.loot.filter(l => l.item.kind === 'gun').map(l => l.item.weaponId));
   const newGun = ['awp', 'm4a1', 'mp5', 'scar', 'p90', 'famas', 'm249', 'scout', 'vector'].find(g => !available.has(g));
   assert.ok(newGun);
-  c.send({ type: 'join', protocol: 3, code: wa.room.code, name: 'Late', weaponId: newGun }); const late = await c.next(p => p.type === 'welcome');
+  c.send({ type: 'join', protocol: PROTOCOL_VERSION, code: wa.room.code, name: 'Late', weaponId: newGun }); const late = await c.next(p => p.type === 'welcome');
   assert.ok(late.room.gear.loot.some(l => l.item.weaponId === newGun));
   assert.ok(late.room.gear.loot.some(l => l.item.weaponId === 'ak47'));
   assert.ok(late.room.gear.loot.some(l => l.item.weaponId === 'g17'));

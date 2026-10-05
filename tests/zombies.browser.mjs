@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { PROTOCOL_VERSION } from '../src/protocol.js';
 import { mkdir } from 'node:fs/promises';
 import { WebSocket } from 'ws';
 import { fixture, walkSolo, until, onlinePair } from './helpers/loot-browser.js';
@@ -144,7 +145,7 @@ try {
   const socket=new WebSocket(`${f.base.replace('http:','ws:')}/ws`);
   await new Promise((resolve,reject)=>{socket.once('open',resolve);socket.once('error',reject);});
   const response=new Promise(resolve=>socket.once('message',message=>resolve(JSON.parse(String(message)))));
-  socket.send(JSON.stringify({type:'create',protocol:3,name:'Invalid',weaponId:'m4a1',mapId:'courtyard',skinId:'ranger',modeId:'zombies'}));
+  socket.send(JSON.stringify({type:'create',protocol: PROTOCOL_VERSION,name:'Invalid',weaponId:'m4a1',mapId:'courtyard',skinId:'ranger',modeId:'zombies'}));
   assert.equal((await response).type,'error'); socket.close();
   const denied=await f.browser.newContext({viewport:{width:1200,height:700},hasTouch:true});
   await denied.addInitScript(()=>Object.defineProperty(window,'localStorage',{get(){throw new Error('denied');}}));

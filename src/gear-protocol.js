@@ -73,11 +73,14 @@ export function validGearWorld(value) {
 }
 
 export function validEquipmentAction(packet) {
-  const fields = { 'equip-gun': ['weaponId', 'source'], 'held-item': ['heldItem'], 'select-grenade': ['grenadeType'], throw: ['grenadeType'] };
+  const fields = { 'equip-gun': ['weaponId', 'source'], 'held-item': ['heldItem'], 'select-grenade': ['grenadeType'], throw: ['grenadeType'],
+    'use-supply': ['supplyType'], 'cancel-supply': [] };
   if (!packet || !hasOwn(fields, packet.kind) || !keys(packet, ['type', 'seq', 'lifeId', 'kind', ...fields[packet.kind]])
     || packet.type !== 'equipment-action' || !positive(packet.seq) || !positive(packet.lifeId)) return false;
   if (packet.kind === 'equip-gun') return guns.has(packet.weaponId) && ['armory', 'inventory'].includes(packet.source);
   if (packet.kind === 'held-item') return ['gun', 'knife'].includes(packet.heldItem);
+  if (packet.kind === 'use-supply') return SUPPLY_TYPES.includes(packet.supplyType);
+  if (packet.kind === 'cancel-supply') return true;
   return grenade(packet.grenadeType);
 }
 

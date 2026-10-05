@@ -1,4 +1,5 @@
 import test from 'node:test';
+import { PROTOCOL_VERSION } from '../src/protocol.js';
 import assert from 'node:assert/strict';
 import { createHeadlessGame, cleanupGame } from './helpers/game-fixture.js';
 import { createInputFixture, InputElement } from './helpers/input-fixture.js';
@@ -114,7 +115,7 @@ test('bot membership ignores inherited and shadowed stats without Object.hasOwn'
   assert.deepEqual(chooseBotIntent(actor, context), { goal: null, targetId: null });
 });
 
-test('protocol 3 action and event validation retains exact shapes without Object.hasOwn', t => {
+test('protocol 4 action and event validation retains exact shapes without Object.hasOwn', t => {
   unavailable(t, Object, 'hasOwn');
   const action = { type: 'equipment-action', seq: 1, lifeId: 1, kind: 'equip-gun', weaponId: 'mp5', source: 'armory' };
   assert.equal(validEquipmentAction(nullPrototype(action)), true);
@@ -149,7 +150,7 @@ test('online snapshots are deeply detached without structuredClone', t => {
 test('online receipt and equipment acknowledgement work with all three newer APIs absent', async t => {
   // The Node server retains its own capabilities; prepare its wire snapshots before limiting the client environment.
   const { manager, state } = roomFixture(), game = arena(t), errors = [];
-  const packet = type => ({ type, protocol: 3, ...(type === 'welcome' ? { id: 'self' } : {}), room: manager.snapshot(state), equipment: manager.equipmentSnapshot('self') });
+  const packet = type => ({ type, protocol: PROTOCOL_VERSION, ...(type === 'welcome' ? { id: 'self' } : {}), room: manager.snapshot(state), equipment: manager.equipmentSnapshot('self') });
   const welcome = packet('welcome');
   const expectedAction = { type: 'equipment-action', seq: 1, lifeId: 2, kind: 'equip-gun', weaponId: 'mp5', source: 'armory' };
   assert.equal(manager.equipmentAction('self', expectedAction).ok, true);

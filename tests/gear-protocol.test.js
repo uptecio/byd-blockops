@@ -6,13 +6,23 @@ import { RoomManager } from '../server/rooms.js';
 const copy = v => structuredClone(v);
 function fixture() { const manager = new RoomManager(); const room = manager.create('p1', 'P1', 'ak47'); manager.join('p2', room.code, 'P2'); manager.start('p1'); return { manager, room }; }
 
-test('protocol 3 equipment validates ownership, recipient, life and nested bounded records including death', () => {
-  assert.equal(PROTOCOL_VERSION, 3);
+test('protocol 4 equipment validates ownership, recipient, life and nested bounded records including death', () => {
+  assert.equal(PROTOCOL_VERSION, 4);
   const { manager, room } = fixture(); const own = manager.snapshot(room).players[0], dto = manager.equipmentSnapshot('p1');
   assert.equal(protocol.validEquipmentSnapshot(dto, own), true);
   const invalid = [d => d.playerId = 'p2', d => d.lifeId++, d => d.lastActionSeq = -1, d => d.equipment.owned = [], d => d.equipment.owned.push(copy(d.equipment.owned[0])), d => d.equipment.grenades.frag = -1, d => d.equipment.grenades.flash = NaN, d => d.equipment.grenades.frag = 4, d => d.equipment.owned[0].reserve = 500, d => d.equipment.extra = 1];
   for (const mutate of invalid) { const value = copy(dto); mutate(value); assert.equal(protocol.validEquipmentSnapshot(value, own), false); }
   manager.eliminate(room, 'p2', room.players.get('p1')); assert.equal(protocol.validEquipmentSnapshot(manager.equipmentSnapshot('p1'), manager.snapshot(room).players[0]), true);
+});
+
+test('supply actions accept only life-scoped intentions, never effect or time claims', () => {
+  const base={type:'equipment-action',seq:1,lifeId:1,kind:'use-supply',supplyType:'health'};
+  assert.equal(protocol.validEquipmentAction(base),true);
+  assert.equal(protocol.validEquipmentAction({...base,supplyType:'armour'}),true);
+  for(const extra of [{supplyType:'bad'},{amount:100},{health:100},{remaining:0},{seq:0},{lifeId:0}]) assert.equal(protocol.validEquipmentAction({...base,...extra}),false);
+  const cancel={type:'equipment-action',seq:2,lifeId:1,kind:'cancel-supply'};
+  assert.equal(protocol.validEquipmentAction(cancel),true);
+  assert.equal(protocol.validEquipmentAction({...cancel,supplyType:'health'}),false);
 });
 
 test('gear world rejects duplicate IDs, unknown nested items, nonfinite values and entity caps', () => {

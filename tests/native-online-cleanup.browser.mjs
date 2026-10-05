@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { PROTOCOL_VERSION } from '../src/protocol.js';
 import { chromium } from 'playwright';
 import { startServer } from '../server/server.mjs';
 import { cleanupOwnedOnlineSession } from '../android/tests/online-cleanup.mjs';
@@ -34,7 +35,7 @@ try {
       if (packet.room?.code === code) observed = packet.room;
     };
     await new Promise((resolve, reject) => { peer.onopen = resolve; peer.onerror = reject; });
-    peer.send(JSON.stringify({ type: 'join', protocol: 3, code, name: 'CleanupObserver', weaponId: 'm4a1', skinId: 'robo-unit' }));
+    peer.send(JSON.stringify({ type: 'join', protocol: PROTOCOL_VERSION, code, name: 'CleanupObserver', weaponId: 'm4a1', skinId: 'robo-unit' }));
     await until(() => observed?.players.length === 2);
     if (openConfirmation) {
       await page.locator('#leave-room').click();
