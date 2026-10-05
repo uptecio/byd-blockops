@@ -7,6 +7,38 @@ import { RoomClient } from '../src/network.js';
 import { RoomManager } from '../server/rooms.js';
 
 const event = (type, fields = {}) => Object.assign(new Event(type, { cancelable: true }), fields);
+test('clearCombat preserves joystick look jump zoom but held combat needs release and new press', t => {
+  const { input, buttons, window, restore } = createInputFixture(); t.after(restore); input.setEnabled(true);
+  buttons.get('joystick').dispatchEvent(event('pointerdown', { pointerId: 1, clientX: 80, clientY: 50 }));
+  buttons.get('fire-button').dispatchEvent(event('pointerdown', { pointerId: 2, clientX: 10, clientY: 10 }));
+  buttons.get('aim-zone').dispatchEvent(event('pointerdown', { pointerId: 3, clientX: 20, clientY: 20 }));
+  for (const code of ['KeyW','KeyF','KeyR','KeyG']) window.dispatchEvent(event('keydown', { code, repeat: false }));
+  input.jump = input.zoom = true; input.look.x = 4;
+  const before = { ...input.move };
+  input.clearCombat();
+  for (const code of ['KeyF','KeyR','KeyG']) window.dispatchEvent(event('keydown', { code, repeat: true }));
+  buttons.get('aim-zone').dispatchEvent(event('pointerup', { pointerId: 3 }));
+  let read = input.read();
+  assert.deepEqual(input.move, before); assert.ok(read.x > 0 && read.y > 0);
+  assert.equal(read.lookX, 4); assert.equal(read.jump, true); assert.equal(read.zoom, true);
+  assert.equal(read.fire, false); assert.equal(read.reload, false); assert.equal(read.throwPressed, false);
+  buttons.get('fire-button').dispatchEvent(event('pointermove', { pointerId: 2, clientX: 12, clientY: 14 }));
+  assert.equal(input.read().lookX, 2, 'held fire drag still aims without attacking');
+  buttons.get('fire-button').dispatchEvent(event('pointerup', { pointerId: 2 }));
+  assert.equal(input.read().fire, false, 'held F cannot be reactivated by unrelated pointer release');
+  window.dispatchEvent(event('keyup', { code: 'KeyF' }));
+  window.dispatchEvent(event('keydown', { code: 'KeyF', repeat: false })); assert.equal(input.read().fire, true);
+  input.clearCombat();
+  buttons.get('fire-button').dispatchEvent(event('pointerdown', { pointerId: 4, clientX: 0, clientY: 0 }));
+  assert.equal(input.read().firePressed, true);
+});
+
+test('disabled Fire button cannot create a combat pointer', t => {
+  const { input, buttons, restore } = createInputFixture(); t.after(restore); input.setEnabled(true);
+  buttons.get('fire-button').disabled = true;
+  buttons.get('fire-button').dispatchEvent(event('pointerdown', { pointerId: 2, clientX: 0, clientY: 0 }));
+  assert.equal(input.read().fire, false); assert.equal(input.pointers.size, 0);
+});
 test('one pointer tap creates exactly one throw edge', t => {
   const { input, buttons, restore } = createInputFixture(); t.after(restore); input.setEnabled(true);
   buttons.get('throw-button')?.dispatchEvent(event('pointerdown', { pointerId: 7 }));

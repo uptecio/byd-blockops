@@ -64,19 +64,23 @@ test('two real knife slashes kill a zombie without loot or duplicate death', t=>
 });
 
 for (const kind of ['walker','runner']) {
-  for (const [wave,health,remaining] of [[1,100,90],[2,100,85],[3,100,80],[4,100,75],
-    [18,100,5],[19,100,0],[20,150,45],[100,1000,495]]) {
+  for (const [wave,damageAmount,remaining] of [[1,10,90],[2,15,85],[3,20,80],[4,25,75],
+    [18,95,5],[19,100,0],[20,105,0],[100,505,0]]) {
     test(`${kind} wave ${wave} slash scales damage without a cap`, t=>{
       const game=arena(t),z=target(game);
       game.modeState.wave=wave;
       z.kind=kind; z.brain=createZombieBrain(kind); z.brain.attackRemaining=0;
-      z.model.position.set(0,0,8.9); game.player.health=health;
+      z.model.position.set(0,0,8.9); game.player.health=100; game.player.armour=0;
+      const amounts=[],damage=game.damageActor.bind(game);
+      game.damageActor=(...args)=>{ amounts.push(args[2]); return damage(...args); };
       game.update(.01);
+      assert.deepEqual(amounts,[damageAmount]);
       assert.equal(game.player.health,remaining);
       assert.equal(game.modeState.ended,remaining===0);
       if (remaining>0) {
         game.update(.01);
         assert.equal(game.player.health,remaining,'the attack interval still prevents another immediate hit');
+        assert.deepEqual(amounts,[damageAmount]);
       }
     });
   }

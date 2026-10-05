@@ -2,6 +2,7 @@ export class Input {
   constructor(onPause) {
     this.enabled = false;
     this.keys = new Set();
+    this.combatBlockedKeys = new Set();
     this.move = { x: 0, y: 0 };
     this.look = { x: 0, y: 0 };
     this.fire = false;
@@ -38,7 +39,7 @@ export class Input {
     for (const id of ['aim-zone', 'fire-button']) {
       const element = document.getElementById(id);
       element.addEventListener('pointerdown', e => {
-        if (!this.enabled) return;
+        if (!this.enabled || element.disabled) return;
         e.preventDefault(); element.setPointerCapture(e.pointerId);
         this.pointers.set(e.pointerId, { x: e.clientX, y: e.clientY, fire: id === 'fire-button' });
         if (id === 'fire-button') { this.fire = true; this.firePressed = true; }
@@ -51,7 +52,7 @@ export class Input {
       });
       const release = e => {
         this.pointers.delete(e.pointerId);
-        this.fire = this.keys.has('KeyF') || [...this.pointers.values()].some(p => p.fire);
+        this.fire = (this.keys.has('KeyF') && !this.combatBlockedKeys.has('KeyF')) || [...this.pointers.values()].some(p => p.fire);
       };
       element.addEventListener('pointerup', release);
       for (const event of ['pointercancel', 'lostpointercapture']) element.addEventListener(event, e => {
@@ -75,21 +76,29 @@ export class Input {
       if (['KeyW','KeyA','KeyS','KeyD','KeyF','KeyR','Space','KeyE','KeyQ','KeyG','KeyT','ArrowUp','ArrowDown','ArrowLeft','ArrowRight'].includes(e.code)) e.preventDefault();
       const fresh = !e.repeat && !this.keys.has(e.code);
       this.keys.add(e.code);
+      if (this.combatBlockedKeys.has(e.code)) return;
       if (fresh && e.code === 'KeyQ') this.knifePressed = true;
       if (fresh && e.code === 'KeyG') this.throwPressed = true;
       if (fresh && e.code === 'KeyT') this.grenadePickerPressed = true;
-      if (e.code === 'KeyF') { this.fire = true; if (!e.repeat) this.firePressed = true; }
-      if (e.code === 'KeyR' && !e.repeat) this.reload = true;
+      if (e.code === 'KeyF' && fresh) { this.fire = true; this.firePressed = true; }
+      if (e.code === 'KeyR' && fresh) this.reload = true;
       if (e.code === 'Space' && !e.repeat) this.jump = true;
       if (e.code === 'KeyE' && !e.repeat) this.zoom = !this.zoom;
     });
-    window.addEventListener('keyup', e => { this.keys.delete(e.code); if (e.code === 'KeyF') this.fire = [...this.pointers.values()].some(p => p.fire); });
+    window.addEventListener('keyup', e => { this.keys.delete(e.code); this.combatBlockedKeys.delete(e.code); if (e.code === 'KeyF') this.fire = [...this.pointers.values()].some(p => p.fire); });
     window.addEventListener('blur', () => { stickPointer = null; this.clear(); });
     document.addEventListener('visibilitychange', () => { if (document.hidden) this.clear(); });
     document.addEventListener('pointercancel', () => this.clear());
     this.resetStick = () => { stickPointer = null; };
   }
+  clearCombat() {
+    for (const key of ['KeyF', 'KeyR', 'KeyG', 'KeyQ', 'KeyT']) if (this.keys.has(key)) this.combatBlockedKeys.add(key);
+    for (const pointer of this.pointers.values()) pointer.fire = false;
+    this.fire = this.firePressed = this.reload = false;
+    this.knifePressed = this.throwPressed = this.grenadePickerPressed = false;
+  }
   clear() {
+    this.combatBlockedKeys.clear();
     this.keys.clear(); this.pointers.clear(); this.fire = this.firePressed = this.jump = this.reload = this.zoom = false;
     this.knifePressed = this.throwPressed = this.grenadePickerPressed = false;
     this.move.x = this.move.y = this.look.x = this.look.y = 0;

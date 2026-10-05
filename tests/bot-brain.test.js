@@ -328,6 +328,8 @@ test('equipment decisions use owned guns and knife range without creating invent
   pickupEquipment(bot.equipment, { kind: 'knife' }); enemy.z = -1;
   assert.deepEqual(brain.chooseBotEquipment(bot, context), { kind: 'held-item', heldItem: 'knife' });
   assert.equal(bot.equipment.activeGunId, 'm4a1');
+  bot.equipment.supplies.health = 1; bot.equipment.supplyUse = { type: 'health', remaining: 3 };
+  assert.equal(brain.chooseBotEquipment(bot, context), null, 'automatic knife selection must not cancel an active supply');
 });
 
 test('grenade decisions require ownership, visibility and six seconds between attempts', () => {

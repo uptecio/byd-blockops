@@ -6,6 +6,7 @@ import { ZOMBIE_BALANCE, createSurvival, tickSurvival, nextZombieSpawn, resolveZ
   recordZombieDeath, settleSurvival, survivalView } from './zombie-survival.js';
 import { createZombieBrain, selectZombieSpawn, stepZombieBrain } from './zombie-brain.js';
 import { createZombieModel, animateZombieModel } from './zombie-avatar.js';
+import { cancelSupplyUse } from './supplies.js';
 
 export class ZombieRuntime {
   constructor(game) { this.game = game; this.disposed = false; }
@@ -28,7 +29,7 @@ export class ZombieRuntime {
   actors() {
     return this.game.bots.map(z => ({ id:z.id, name:z.model.name, kind:z.kind, lifeId:z.lifeId,
       teamId:null, skinId:null, equipment:null, x:z.model.position.x,y:0,z:z.model.position.z,
-      yaw:z.yaw,pitch:0,health:z.health,alive:z.health>0,protectedRemaining:0,flashRemaining:z.flashRemaining }));
+      yaw:z.yaw,pitch:0,health:z.health,armour:0,alive:z.health>0,protectedRemaining:0,flashRemaining:z.flashRemaining }));
   }
   record() {
     this.game.events.onSurvivalRecord?.({ mapId:this.state.mapId, waves:this.state.completedWaves, kills:this.state.kills });
@@ -97,6 +98,8 @@ export class ZombieRuntime {
         game.clearEffects(); game.gearView?.clear();
         game.player.flashRemaining=0; game.shotFlash=0; game.hitFlash=0; game.damageFlash=0; game.recoil=0;
         game.muzzle.visible=false;
+        if (game.player.equipment.supplyUse?.type === 'health') cancelSupplyUse(game.player.equipment);
+        game.clearSupplyCombat();
         game.player.health=100; refillOwnedAmmo(game.player.equipment); game.syncPlayerEquipment();
         game.refreshGearView();
         game.audio.zombieRecovery?.(); game.events.onToast('WAVE CLEAR · HEALTH & AMMO RESTORED'); this.record();

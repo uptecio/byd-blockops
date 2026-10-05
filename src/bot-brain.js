@@ -3,6 +3,7 @@ import { areEnemies } from './modes.js';
 import { smokeBlocksSight } from './gear-combat.js';
 import { getWeapon } from './weapons.js';
 import { hasOwn } from './has-own.js';
+import { isUsingSupply } from './supplies.js';
 
 const point = ({ x, z }) => ({ x, z });
 const distance = (a, b) => Math.hypot(a.x - b.x, a.z - b.z);
@@ -62,7 +63,7 @@ export function chooseBotIntent(actor, { actors, state, map, role, smokes = [], 
 
 export function chooseBotEquipment(actor, { actors, intent, smokes = [], solids, now }) {
   const equipment = actor.equipment;
-  if (!actor.alive || !equipment?.owned.has(equipment.activeGunId) || actor.flashRemaining > 0) return null;
+  if (!actor.alive || !equipment?.owned.has(equipment.activeGunId) || actor.flashRemaining > 0 || isUsingSupply(equipment)) return null;
   const target = actors.find(other => other.id === intent?.targetId && other.alive && other.protectedRemaining <= 0
     && other.id !== actor.id && (actor.teamId === null || other.teamId !== actor.teamId));
   const eye = a => ({ x: a.x, y: (a.y ?? 0) + 1.35, z: a.z });

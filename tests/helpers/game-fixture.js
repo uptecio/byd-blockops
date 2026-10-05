@@ -7,7 +7,7 @@ import { getWeapon } from '../../src/weapons.js';
 // Real input methods, scene, world and combat; only DOM/GPU/audio sinks omitted.
 export function createHeadlessGame() {
   const input = Object.assign(Object.create(Input.prototype), {
-    enabled: false, keys: new Set(), pointers: new Map(), move: { x: 0, y: 0 },
+    enabled: false, keys: new Set(), combatBlockedKeys: new Set(), pointers: new Map(), move: { x: 0, y: 0 },
     look: { x: 0, y: 0 }, knob: { style: {} }, fire: false, firePressed: false,
     jump: false, reload: false, zoom: false, knifePressed: false, throwPressed: false, grenadePickerPressed: false,
   });

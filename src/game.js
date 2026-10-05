@@ -19,6 +19,8 @@ import { GearView, createKnifeModel } from './gear-view.js';
 import { hasOwn } from './has-own.js';
 import { ZombieRuntime } from './zombie-runtime.js';
 import { lootItemLabel } from './loot-labels.js';
+import { damageVitals } from './vitals.js';
+import { startSupplyUse, cancelSupplyUse, advanceSupplyUse, isUsingSupply, chooseBotSupply } from './supplies.js';
 
 export function disposeModel(model) {
   if (!model) return;
@@ -49,7 +51,7 @@ export class ArenaGame {
     this.camera = new THREE.PerspectiveCamera(75, 1, .05, 180);
     this.camera.rotation.order = 'YXZ'; this.scene.add(this.camera);
     this.world = createWorld(THREE, this.scene);
-    this.player = { ...this.world.playerSpawn, id: 'local', name: 'You', lifeId: 0, skinId: DEFAULT_SKIN_ID, pendingSkinId: DEFAULT_SKIN_ID, health: 100, jump: 0, velocity: 0, dead: 0, protected: 2 };
+    this.player = { ...this.world.playerSpawn, id: 'local', name: 'You', lifeId: 0, skinId: DEFAULT_SKIN_ID, pendingSkinId: DEFAULT_SKIN_ID, health: 100, armour: 0, jump: 0, velocity: 0, dead: 0, protected: 2 };
     this.yaw = 0; this.pitch = 0; this.time = 0; this.recoil = 0;
     this.active = false; this.hasRound = false; this.bots = []; this.effects = [];
     this.inventory = new Map(); this.weapon = getWeapon('m4a1');
@@ -86,6 +88,7 @@ export class ArenaGame {
       this.presentHeldItem(equipment.activeGunId, equipment.heldItem);
   }
   getEquipmentView() { return equipmentDTO(this.player.equipment); }
+  clearSupplyCombat() { this.input.clearCombat(); this.lastFire = false; }
   requestEquipment(action) {
     if (!this.hasRound || this.modeState.ended || this.player.health <= 0 || this.player.dead > 0)
       return { ok: false, reason: 'Cannot change equipment while inactive' };
@@ -94,16 +97,27 @@ export class ArenaGame {
     return result;
   }
   applyEquipmentAction(actor, action) {
+    const before = actor.equipment?.supplyUse;
+    const result = this.performEquipmentAction(actor, action);
+    if (actor.id === this.player.id && before !== actor.equipment?.supplyUse) this.clearSupplyCombat();
+    return result;
+  }
+  performEquipmentAction(actor, action) {
     if (!action || typeof action !== 'object' || Array.isArray(action)) return { ok: false, reason: 'Invalid equipment action' };
     const fields = { 'equip-gun': ['kind', 'weaponId', 'source'], 'held-item': ['kind', 'heldItem'],
-      'select-grenade': ['kind', 'grenadeType'], throw: ['kind', 'grenadeType'] };
+      'select-grenade': ['kind', 'grenadeType'], throw: ['kind', 'grenadeType'],
+      'use-supply': ['kind', 'supplyType'], 'cancel-supply': ['kind'] };
     const keys = hasOwn(fields, action.kind) ? fields[action.kind] : null;
     if (!keys || Reflect.ownKeys(action).length !== keys.length || !keys.every(key => hasOwn(action, key)))
       return { ok: false, reason: 'Invalid equipment action' };
+    if (action.kind === 'use-supply') return startSupplyUse(actor.equipment, this.actorEntity(actor.id), action.supplyType,
+      { active: this.active && !this.modeState.ended, alive: actor.alive });
+    if (action.kind === 'cancel-supply') return cancelSupplyUse(actor.equipment);
     if (action.kind === 'equip-gun') return equipGun(actor.equipment, action.weaponId, { source: action.source });
     if (action.kind === 'held-item') return setHeldItem(actor.equipment, action.heldItem);
     if (action.kind === 'select-grenade') return selectGrenade(actor.equipment, action.grenadeType);
     if (!this.active) return { ok: false, reason: 'Cannot throw while paused' };
+    if (isUsingSupply(actor.equipment)) return { ok: false, reason: 'Finish or cancel supply use first' };
     if (this.zombieRuntime && !this.zombieRuntime.canAttack()) return { ok: false, reason: 'Get ready for the next wave' };
     return throwGrenade(this.gearCombatState, actor, action.grenadeType, { solids: this.world.solids });
   }
@@ -168,7 +182,7 @@ export class ArenaGame {
     bot.bar.position.y = 2.13; bot.model.add(bot.bar); this.world.botGroup.add(bot.model);
     bot.model.position.set(spawn.x, 0, spawn.z);
     bot.equipment ??= createEquipment('m4a1'); resetEquipment(bot.equipment);
-    Object.assign(bot, { health: 100, respawn: 0, protected: 2.5, flashRemaining: 0, cooldown: 1.5,
+    Object.assign(bot, { health: 100, armour: 0, respawn: 0, protected: 2.5, flashRemaining: 0, cooldown: 1.5,
       intentTimer: 0, pathTimer: 0, waypoint: null, intent: null, yaw: Math.PI, lastKnownTargets: new Map(),
       lastGrenadeAttempt: bot.lastGrenadeAttempt ?? -Infinity, weaponState: bot.equipment.owned.get('m4a1') });
     for (const other of this.bots) other.lastKnownTargets?.delete(bot.id);
@@ -177,10 +191,10 @@ export class ArenaGame {
   getActors() {
     return [{ id: this.player.id, name: this.player.name, teamId: this.player.teamId, x: this.player.x, y: this.player.jump, z: this.player.z,
       alive: this.player.health > 0 && this.player.dead <= 0, protectedRemaining: this.player.protected, lifeId: this.player.lifeId, skinId: this.player.skinId,
-      yaw: this.yaw, pitch: this.pitch, flashRemaining: this.player.flashRemaining ?? 0, equipment: this.player.equipment, health: this.player.health },
+      yaw: this.yaw, pitch: this.pitch, flashRemaining: this.player.flashRemaining ?? 0, equipment: this.player.equipment, health: this.player.health, armour: this.player.armour },
     ...(this.zombieRuntime ? this.zombieRuntime.actors() : this.bots.map(bot => ({ id: bot.id, name: bot.name, teamId: bot.teamId, x: bot.model.position.x, y: bot.model.position.y, z: bot.model.position.z,
       alive: bot.health > 0 && bot.respawn <= 0, protectedRemaining: bot.protected, lifeId: bot.lifeId, skinId: bot.skinId,
-      yaw: bot.yaw, pitch: 0, flashRemaining: bot.flashRemaining, equipment: bot.equipment, health: bot.health,
+      yaw: bot.yaw, pitch: 0, flashRemaining: bot.flashRemaining, equipment: bot.equipment, health: bot.health, armour: bot.armour,
       lastGrenadeAttempt: bot.lastGrenadeAttempt, carryingFlag: Object.values(this.modeState.flags ?? {}).some(flag => flag.carrierId === bot.id) })))];
   }
   refreshMatchView(actors = this.getActors()) {
@@ -193,6 +207,8 @@ export class ArenaGame {
   getMatchView() { return this.matchView; }
   finishRound(actors) {
     if (!this.modeState.ended || this.endReported) return;
+    for (const actor of [this.player, ...this.bots]) if (actor.equipment) cancelSupplyUse(actor.equipment);
+    this.clearSupplyCombat();
     this.refreshMatchView(actors); this.endReported = true; this.pause(); this.events.onEnd(this.match);
   }
   resetPlayer(initial = false) {
@@ -204,7 +220,7 @@ export class ArenaGame {
         return distance > best.distance ? { ...point, distance } : best;
       }, { ...spawn, distance: -1 });
     }
-    Object.assign(this.player, { x: spawn.x, z: spawn.z, health: 100, dead: 0, jump: 0, velocity: 0, protected: 2.5, flashRemaining: 0, skinId: this.player.pendingSkinId });
+    Object.assign(this.player, { x: spawn.x, z: spawn.z, health: 100, armour: 0, dead: 0, jump: 0, velocity: 0, protected: 2.5, flashRemaining: 0, skinId: this.player.pendingSkinId });
     this.player.lifeId++;
     this.yaw = initial ? 0 : Math.atan2(spawn.x, spawn.z); this.pitch = 0; this.recoil = 0;
     resetEquipment(this.player.equipment); this.syncPlayerEquipment(); this.input.clear(); this.placeCamera();
@@ -213,6 +229,7 @@ export class ArenaGame {
   resume() { if (this.hasRound && !this.match.ended) { this.active = true; this.lastFire = false; this.input.setEnabled(true); } }
   pause() { this.active = false; this.input.setEnabled(false); this.lastFire = false; }
   quit() {
+    for (const actor of [this.player, ...this.bots]) if (actor.equipment) cancelSupplyUse(actor.equipment);
     this.pause(); this.hasRound = false; this.gearView?.clear();
     if (this.zombieRuntime) {
       this.zombieRuntime.record(); this.zombieRuntime.dispose(); this.zombieRuntime = null;
@@ -240,10 +257,13 @@ export class ArenaGame {
   simulate(dt) {
     if (!Number.isFinite(dt) || dt <= 0) return;
     const steps = Math.ceil(dt / .05);
-    for (let step = 0; step < steps && this.active && !this.modeState.ended; step++) this.simulateStep(dt / steps);
+    const roundRemaining = this.modeState.timeLeft;
+    for (let step = 0; step < steps && this.active && !this.modeState.ended; step++) this.simulateStep(dt / steps, roundRemaining - step * dt / steps);
   }
-  simulateStep(dt) {
+  simulateStep(dt, roundRemaining = this.modeState.timeLeft) {
     if (this.modeState.ended) return;
+    const pendingUses = [this.player, ...this.bots].filter(actor => isUsingSupply(actor.equipment))
+      .map(actor => ({ actor, equipment: actor.equipment, use: actor.equipment.supplyUse }));
     const input = this.input.read();
     if (input.grenadePickerPressed) { this.events.onEquipmentPicker?.(); if (!this.active) return; }
     this.zombieRuntime?.beginStep(dt);
@@ -260,7 +280,9 @@ export class ArenaGame {
     const actors = this.getActors(), playerActor = actors[0];
     if (this.player.dead <= 0) {
       if (input.knifePressed) {
+        const wasUsing = isUsingSupply(this.player.equipment);
         const result = this.requestEquipment({ kind: 'held-item', heldItem: this.player.equipment.heldItem === 'knife' ? 'gun' : 'knife' });
+        if (wasUsing && result.ok) input.fire = input.firePressed = input.reload = input.throwPressed = false;
         if (!result.ok) this.events.onToast(result.reason);
         this.input.zoom = false;
       }
@@ -282,9 +304,9 @@ export class ArenaGame {
         const result = this.requestEquipment({ kind: 'throw', grenadeType: this.player.equipment.selectedGrenade });
         if (!result.ok) this.events.onToast(result.reason);
       }
-      if (input.reload && this.player.equipment.heldItem === 'gun' && startReload(this.weaponState)) this.audio.reload();
+      if (!isUsingSupply(this.player.equipment) && input.reload && this.player.equipment.heldItem === 'gun' && startReload(this.weaponState)) this.audio.reload();
       this.placeCamera();
-      const canAttack = !this.zombieRuntime || this.zombieRuntime.canAttack();
+      const canAttack = !isUsingSupply(this.player.equipment) && (!this.zombieRuntime || this.zombieRuntime.canAttack());
       if (canAttack && input.fire && this.player.equipment.heldItem === 'knife') this.slash(playerActor, actors);
       else if (canAttack && input.fire && this.player.equipment.attackLockRemaining <= 0 && (this.weapon.automatic || input.firePressed)) {
         if (tryFire(this.weaponState)) this.shoot(zoom, actors);
@@ -339,6 +361,15 @@ export class ArenaGame {
       return true;
     });
     this.zombieRuntime?.finishStep();
+    for (const { actor, equipment, use } of pendingUses) {
+      if (actor.equipment !== equipment || equipment.supplyUse !== use) continue;
+      const result = advanceSupplyUse(equipment, actor, dt, {
+        active: this.active && !this.modeState.ended && (!!this.zombieRuntime || roundRemaining > dt + 1e-10),
+        alive: actor.health > 0 && (actor.dead ?? actor.respawn) <= 0,
+      });
+      if (actor.id === this.player.id && ['completed', 'cancelled'].includes(result.status)) this.clearSupplyCombat();
+      if (actor.id !== this.player.id && actor.bar) actor.bar.scale.x = actor.health / 100;
+    }
   }
   presentGearEvents(events) {
     for (const event of events) {
@@ -372,7 +403,7 @@ export class ArenaGame {
   }
   slash(actor, actors = this.getActors()) {
     if (this.modeState.ended || (this.zombieRuntime && !this.zombieRuntime.canAttack()) || !actor.alive || (actor.id !== 'local' && actor.flashRemaining > 0)
-      || !beginMelee(actor.equipment).ok) return;
+      || isUsingSupply(actor.equipment) || !beginMelee(actor.equipment).ok) return;
     this.gearCombatState.events.push({ type: 'melee', playerId: actor.id });
     const eye = other => ({ x: other.x, y: other.y + 1.35, z: other.z });
     const candidates = actor.id === 'local' ? actors
@@ -401,7 +432,7 @@ export class ArenaGame {
           this.spawnBot(bot);
           const actor = actors.find(actor => actor.id === bot.id);
           Object.assign(actor, { x: bot.model.position.x, y: 0, z: bot.model.position.z, alive: true, lifeId: bot.lifeId,
-            equipment: bot.equipment, protectedRemaining: bot.protected, flashRemaining: 0 });
+            equipment: bot.equipment, health: bot.health, armour: bot.armour, protectedRemaining: bot.protected, flashRemaining: 0 });
         }
         continue;
       }
@@ -410,7 +441,9 @@ export class ArenaGame {
       bot.flashRemaining = Math.max(0, bot.flashRemaining - dt);
       bot.cooldown -= dt; bot.intentTimer -= dt; bot.pathTimer -= dt;
       const actor = actors.find(actor => actor.id === bot.id);
-      Object.assign(actor, { protectedRemaining: bot.protected, flashRemaining: bot.flashRemaining, lastGrenadeAttempt: bot.lastGrenadeAttempt });
+      Object.assign(actor, { health: bot.health, armour: bot.armour, protectedRemaining: bot.protected, flashRemaining: bot.flashRemaining, lastGrenadeAttempt: bot.lastGrenadeAttempt });
+      const supply = chooseBotSupply(actor);
+      if (supply) this.applyEquipmentAction(actor, { kind: 'use-supply', supplyType: supply });
       const eye = other => ({ x: other.x, y: other.y + 1.35, z: other.z });
       for (const enemy of actors.filter(other => areEnemies(this.modeState, bot.id, other.id))) {
         const remembered = bot.lastKnownTargets.get(enemy.id);
@@ -456,6 +489,7 @@ export class ArenaGame {
       if (target && bot.flashRemaining <= 0 && !smokeBlocksSight(eye(actor), eye(target), this.gearCombatState.smokes)) {
         bot.yaw = Math.atan2(actor.x - target.x, actor.z - target.z); actor.yaw = bot.yaw;
       }
+      if (isUsingSupply(bot.equipment)) continue;
       const equipmentAction = chooseBotEquipment(actor, { actors, intent: bot.intent, smokes: this.gearCombatState.smokes,
         solids: this.world.solids, now: this.simulationTime });
       if (equipmentAction) {
@@ -487,9 +521,9 @@ export class ArenaGame {
   damageActor(attackerId, victim, damage, actors) {
     if (this.modeState.ended || !victim || !this.isEnemy(attackerId, victim.id) || victim.health <= 0
       || (victim.dead ?? victim.respawn) > 0 || victim.protected > 0) return false;
-    victim.health = Math.max(0, victim.health - damage);
+    if (!damageVitals(victim, damage).ok) return false;
     const record = actors?.find(actor => actor.id === victim.id);
-    if (record) { record.health = victim.health; record.alive = victim.health > 0; }
+    if (record) { record.health = victim.health; record.armour = victim.armour; record.alive = victim.health > 0; }
     if (victim.id === 'local') this.damageFlash = .3;
     else victim.bar.scale.x = (this.zombieRuntime ? .65 : 1) * victim.health / 100;
     if (victim.health === 0) {
@@ -498,6 +532,7 @@ export class ArenaGame {
       addDeathDrops(this.lootState, { actorId: victim.id, lifeId: victim.lifeId, position,
         items: deathItems(victim.equipment), solids: this.world.solids });
       clearEquipment(victim.equipment);
+      victim.armour = 0;
       for (const bot of this.bots) {
         bot.lastKnownTargets.delete(victim.id);
         bot.intentTimer = 0; bot.pathTimer = 0;
@@ -513,7 +548,7 @@ export class ArenaGame {
     return true;
   }
   shoot(zoom, actors) {
-    if (this.modeState.ended || (this.zombieRuntime && !this.zombieRuntime.canAttack())) return;
+    if (this.modeState.ended || isUsingSupply(this.player.equipment) || (this.zombieRuntime && !this.zombieRuntime.canAttack())) return;
     this.audio.shoot(this.weapon); this.shotFlash = .055;
     this.camera.updateMatrixWorld(true);
     const origin = this.camera.getWorldPosition(new THREE.Vector3());
