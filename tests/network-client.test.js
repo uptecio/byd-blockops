@@ -16,6 +16,7 @@ function room() {
       startingGunId: 'm4a1', activeGunId: own.weaponId, heldItem: own.heldItem, startingGunRemoved: own.weaponId !== 'm4a1',
       owned: own.health > 0 ? [{ weaponId: own.weaponId, ammo: own.ammo, reserve: own.reserve, cooldown: 0, reloadRemaining: own.reloadRemaining }] : [],
       knife: own.heldItem === 'knife', grenades: { frag: 0, smoke: 0, flash: 0 }, selectedGrenade: 'frag', throwRemaining: 0, attackLockRemaining: 0, meleeRemaining: 0,
+      supplies: { health: 0, armour: 0 }, supplyUse: null,
     } };
   } });
   return value;

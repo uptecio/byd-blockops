@@ -46,7 +46,7 @@ for (const map of MAPS) for (const modeId of ['ffa', 'tdm', 'ctf']) {
     assert.deepEqual(state.players.map(player => player.teamId), modeId === 'ffa' ? [null, null] : ['red', 'blue']);
     assert.deepEqual(state.teamScores, { red: 0, blue: 0 });
     assert.equal(state.flags === null, modeId !== 'ctf');
-    assert.equal(state.gear.loot.length, 16);
+    assert.equal(state.gear.loot.length, 20);
     assert.deepEqual(state.gear.projectiles, []); assert.deepEqual(state.gear.smokes, []);
     for (const player of state.players) {
       const spawns = modeId === 'ffa' ? [map.playerSpawn, ...map.spawns] : map.teamSpawns[player.teamId];

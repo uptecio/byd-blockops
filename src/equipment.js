@@ -1,11 +1,13 @@
 import { WEAPONS, TOTAL_AMMO, createWeaponState, tickWeapon } from './weapons.js';
 import { GRENADE_TYPES, GEAR_BALANCE } from './equipment-catalog.js';
 import { hasOwn } from './has-own.js';
+import { createSupplyState, cancelSupplyUse, SUPPLY_TYPES, SUPPLY_BALANCE } from './supplies.js';
 
 const guns = new Map(WEAPONS.map(gun => [gun.id, gun]));
 const equipmentKeys = [
   'startingGunId', 'activeGunId', 'heldItem', 'startingGunRemoved', 'owned',
   'knife', 'grenades', 'selectedGrenade', 'throwRemaining', 'attackLockRemaining', 'meleeRemaining',
+  'supplies', 'supplyUse',
 ];
 const weaponKeys = ['weaponId', 'ammo', 'reserve', 'cooldown', 'reloadRemaining'];
 const ok = () => ({ ok: true });
@@ -35,6 +37,7 @@ export function createEquipment(startingGunId) {
     owned: new Map([[startingGunId, createWeaponState(startingGunId)]]),
     knife: false, grenades: { frag: 0, smoke: 0, flash: 0 }, selectedGrenade: 'frag',
     throwRemaining: 0, attackLockRemaining: 0, meleeRemaining: 0,
+    ...createSupplyState(),
   };
 }
 
@@ -53,6 +56,7 @@ export function equipGun(e, weaponId, options) {
   }
   e.activeGunId = weaponId;
   e.heldItem = 'gun';
+  cancelSupplyUse(e);
   return ok();
 }
 
@@ -68,6 +72,9 @@ export function pickupEquipment(e, item) {
   } else if (hasKeys(item, ['kind', 'grenadeType']) && item.kind === 'grenade' && GRENADE_TYPES.includes(item.grenadeType)) {
     if (grenadeCount(e) >= GEAR_BALANCE.grenadeCapacity) return denied('Grenade capacity full');
     e.grenades[item.grenadeType] += 1;
+  } else if (hasKeys(item, ['kind', 'supplyType']) && item.kind === 'supply' && SUPPLY_TYPES.includes(item.supplyType)) {
+    if (e.supplies[item.supplyType] >= SUPPLY_BALANCE.capacity) return denied('Supply capacity full');
+    e.supplies[item.supplyType] += 1;
   } else return denied('Invalid equipment pickup');
   return ok();
 }
@@ -77,12 +84,14 @@ export function setHeldItem(e, heldItem) {
   if (!hasEquipment(e)) return denied('No active equipment');
   if (heldItem === 'knife' && !e.knife) return denied('Find a knife as loot');
   e.heldItem = heldItem;
+  cancelSupplyUse(e);
   return ok();
 }
 
 export function selectGrenade(e, grenadeType) {
   if (!GRENADE_TYPES.includes(grenadeType)) return denied('Unknown grenade type');
   e.selectedGrenade = grenadeType;
+  cancelSupplyUse(e);
   return ok();
 }
 
@@ -123,6 +132,9 @@ export function deathItems(e) {
   for (const grenadeType of GRENADE_TYPES) {
     for (let count = 0; count < e.grenades[grenadeType]; count++) items.push({ kind: 'grenade', grenadeType });
   }
+  for (const supplyType of SUPPLY_TYPES) {
+    for (let count = 0; count < e.supplies[supplyType]; count++) items.push({ kind: 'supply', supplyType });
+  }
   return items;
 }
 
@@ -135,6 +147,7 @@ export function clearEquipment(e) {
   e.throwRemaining = 0;
   e.attackLockRemaining = 0;
   e.meleeRemaining = 0;
+  Object.assign(e, createSupplyState());
 }
 
 export function resetEquipment(e) {
@@ -161,6 +174,7 @@ export function equipmentDTO(e) {
     knife: e.knife, grenades: { frag: e.grenades.frag, smoke: e.grenades.smoke, flash: e.grenades.flash },
     selectedGrenade: e.selectedGrenade, throwRemaining: e.throwRemaining,
     attackLockRemaining: e.attackLockRemaining, meleeRemaining: e.meleeRemaining,
+    supplies: { ...e.supplies }, supplyUse: e.supplyUse ? { ...e.supplyUse } : null,
   };
 }
 
@@ -171,12 +185,18 @@ export function equipmentFromDTO(dto) {
     || (!dto.startingGunRemoved && dto.activeGunId !== dto.startingGunId)
     || typeof dto.knife !== 'boolean' || (dto.heldItem === 'knife' && !dto.knife)
     || !GRENADE_TYPES.includes(dto.selectedGrenade) || !hasKeys(dto.grenades, GRENADE_TYPES)
+    || !hasKeys(dto.supplies, SUPPLY_TYPES)
     || !Array.isArray(dto.owned) || dto.owned.length > guns.size
     || !isTimer(dto.throwRemaining, GEAR_BALANCE.throwCooldown)
     || !isTimer(dto.attackLockRemaining, GEAR_BALANCE.attackSuppression)
     || !isTimer(dto.meleeRemaining, GEAR_BALANCE.knife.interval)) invalid();
   if (!GRENADE_TYPES.every(type => Number.isInteger(dto.grenades[type]) && dto.grenades[type] >= 0)
     || grenadeCount(dto) > GEAR_BALANCE.grenadeCapacity) invalid();
+  if (!SUPPLY_TYPES.every(type => Number.isInteger(dto.supplies[type]) && dto.supplies[type] >= 0
+    && dto.supplies[type] <= SUPPLY_BALANCE.capacity)) invalid();
+  if (dto.supplyUse !== null && (!hasKeys(dto.supplyUse, ['type', 'remaining'])
+    || !SUPPLY_TYPES.includes(dto.supplyUse.type) || dto.supplies[dto.supplyUse.type] <= 0
+    || !isTimer(dto.supplyUse.remaining, SUPPLY_BALANCE.useSeconds) || dto.supplyUse.remaining <= 0)) invalid();
   const owned = new Map();
   for (const state of dto.owned) {
     if (!hasKeys(state, weaponKeys) || !validAmmo(state.weaponId, state.ammo, state.reserve)
@@ -187,6 +207,7 @@ export function equipmentFromDTO(dto) {
   if (owned.size > 0) {
     if (!owned.has(dto.activeGunId) || (!dto.startingGunRemoved && !owned.has(dto.startingGunId))) invalid();
   } else if (dto.knife || grenadeCount(dto) > 0 || dto.heldItem !== 'gun'
-    || dto.throwRemaining > 0 || dto.attackLockRemaining > 0 || dto.meleeRemaining > 0) invalid();
-  return { ...dto, owned, grenades: { ...dto.grenades } };
+    || dto.throwRemaining > 0 || dto.attackLockRemaining > 0 || dto.meleeRemaining > 0
+    || SUPPLY_TYPES.some(type => dto.supplies[type] > 0) || dto.supplyUse !== null) invalid();
+  return { ...dto, owned, grenades: { ...dto.grenades }, supplies: { ...dto.supplies }, supplyUse: dto.supplyUse ? { ...dto.supplyUse } : null };
 }

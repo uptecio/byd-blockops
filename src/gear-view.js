@@ -2,6 +2,7 @@ import { createWeaponModel } from './world.js';
 import { getWeapon } from './weapons.js';
 import { smokeBlocksSight } from './gear-combat.js';
 import { GEAR_BALANCE } from './equipment-catalog.js';
+import { lootItemLabel } from './loot-labels.js';
 
 // Standalone models own their resources; a view's cached templates own theirs.
 export function createKnifeModel(THREE) {
@@ -21,9 +22,7 @@ export function createKnifeModel(THREE) {
 
 const grenadeColours = { frag: '#c68b48', smoke: '#689b79', flash: '#b5c6e8' };
 const itemKey = item => item.kind === 'gun' ? `gun:${item.weaponId}`
-  : item.kind === 'grenade' ? `grenade:${item.grenadeType}` : 'knife';
-const itemLabel = item => item.kind === 'gun' ? getWeapon(item.weaponId).name
-  : item.kind === 'grenade' ? `${item.grenadeType.toUpperCase()} GRENADE` : 'KNIFE';
+  : item.kind === 'grenade' ? `grenade:${item.grenadeType}` : item.kind === 'supply' ? `supply:${item.supplyType}` : 'knife';
 
 export class GearView {
   constructor(THREE, scene) {
@@ -48,6 +47,28 @@ export class GearView {
     let model;
     if (item.kind === 'gun') model = createWeaponModel(THREE, getWeapon(item.weaponId));
     else if (item.kind === 'knife') model = createKnifeModel(THREE);
+    else if (item.kind === 'supply') {
+      model = new THREE.Group(); model.name = lootItemLabel(item);
+      const health = item.supplyType === 'health';
+      const body = this.ownMaterial(new THREE.MeshLambertMaterial({ color: health ? '#e6eee2' : '#2568b5' }));
+      const symbol = this.ownMaterial(new THREE.MeshLambertMaterial({ color: health ? '#238347' : '#d4ebff' }));
+      const addBox = (name, material, size, position) => {
+        const box = new THREE.Mesh(this.box, material); box.name = name;
+        box.scale.set(...size); box.position.set(...position); model.add(box);
+      };
+      addBox('case', body, [.48,.36,.24], [0,0,0]);
+      addBox('handle', symbol, [.2,.055,.1], [0,.2,0]);
+      for (const z of [-.125,.125]) {
+        if (health) {
+          addBox('health-symbol', symbol, [.24,.075,.015], [0,0,z]);
+          addBox('health-symbol-vertical', symbol, [.075,.24,.015], [0,0,z]);
+        } else {
+          addBox('shield-symbol', symbol, [.24,.1,.015], [0,.065,z]);
+          addBox('shield-middle', symbol, [.18,.075,.015], [0,-.02,z]);
+          addBox('shield-tip', symbol, [.08,.065,.015], [0,-.085,z]);
+        }
+      }
+    }
     else {
       model = new THREE.Group(); model.name = `${item.grenadeType} grenade`;
       const material = this.ownMaterial(new THREE.MeshLambertMaterial({ color: grenadeColours[item.grenadeType] }));
@@ -93,8 +114,8 @@ export class GearView {
   }
   sync({ loot = [], projectiles = [], smokes = [] }) {
     if (this.disposed) return;
-    this.reconcile(loot.slice(0, 64), this.loot, record => {
-      const model = new this.THREE.Group(); model.userData.label = itemLabel(record.item);
+    this.reconcile(loot.slice(0, GEAR_BALANCE.maxLoot), this.loot, record => {
+      const model = new this.THREE.Group(); model.userData.label = lootItemLabel(record.item);
       const item = this.template(record.item).clone(); item.position.y = .25;
       item.scale.setScalar(record.item.kind === 'gun' ? .4 : record.item.kind === 'knife' ? .6 : 1);
       model.add(item); const label = this.label(model.userData.label); if (label) model.add(label);

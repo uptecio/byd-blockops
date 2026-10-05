@@ -24,6 +24,8 @@ export const GEAR_BALANCE = Object.freeze({
   dropUnlock: 0.5,
   dropExpiry: 30,
   maxDrops: 48,
+  maxMapLoot: 20,
+  maxLoot: 68,
   maxProjectiles: 32,
   maxSmoke: 16,
 });

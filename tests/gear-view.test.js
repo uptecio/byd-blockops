@@ -25,7 +25,7 @@ const smoke = { id: 'smoke-1', ownerId: 'other', x: 0, y: 1.6, z: -4, radius: 2,
 test('world IDs retain one visual across repeated sync and remove absent or replaced pickups', () => {
   const scene = new THREE.Scene(), view = new GearView(THREE, scene);
   const world = { ...empty(), loot: loot() }; view.sync(world);
-  assert.equal(view.loot.size, 16);
+  assert.equal(view.loot.size, 20);
   for (const item of world.loot) assert.equal(view.loot.get(item.id).userData.id, item.id);
   const item = world.loot[0], first = view.loot.get(item.id), owned = resources(view.group);
   view.sync(world); assert.equal(view.loot.get(item.id), first);
@@ -67,7 +67,7 @@ test('clear removes every entity and disposing a view releases each resource onc
   assert.equal(first.loot.size + first.projectiles.size + first.smokes.size, 0);
   first.dispose(); first.dispose();
   for (const count of counts.values()) assert.equal(count, 1);
-  assert.equal(second.group.parent, scene); assert.equal(second.loot.size, 16); second.dispose();
+  assert.equal(second.group.parent, scene); assert.equal(second.loot.size, 20); second.dispose();
 });
 
 test('smoke uses the shared spherical volume and hides opponent models and labels without blocking rays', () => {
@@ -178,10 +178,31 @@ test('pickup, swing and grenade audio is optional under disabled sound or missin
 
 test('solo map switches and fixture cleanup release gear visuals', () => {
   const game = createHeadlessGame(); game.start('ak47', { bots: 0 });
-  assert.equal(game.gearView.loot.size, 16);
+  assert.equal(game.gearView.loot.size, 20);
   const old = [...game.gearView.loot.values()]; game.loadMap('dust-town');
   assert.equal(game.gearView.loot.size, 0); for (const model of old) assert.equal(model.parent, null);
   cleanupGame(game); assert.equal(game.gearView.group.parent, null);
+});
+
+test('both supply models use distinct cached boxes and all 68 permitted pickups render', () => {
+  const view = new GearView(THREE, new THREE.Scene());
+  const world = { ...empty(), loot: loot() };
+  for (let i = 0; i < 48; i++) world.loot.push({ id: `drop:${i}`, x: 0, y: 0, z: i, item: { kind: 'supply', supplyType: i % 2 ? 'armour' : 'health' } });
+  view.sync(world);
+  assert.equal(view.loot.size, 68);
+  assert.equal(view.loot.get('drop:47').userData.label, 'ARMOUR PACK');
+  const health = view.template({ kind: 'supply', supplyType: 'health' }), armour = view.template({ kind: 'supply', supplyType: 'armour' });
+  assert.notEqual(health, armour);
+  assert.equal(view.template({ kind: 'supply', supplyType: 'health' }), health);
+  assert.ok(health.getObjectByName('health-symbol')); assert.ok(armour.getObjectByName('shield-symbol'));
+  for (const template of [health, armour]) {
+    template.traverse(mesh => { if (mesh.geometry) assert.equal(mesh.geometry.type, 'BoxGeometry'); });
+    const bounds = new THREE.Box3().setFromObject(template);
+    assert.ok(bounds.max.x - bounds.min.x <= .7 && bounds.max.z - bounds.min.z <= .7);
+  }
+  const counts = new Map();
+  for (const resource of resources(view.group)) { counts.set(resource, 0); resource.addEventListener('dispose', () => counts.set(resource, counts.get(resource) + 1)); }
+  view.dispose(); view.dispose(); assert.ok([...counts.values()].every(n => n === 1));
 });
 
 test('winning solo knife swing drains presentation once without advancing pending grenade damage', t => {

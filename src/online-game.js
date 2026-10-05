@@ -3,6 +3,7 @@ import { createAvatarModel } from './avatar.js';
 import { disposeModel } from './game.js';
 import { equipmentDTO, equipmentFromDTO } from './equipment.js';
 import { getWeapon } from './weapons.js';
+import { lootItemLabel } from './loot-labels.js';
 
 const neutral = (yaw, pitch, lifeId) => ({ type: 'input', lifeId, x: 0, y: 0, yaw, pitch, fire: false, firePressed: false, jump: false, reload: false, zoom: false });
 const emptyPending = () => ({ firePressed: false, jump: false, reload: false });
@@ -112,7 +113,7 @@ export class OnlineArena {
         game.audio.kill();
         this.onToast(room.modeId === 'ffa' ? `+1 ELIMINATION · ${own.kills} / 15` : room.modeId === 'tdm' ? `+1 ELIMINATION · ${own.teamId.toUpperCase()} ${room.teamScores[own.teamId]} / 30` : '+1 ELIMINATION');
       } else if (event.type === 'pickup' && event.playerId === this.id) {
-        const label = event.item.kind === 'gun' ? getWeapon(event.item.weaponId).name : event.item.kind === 'knife' ? 'KNIFE' : `${event.item.grenadeType.toUpperCase()} GRENADE`;
+        const label = lootItemLabel(event.item);
         this.onToast(`PICKED UP ${label}`);
         game.audio.pickup?.();
       } else if (['melee', 'grenade-throw', 'grenade-burst'].includes(event.type)) {

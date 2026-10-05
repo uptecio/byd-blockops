@@ -5,8 +5,9 @@ import { GRENADE_TYPES, GEAR_BALANCE } from '../src/equipment-catalog.js';
 import {
   createEquipment, equipGun, pickupEquipment, setHeldItem, selectGrenade,
   tickEquipment, consumeGrenade, beginMelee, deathItems, clearEquipment,
-  resetEquipment, equipmentDTO, equipmentFromDTO,
+  resetEquipment, equipmentDTO, equipmentFromDTO, refillOwnedAmmo,
 } from '../src/equipment.js';
+import { startSupplyUse, advanceSupplyUse } from '../src/supplies.js';
 import { createGearActor } from './helpers/equipment-fixture.js';
 
 function unchanged(e, action) {
@@ -17,6 +18,88 @@ function unchanged(e, action) {
   assert.ok(result.reason.length > 0);
   assert.deepEqual(equipmentDTO(e), before);
 }
+
+test('supplies stack independently without equipping', () => {
+  const e = createEquipment('m4a1');
+  for (let i = 0; i < 3; i++) assert.equal(pickupEquipment(e, { kind: 'supply', supplyType: 'health' }).ok, true);
+  unchanged(e, () => pickupEquipment(e, { kind: 'supply', supplyType: 'health' }));
+  assert.equal(pickupEquipment(e, { kind: 'supply', supplyType: 'armour' }).ok, true);
+  assert.deepEqual(e.supplies, { health: 3, armour: 1 });
+  assert.equal(e.activeGunId, 'm4a1'); assert.equal(e.startingGunRemoved, false);
+  assert.equal(deathItems(e).filter(i => i.kind === 'supply').length, 4);
+  for (const item of [{ kind: 'supply', supplyType: 'gas' }, { kind: 'supply', supplyType: 'health', count: 2 }, { kind: 'supply' }]) {
+    unchanged(e, () => pickupEquipment(e, item));
+  }
+});
+
+test('strict detached supply DTOs', () => {
+  const e = createEquipment('m4a1'), v = { health: 10, armour: 0 }, live = { active: true, alive: true };
+  pickupEquipment(e, { kind: 'supply', supplyType: 'health' });
+  startSupplyUse(e, v, 'health', live); advanceSupplyUse(e, v, 2.5, live);
+  const dto = equipmentDTO(e), copy = equipmentFromDTO(dto);
+  assert.deepEqual(copy.supplyUse, { type: 'health', remaining: 2.5 });
+  dto.supplies.health = 3; dto.supplyUse.remaining = 1;
+  copy.supplies.health = 2; copy.supplyUse.remaining = .5;
+  assert.equal(e.supplies.health, 1); assert.equal(e.supplyUse.remaining, 2.5);
+  const changes = [
+    d => { delete d.supplies; }, d => { delete d.supplyUse; }, d => { delete d.supplies.armour; },
+    d => { d.supplies.gas = 1; }, d => { d.supplyUse.extra = 1; }, d => { delete d.supplyUse.type; },
+    d => { d.supplyUse.type = 'gas'; }, d => { d.supplies.health = 0; },
+    ...[-1, 1.5, 4, NaN, '1'].map(n => d => { d.supplies.armour = n; }),
+    ...[0, -1, 5.001, NaN, Infinity, '5'].map(n => d => { d.supplyUse.remaining = n; }),
+    d => { d.supplies = []; }, d => { d.supplyUse = []; },
+  ];
+  for (const change of changes) {
+    const invalid = equipmentDTO(e); change(invalid);
+    assert.throws(() => equipmentFromDTO(invalid), TypeError);
+  }
+});
+
+test('empty inventory has no supplies/use and reset grants none', () => {
+  const e = createEquipment('m4a1');
+  pickupEquipment(e, { kind: 'supply', supplyType: 'health' });
+  startSupplyUse(e, { health: 10, armour: 0 }, 'health', { active: true, alive: true });
+  clearEquipment(e);
+  assert.deepEqual(e.supplies, { health: 0, armour: 0 }); assert.equal(e.supplyUse, null);
+  const dead = equipmentDTO(e);
+  assert.doesNotThrow(() => equipmentFromDTO(dead));
+  assert.throws(() => equipmentFromDTO({ ...dead, supplies: { health: 1, armour: 0 } }), TypeError);
+  assert.throws(() => equipmentFromDTO({ ...dead, supplyUse: { type: 'health', remaining: 1 } }), TypeError);
+  unchanged(e, () => pickupEquipment(e, { kind: 'supply', supplyType: 'health' }));
+  resetEquipment(e);
+  assert.deepEqual(e.supplies, { health: 0, armour: 0 }); assert.equal(e.supplyUse, null);
+});
+
+test('successful selection cancels, denied selection preserves supply use', () => {
+  for (const kind of ['gun', 'knife', 'grenade']) {
+    const e = createEquipment('m4a1');
+    pickupEquipment(e, { kind: 'supply', supplyType: 'health' });
+    startSupplyUse(e, { health: 50, armour: 0 }, 'health', { active: true, alive: true });
+    const use = e.supplyUse;
+    if (kind === 'gun') {
+      unchanged(e, () => equipGun(e, 'ak47', { source: 'inventory' }));
+      assert.equal(e.supplyUse, use);
+      assert.equal(equipGun(e, 'ak47', { source: 'armory' }).ok, true);
+    } else if (kind === 'knife') {
+      unchanged(e, () => setHeldItem(e, 'knife'));
+      pickupEquipment(e, { kind: 'knife' }); assert.equal(e.supplyUse, use);
+      assert.equal(setHeldItem(e, 'knife').ok, true);
+    } else {
+      unchanged(e, () => selectGrenade(e, 'gas')); assert.equal(e.supplyUse, use);
+      assert.equal(selectGrenade(e, 'frag').ok, true);
+    }
+    assert.equal(e.supplyUse, null); assert.equal(e.supplies.health, 1);
+  }
+});
+
+test('refill preserves supplies/use and equipment ticking never advances use', () => {
+  const e = createEquipment('m4a1');
+  pickupEquipment(e, { kind: 'supply', supplyType: 'armour' });
+  startSupplyUse(e, { health: 100, armour: 0 }, 'armour', { active: true, alive: true });
+  const use = e.supplyUse;
+  tickEquipment(e, 10); refillOwnedAmmo(e);
+  assert.equal(e.supplyUse, use); assert.equal(use.remaining, 5); assert.equal(e.supplies.armour, 1);
+});
 
 test('original gun needs loot after the first replacement and resets next life', () => {
   const e = createEquipment('ak47');

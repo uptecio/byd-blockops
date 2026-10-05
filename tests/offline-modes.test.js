@@ -18,7 +18,7 @@ test('all 24 combinations start cleanly on one reused production game', () => {
       assert.equal(game.getMatchView().modeId, modeId);
       assert.equal(game.getMatchView().players.length, 5);
       assert.equal(game.effects.length, 0);
-      assert.equal(game.lootState.slots.length, 16);
+      assert.equal(game.lootState.slots.length, 20);
       assert.equal(game.lootState.drops.length, 0);
       assert.equal(game.gearCombatState.projectiles.length, 0);
       assert.equal(game.gearCombatState.smokes.length, 0);

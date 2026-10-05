@@ -39,7 +39,7 @@ test('Solo first update advances bots and the match without Object.hasOwn', t =>
   assert.ok(game.bots[0].intent.goal, 'The first live bot chooses its movement goal');
   assert.ok(game.modeState.timeLeft < remaining, 'The first simulation step reaches the match clock');
   assert.equal(game.player.equipment.owned.get('m4a1').ammo, 30);
-  assert.equal(game.gearView.loot.size, 16);
+  assert.equal(game.gearView.loot.size, 20);
 });
 
 test('Solo HUD refresh replaces equipment lists without Element.replaceChildren', t => {

@@ -28,8 +28,23 @@ test('gear world rejects duplicate IDs, unknown nested items, nonfinite values a
     const world = {loot:[],projectiles:[copy(projectile)],smokes:[copy(smoke)]}; mutate(world); assert.equal(protocol.validGearWorld(world), false);
   }
   const item = copy(dto.loot[0]);
-  assert.equal(protocol.validGearWorld({loot:Array.from({length:17}, (_, i) => ({...item,id:`m${i}`})),projectiles:[],smokes:[]}), false);
+  assert.equal(protocol.validGearWorld({loot:Array.from({length:21}, (_, i) => ({...item,id:`m${i}`})),projectiles:[],smokes:[]}), false);
   assert.equal(protocol.validGearWorld({loot:Array.from({length:49}, (_, i) => ({...item,id:`d${i}`,source:'drop',expiresRemaining:30})),projectiles:[],smokes:[]}), false);
+});
+
+test('supply worlds and pickup events accept exact types and enforce 20 map plus 48 drops', () => {
+  const { manager, room } = fixture(); const world = manager.snapshot(room).gear;
+  const pack = world.loot.find(p => p.item.supplyType === 'health');
+  assert.ok(pack);
+  world.loot.push(...Array.from({ length: 48 }, (_, i) => ({ ...copy(pack), id: `d${i}`, source: 'drop', expiresRemaining: 30, availableRemaining: .5 })));
+  assert.equal(world.loot.length, 68); assert.equal(protocol.validGearWorld(world), true);
+  const event = { id: 1, type: 'pickup', playerId: 'p1', itemId: pack.id, item: pack.item };
+  assert.equal(protocol.validGearEvent(event), true);
+  for (const item of [{ kind: 'supply' }, { kind: 'supply', supplyType: 'unknown' }, { kind: 'supply', supplyType: 'health', amount: 100 }]) {
+    assert.equal(protocol.validGearWorld({ ...world, loot: [{ ...pack, item }] }), false);
+    assert.equal(protocol.validGearEvent({ ...event, item }), false);
+  }
+  world.loot.push({ ...copy(pack), id: 'extra' }); assert.equal(protocol.validGearWorld(world), false);
 });
 
 test('equipment actions and gear events require exact catalog payloads and positive safe identities', () => {

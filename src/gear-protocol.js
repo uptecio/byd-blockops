@@ -2,6 +2,7 @@ import { equipmentFromDTO } from './equipment.js';
 import { WEAPONS, TOTAL_AMMO } from './weapons.js';
 import { GEAR_BALANCE, GRENADE_TYPES } from './equipment-catalog.js';
 import { hasOwn } from './has-own.js';
+import { SUPPLY_TYPES } from './supplies.js';
 
 const guns = new Map(WEAPONS.map(gun => [gun.id, gun]));
 const id = value => typeof value === 'string' && value.trim().length > 0 && value.length <= 128;
@@ -21,7 +22,8 @@ function validItem(item) {
       && item.ammo <= gun.magazine && count(item.reserve) && item.ammo + item.reserve <= TOTAL_AMMO;
   }
   return (item?.kind === 'knife' && keys(item, ['kind']))
-    || (item?.kind === 'grenade' && keys(item, ['kind', 'grenadeType']) && grenade(item.grenadeType));
+    || (item?.kind === 'grenade' && keys(item, ['kind', 'grenadeType']) && grenade(item.grenadeType))
+    || (item?.kind === 'supply' && keys(item, ['kind', 'supplyType']) && SUPPLY_TYPES.includes(item.supplyType));
 }
 
 export function validEquipmentSnapshot(value, ownPlayer) {
@@ -42,7 +44,7 @@ export function validEquipmentSnapshot(value, ownPlayer) {
 
 export function validGearWorld(value) {
   if (!keys(value, ['loot', 'projectiles', 'smokes']) || ![value.loot, value.projectiles, value.smokes].every(Array.isArray)
-    || value.loot.length > 64 || value.projectiles.length > 32 || value.smokes.length > 16) return false;
+    || value.loot.length > GEAR_BALANCE.maxLoot || value.projectiles.length > GEAR_BALANCE.maxProjectiles || value.smokes.length > GEAR_BALANCE.maxSmoke) return false;
   const ids = new Set();
   const unique = record => id(record?.id) && !ids.has(record.id) && !!ids.add(record.id);
   let maps = 0, drops = 0;
@@ -54,7 +56,7 @@ export function validGearWorld(value) {
     else if (record.source === 'drop') { drops++; if (!timer(record.expiresRemaining, GEAR_BALANCE.dropExpiry) || record.expiresRemaining === 0) return false; }
     else return false;
   }
-  if (maps > 16 || drops > 48) return false;
+  if (maps > GEAR_BALANCE.maxMapLoot || drops > GEAR_BALANCE.maxDrops) return false;
   for (const record of value.projectiles) {
     if (!keys(record, ['id', 'grenadeType', 'ownerId', 'ownerTeamId', 'ownerLifeId', 'x', 'y', 'z', 'vx', 'vy', 'vz', 'fuseRemaining'])
       || !unique(record) || !grenade(record.grenadeType) || !id(record.ownerId) || !positive(record.ownerLifeId)

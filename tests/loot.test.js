@@ -24,12 +24,12 @@ const addDrop = (state, actorId = 'victim', lifeId = 1, options = {}) => addDeat
 });
 
 for (const map of MAPS) {
-  test(`${map.id} authors sixteen immutable safe reachable locations`, () => {
+  test(`${map.id} authors twenty immutable safe reachable locations`, () => {
     assert.ok(LOOT_SPAWNS, 'authored locations must exist');
     const locations = LOOT_SPAWNS[map.id];
-    assert.equal(locations.length, 16);
-    assert.equal(new Set(locations.map(point => point.id)).size, 16);
-    assert.deepEqual(['gun', 'knife', 'grenade'].map(kind => locations.filter(point => point.kind === kind).length), [8, 2, 6]);
+    assert.equal(locations.length, 20);
+    assert.equal(new Set(locations.map(point => point.id)).size, 20);
+    assert.deepEqual(['gun', 'knife', 'grenade', 'supply'].map(kind => locations.filter(point => point.kind === kind).length), [8, 2, 6, 4]);
     for (const type of ['frag', 'smoke', 'flash']) assert.equal(locations.filter(point => point.grenadeType === type).length, 2);
     assert.ok(Object.isFrozen(LOOT_SPAWNS) && Object.isFrozen(locations));
     const navigation = createNavigation(map);
@@ -47,7 +47,7 @@ test('seeded assignments are reproducible, fresh and detached from DTO consumers
   const state = create();
   assert.deepEqual(lootDTO(state), lootDTO(create()));
   assert.notDeepEqual(mapGuns(state), mapGuns(create({ seed: 2 })));
-  assert.equal(lootDTO(state).length, 16);
+  assert.equal(lootDTO(state).length, 20);
   for (const record of mapGuns(state)) assert.equal(record.item.ammo + record.item.reserve, 500);
   const dto = lootDTO(state);
   dto[0].item.weaponId = 'tampered';
@@ -223,7 +223,7 @@ test('oldest drop eviction caps drops at forty-eight without evicting map slots'
   }
   assert.equal(drops(state).length, 48);
   assert.ok(!drops(state).some(record => record.id === firstId));
-  assert.equal(lootDTO(state).filter(record => record.source === 'map').length, 16);
+  assert.equal(lootDTO(state).filter(record => record.source === 'map').length, 20);
 });
 
 test('drop spread stays grounded clear and on the origin side of cover', () => {

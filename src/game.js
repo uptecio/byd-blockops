@@ -18,6 +18,7 @@ import { GEAR_BALANCE } from './equipment-catalog.js';
 import { GearView, createKnifeModel } from './gear-view.js';
 import { hasOwn } from './has-own.js';
 import { ZombieRuntime } from './zombie-runtime.js';
+import { lootItemLabel } from './loot-labels.js';
 
 export function disposeModel(model) {
   if (!model) return;
@@ -327,8 +328,7 @@ export class ArenaGame {
         .map(event => ({ ...event, id: ++this.gearEventId }));
       this.pickupEvents.push(...pickups); this.gearEvents.push(...pickups);
       for (const event of pickups) if (event.playerId === 'local') this.audio.pickup?.();
-      for (const event of pickups) if (event.playerId === 'local') this.events.onToast(event.item.kind === 'gun'
-        ? `PICKED UP ${getWeapon(event.item.weaponId).name}` : event.item.kind === 'knife' ? 'PICKED UP KNIFE' : `PICKED UP ${event.item.grenadeType.toUpperCase()} GRENADE`);
+      for (const event of pickups) if (event.playerId === 'local') this.events.onToast(`PICKED UP ${lootItemLabel(event.item)}`);
     }
     this.shotFlash = Math.max(0, this.shotFlash - dt); this.muzzle.visible = this.heldItem === 'gun' && this.shotFlash > 0 && this.weaponModel.visible;
     this.hitFlash = Math.max(0, this.hitFlash - dt); this.damageFlash = Math.max(0, this.damageFlash - dt);

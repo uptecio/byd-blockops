@@ -4,6 +4,7 @@ import { pickupEquipment } from './equipment.js';
 import { WEAPONS, createWeaponState } from './weapons.js';
 import { getMap } from './maps.js';
 import { canOccupy, hasLineOfSight } from './collision.js';
+import { SUPPLY_BALANCE } from './supplies.js';
 
 const gunIds = new Set(WEAPONS.map(gun => gun.id));
 // Drops must fit wherever the smallest runtime actor (solo human) can stand.
@@ -44,7 +45,9 @@ export function createLootState({ mapId, seed, startingGunIds = [] }) {
     slots: LOOT_SPAWNS[mapId].map(location => ({
       id: location.id, x: location.x, y: 0, z: location.z,
       item: location.kind === 'gun' ? freshGun(assignments[gunIndex++])
-        : location.kind === 'knife' ? { kind: 'knife' } : { kind: 'grenade', grenadeType: location.grenadeType },
+        : location.kind === 'knife' ? { kind: 'knife' }
+          : location.kind === 'supply' ? { kind: 'supply', supplyType: location.supplyType }
+            : { kind: 'grenade', grenadeType: location.grenadeType },
       source: 'map', availableRemaining: 0, expiresRemaining: null, respawnRemaining: 0, present: true,
     })),
     drops: [], nextDropId: 1, lastDroppedLife: new Map(),
@@ -92,6 +95,7 @@ function eligible(actor, record, solids) {
   if (!equipment?.owned.has(equipment.activeGunId)) return false;
   if (record.item.kind === 'gun') return !equipment.owned.has(record.item.weaponId);
   if (record.item.kind === 'knife') return !equipment.knife;
+  if (record.item.kind === 'supply') return equipment.supplies[record.item.supplyType] < SUPPLY_BALANCE.capacity;
   return GRENADE_TYPES.reduce((total, type) => total + equipment.grenades[type], 0) < GEAR_BALANCE.grenadeCapacity;
 }
 

@@ -25,7 +25,7 @@ test('eight real sockets bound saturated inventories/packets and disconnect a st
         client.latest = packet;
         bytes.push(data.length);
         const world = packet.room.gear;
-        if (world && (world.loot.length > 64 || world.projectiles.length > 32 || world.smokes.length + world.projectiles.filter(p => p.grenadeType === 'smoke').length > 16)) failures.push('entity bound exceeded');
+        if (world && (world.loot.length > 68 || world.projectiles.length > 32 || world.smokes.length + world.projectiles.filter(p => p.grenadeType === 'smoke').length > 16)) failures.push('entity bound exceeded');
         if (data.length >= 65536) failures.push(`packet bound exceeded: ${data.length}`);
         if (packet.equipment?.equipment.owned.length > 28) failures.push('inventory bound exceeded');
       }
@@ -69,8 +69,9 @@ test('eight real sockets bound saturated inventories/packets and disconnect a st
   stalled.socket._socket.resume();
   await until(() => stalled.socket.readyState === WebSocket.CLOSED, 'stalled owned socket closes');
   assert.deepEqual(failures, [], 'entity, inventory and packet bounds remain intact under real-socket saturation');
-  const result = { peers: 8, carriedGunsPerPeer: clients.map(client => client.latest.equipment.equipment.owned.length), observations: bytes.length, typicalSerializedBytes: typical, maximumSerializedBytes: Math.max(...bytes), bounds: { loot: 64, projectiles: 32, smokeAndFlights: 16, packetBytes: 65536 }, stalledReaderDisconnected: true };
-  await mkdir('artifacts/loot-review', { recursive: true });
-  await writeFile('artifacts/loot-review/saturation.json', JSON.stringify(result, null, 2));
+  const result = { peers: 8, carriedGunsPerPeer: clients.map(client => client.latest.equipment.equipment.owned.length), observations: bytes.length, typicalSerializedBytes: typical, maximumSerializedBytes: Math.max(...bytes), bounds: { loot: 68, projectiles: 32, smokeAndFlights: 16, packetBytes: 65536 }, stalledReaderDisconnected: true };
+  const output = process.env.LOOT_ARTIFACTS || 'artifacts/loot-review';
+  await mkdir(output, { recursive: true });
+  await writeFile(`${output}/saturation.json`, JSON.stringify(result, null, 2));
   console.log(JSON.stringify(result));
 });

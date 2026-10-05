@@ -52,8 +52,28 @@ for (const map of MAPS) {
   });
 
   test(`${map.id} gun redistribution preserves every knife and grenade location`, () => {
-    const other = LOOT_SPAWNS[map.id].filter(point => point.kind !== 'gun');
+    const other = LOOT_SPAWNS[map.id].filter(point => ['knife', 'grenade'].includes(point.kind));
     assert.deepEqual(other.map(p => [p.x, p.z]), unchanged[map.id]);
     assert.deepEqual(other.map(p => p.id), ['knife:1','knife:2','frag:1','frag:2','smoke:1','smoke:2','flash:1','flash:2'].map(id => `map:${map.id}:${id}`));
+  });
+
+  test(`${map.id} supplies are spread rotated pairs with fair walking access`, () => {
+    const navigation = createNavigation(map), slots = LOOT_SPAWNS[map.id];
+    for (const type of ['health', 'armour']) {
+      const supplies = slots.filter(p => p.supplyType === type);
+      assert.equal(supplies.length, 2);
+      assert.deepEqual([supplies[1].x, supplies[1].z], [-supplies[0].x, -supplies[0].z]);
+      assert.ok(Math.hypot(supplies[0].x - supplies[1].x, supplies[0].z - supplies[1].z) >= 10);
+      for (const p of supplies) {
+        assert.ok(p.x >= map.bounds.min + .42 && p.x <= map.bounds.max - .42);
+        assert.ok(p.z >= map.bounds.min + .42 && p.z <= map.bounds.max - .42);
+        for (const other of slots.filter(s => s !== p)) assert.ok(Math.hypot(p.x - other.x, p.z - other.z) >= 3, `${p.id} near ${other.id}`);
+        for (const start of [map.playerSpawn, ...map.spawns, ...map.teamSpawns.red, ...map.teamSpawns.blue]) assert.ok(navigation.reachable(start, p));
+      }
+      const distances = team => supplies.map(p => Math.min(...map.teamSpawns[team].map(start => walkingDistance(navigation, start, p)))).sort((a,b) => a-b);
+      const red = distances('red'), blue = distances('blue');
+      assert.ok(red.every((distance, i) => Math.abs(distance - blue[i]) <= 4), JSON.stringify({ type, red, blue }));
+    }
+    assert.deepEqual(slots.filter(p => p.kind === 'gun').map(p => [p.x,p.z]), [[-10,18],[10,-18],[10,18],[-10,-18],[-18,-4],[18,4],[-2,6],[2,-6]]);
   });
 }
