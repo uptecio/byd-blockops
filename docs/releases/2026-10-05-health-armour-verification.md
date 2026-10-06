@@ -1,6 +1,32 @@
-# Health and armour 0.6.0 candidate verification
+# Health and armour 0.6.0 release verification
 
-Status: **verified candidate; public deployment awaits a coordinated maintenance window**. The public browser remains 0.5.1. Physical BYD testing remains a user check, while parked.
+Status: **published and verified** (2026-10-06). The browser now serves 0.6.0 health and armour. Physical BYD testing remains a user check, while parked. The original candidate evidence below is retained; the live-release section records the replacement URL and APK.
+
+## Live release — 2026-10-06
+
+- Browser/server: https://myth-referring-tablets-venture.trycloudflare.com
+- New APK: `artifacts/health-armour-live-Fga648/block-ops-v0.6.0-health-armour-online.apk` (0.6.0 / code 8 / protocol 4). This supersedes the earlier candidate's expired bundled server address; the old APK is retained, not overwritten.
+- Final handoff: [block-ops-v0.6.0-health-armour-online.apk](../../artifacts/block-ops-v0.6.0-health-armour-online.apk), copied exclusively and verified byte-identical. Use this file, not the older `block-ops-v0.6.0-health-armour.apk` candidate.
+- APK SHA-256: `43114dafc4932c901848688c876f1ab64b26733ededcd4807db75177f203d4df`.
+- New `game.js` SHA-256: `b75c515d2b7f70ae8e32ecde1fcb2a6dadf3476067d0f78668c35b1deae87eda`. The other three asset hashes in the candidate table remain identical. The entire new bundle is byte-identical after replacing exactly one default-URL string; no gameplay changed.
+- Signing certificate still matches retained 0.5.1 and the candidate: `6b2d84eb4133168fec0850ed710acffa01d8399b75c8410621b2d0ce9881cb49`. Package smoke passed 3/3 and same-package `install -r` succeeded on the owned emulator.
+- Evidence: `artifacts/health-armour-live-Fga648`; immutable served source/assets: its `release-source` directory (archive of 6e77bd9 plus the one explicit `game-server.json` URL change and copied new dist). Rollback: its `rollback-source`, verified equal to the old running `artifacts/release-v0.5.1-Tn1Hla` before replacement.
+
+The user explicitly confirmed empty lobbies and the coordinated maintenance window. Fresh discovery showed old app PID 1247182 still running on 127.0.0.1:4185 with rooms=0, but the historical quick tunnel process was absent and its hostname no longer resolved. No historical tunnel PID was signalled. A new task-owned tunnel was created, PID 21648, to the same local port. After exact cwd/command/environment and immediate empty-room checks, only the old app process was replaced. New server PID 22931 serves the frozen release snapshot. These PIDs are historical evidence, not future cleanup authority; revalidate before signalling anything.
+
+`cutover.log` records successful port-0 candidate checks, old local/public asset equality, and new local/public health, no-store headers and equality of all four assets. The rollback copy remains available; no rollback was needed at the initial cutover gate.
+
+Post-cutover public Playwright CLI performed genuine walking pickups, armour cancellation without consumption, then successful use/consumption to armour 50. Passive active-use duration was 4.9832 simulation seconds. No page exception occurred; the inspected screenshot `public-cli-using.png` shows the world and numbered health/armour inventory. Console messages were only the known optional favicon404 and software-render readback warnings. The named CLI session was closed.
+
+Fresh units passed **740/740**, with no skips (`unit-final.log`). `TEST_GAME_URL=<new-public-origin> npm run test:multiplayer` passed with two independent browser clients (`public-multiplayer.log`): join/create, remote-start menu/background/Home handling, authoritative map/mode/skin/input/ammo/damage/kill/respawn state, Home cancellation and host transfer. Its hosted branch deliberately skips local accelerated round-end/departed-winner tests and later TDM/CTF gameplay; those are covered by the prior local matrix and the separate native all-mode run, not claimed from this hosted command's overly broad final log line. The verification-only helper made no code changes or server mutations.
+
+Existing installs retain a saved server address across APK upgrades. If online play still points to the expired URL, open **Online Friends → Server settings → Game server**, replace it with the new browser/server URL above, then create/join. Fresh installs use the new bundled default. Rebuilding at the same version/code preserves compatibility; the distinct filename and SHA-256 identify this address-refresh build. This temporary route still requires the computer, server and tunnel to stay online; no permanent hosting or automatic tunnel recovery is claimed.
+
+The final native command exited 0 (`native-online.log`): actual bundled default address without `GAME_TEST_SERVER_URL`, protocol4 secure WebSockets, FFA/TDM/CTF, supply pickup/use/menu/armour, FFA health/damage/death drops, equipment, distinct skins/teams, actual flag capture, Home/Back/background/foreground and guest remote-start pause/explicit Resume. Literal protocol3 clients received update guidance. Only the expected WSS endpoint was contacted, with no remote HTTP assets or JavaScript/CSP errors. Owned room departure and forwarding cleanup passed. The native CTF screenshot was inspected.
+
+Final `verify-delivery.mjs` checks pass: exact live server/tunnel identity, local/public rooms0 and no-store, all four served bytes equal frozen/package bytes, URL-only difference from the fully tested candidate, matching retained signing certificate, and final handoff package 3/3. Evidence is in `delivery-final.log` and `delivery-manifest.json`. No rollback was required. After checking the owned emulator AVD/registry/process and empty forwarding list, only emulator5582 was stopped; its data is retained. No emulator or9228 listener remains. Live server22931 and tunnel21648 remain running; no players were kicked.
+
+Only the scoped server-default and release documentation/plan are committed. No push, merge, branch deletion or unrelated-file change was performed. Final execution evidence is retained at `artifacts/health-armour-live-Fga648/execution-evidence-final`, with the active ledger preserved for audit. Code integration remains the user's choice.
 
 ## Scope
 
@@ -10,11 +36,11 @@ Solo FFA/TDM/CTF, Zombies and online FFA/TDM/CTF are covered. Bots collect suppl
 
 Minimap, aim assist, gun effects and XP/new cosmetics remain later upgrades; this is not completion of all six recommendations.
 
-## Candidate identity
+## Original candidate identity (retained evidence)
 
 - Implementation base: `0591340f2c575a7bedb61aa78b8db8f1201f8744`.
 - Tasks 1–6 source/test commit: `eb0c4d6ffce4880aed4d3140366692c4a1e2ec90`.
-- Final product/test source: `17cda6f0231d7b99eb398a963a490eb3fb58aee3`; subsequent changes are documentation only. Only native/configuration test files changed after eb0c4d6; product bytes did not.
+- Final candidate product/test source: `17cda6f0231d7b99eb398a963a490eb3fb58aee3`; subsequent candidate changes were documentation only. Only native/configuration test files changed after eb0c4d6; candidate product bytes did not. The live release above subsequently refreshes only the default server URL.
 - Evidence root: `artifacts/health-armour-Jwzb4x`.
 - Frozen browser bytes: `artifacts/health-armour-Jwzb4x/dist`.
 - APK: `artifacts/health-armour-Jwzb4x/block-ops-v0.6.0-health-armour.apk`.
@@ -99,10 +125,11 @@ Additional evidence: `signer-final.log`, `accepted-source-check.log`, `accepted-
 7. The reviewer deferred physical BYD performance: require a parked-device test; device-specific rendering/input issues may remain despite emulator success.
 8. The reviewer deferred the other four roadmap features: keep them outside this approved feature; delivery expectations for those upgrades remain to be agreed.
 9. The reviewer excluded unrelated dirty files: preserve and do not stage them; unrelated problems remain outside this verification.
+10. The old temporary tunnel vanished before the authorised release: create a new temporary route and rebuild only the bundled default, retaining old artifacts and version/code under a distinct filename/hash. Cost: saved addresses require manual updating and the temporary URL can expire again.
 
 Deferred minor findings: none. The one Important review finding is fixed and verified red→green; no product-code change resulted from final review.
 
-## Release boundary and limitations
+## Original candidate release boundary (historical)
 
 Read-only discovery at 2026-10-05 20:35:54 AWST found the public 0.5.1 server at `artifacts/release-v0.5.1-Tn1Hla`, PID 1247182, 127.0.0.1:4185, behind existing tunnel PID 859138. Local/public health returned rooms=0 and no-store; browser footer remained `v0.5.1 SOLO ZOMBIES`. No live state was changed. The server has no admission/drain gate, so an empty check alone cannot prevent a new join racing a restart. Publishing requires a user-coordinated maintenance window; do not kick players or invent an admin API.
 
