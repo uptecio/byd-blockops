@@ -38,7 +38,7 @@ export class OnlineArena {
     this.id = id; this.running = true; this.suspended = false; this.endReported = false;
     this.lastEvent = room.events.reduce((maximum, event) => Math.max(maximum, event.id), -1);
     this.sendTimer = 0; this.hudTimer = 0; this.previousRespawn = own.respawnRemaining;
-    this.game.start(own.weaponId, { ...settings, mapId: room.mapId, modeId: room.modeId, skinId: own.skinId, bots: 0, progressionSource: 'online' }); this.game.active = false;
+    this.game.start(own.weaponId, { ...settings, mapId: room.mapId, modeId: room.modeId, skinId: own.skinId, finishId: own.finishId, bots: 0, progressionSource: 'online' }); this.game.active = false;
     this.game.lootState = null;
     this.game.yaw = own.yaw; this.game.pitch = own.pitch;
     Object.assign(this.game.player, { x: own.x, z: own.z, jump: own.y });
@@ -51,7 +51,7 @@ export class OnlineArena {
     const equipment = equipmentFromDTO(room.selfEquipment.equipment);
     const previousEquipment = game.player.equipment, previousUse = previousEquipment?.supplyUse;
     const lifeChanged = game.player.lifeId !== own.lifeId;
-    const roundChanged = this.room && (this.room.phase !== room.phase || this.room.mapId !== room.mapId || this.room.modeId !== room.modeId);
+    const roundChanged = this.room && (this.room.roundId !== room.roundId || this.room.phase !== room.phase || this.room.mapId !== room.mapId || this.room.modeId !== room.modeId);
     const useChanged = previousUse?.type !== equipment.supplyUse?.type
       || (previousUse && equipment.supplyUse && equipment.supplyUse.remaining > previousUse.remaining + 1e-8);
     if (useChanged) { game.clearSupplyCombat(); this.pending.firePressed = this.pending.reload = false; }
@@ -64,7 +64,7 @@ export class OnlineArena {
       for (const remote of this.remotes.values()) disposeModel(remote.model);
       this.remotes.clear(); game.loadMap(room.mapId); initial = true;
     }
-    Object.assign(game.settings, { mapId: room.mapId, modeId: room.modeId, skinId: own.skinId });
+    Object.assign(game.settings, { mapId: room.mapId, modeId: room.modeId, skinId: own.skinId, finishId: own.finishId });
     this.room = room;
     this.target = { x: own.x, z: own.z, y: own.y };
     const respawned = this.previousRespawn > 0 && own.respawnRemaining === 0;
@@ -75,7 +75,7 @@ export class OnlineArena {
     if (own.health < game.player.health || own.armour < game.player.armour) game.damageFlash = .3;
     if (own.respawnRemaining > 0 && this.previousRespawn <= 0) { game.input.clear(); this.pending = emptyPending(); this.onToast('ELIMINATED · RESPAWNING'); }
     this.previousRespawn = own.respawnRemaining;
-    Object.assign(game.player, { id: own.id, lifeId: own.lifeId, name: own.name, teamId: own.teamId, skinId: own.skinId, pendingSkinId: own.pendingSkinId, health: own.health, armour: own.armour, dead: own.respawnRemaining, protected: own.protectedRemaining, flashRemaining: own.flashRemaining, equipment });
+    Object.assign(game.player, { id: own.id, lifeId: own.lifeId, name: own.name, teamId: own.teamId, skinId: own.skinId, pendingSkinId: own.pendingSkinId, finishId: own.finishId, pendingFinishId: own.pendingFinishId, health: own.health, armour: own.armour, dead: own.respawnRemaining, protected: own.protectedRemaining, flashRemaining: own.flashRemaining, equipment });
     game.matchView = {
       mapId: room.mapId, modeId: room.modeId, timeLeft: room.timeLeft, ended: room.phase === 'ended',
       winnerId: room.winnerId, winnerName: room.winnerName, winnerTeamId: room.winnerTeamId,
@@ -98,7 +98,7 @@ export class OnlineArena {
       if (player.id === this.id) continue;
       present.add(player.id);
       let remote = this.remotes.get(player.id);
-      if (!remote || remote.model.userData.skinId !== player.skinId || remote.model.userData.teamId !== player.teamId || remote.model.userData.weaponId !== player.weaponId || (remote.model.userData.heldItem ?? 'gun') !== player.heldItem || remote.name !== player.name) {
+      if (!remote || remote.model.userData.skinId !== player.skinId || remote.model.userData.teamId !== player.teamId || remote.model.userData.weaponId !== player.weaponId || (remote.model.userData.finishId ?? 'standard') !== player.finishId || (remote.model.userData.heldItem ?? 'gun') !== player.heldItem || remote.name !== player.name) {
         disposeModel(remote?.model);
         const model = createAvatarModel(THREE, player); game.world.botGroup.add(model);
         addNameLabel(model, player.name);

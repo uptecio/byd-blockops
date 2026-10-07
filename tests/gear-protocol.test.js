@@ -6,8 +6,8 @@ import { RoomManager } from '../server/rooms.js';
 const copy = v => structuredClone(v);
 function fixture() { const manager = new RoomManager(); const room = manager.create('p1', 'P1', 'ak47'); manager.join('p2', room.code, 'P2'); manager.start('p1'); return { manager, room }; }
 
-test('protocol 4 equipment validates ownership, recipient, life and nested bounded records including death', () => {
-  assert.equal(PROTOCOL_VERSION, 4);
+test('protocol 5 equipment validates ownership, recipient, life and nested bounded records including death', () => {
+  assert.equal(PROTOCOL_VERSION, 5);
   const { manager, room } = fixture(); const own = manager.snapshot(room).players[0], dto = manager.equipmentSnapshot('p1');
   assert.equal(protocol.validEquipmentSnapshot(dto, own), true);
   const invalid = [d => d.playerId = 'p2', d => d.lifeId++, d => d.lastActionSeq = -1, d => d.equipment.owned = [], d => d.equipment.owned.push(copy(d.equipment.owned[0])), d => d.equipment.grenades.frag = -1, d => d.equipment.grenades.flash = NaN, d => d.equipment.grenades.frag = 4, d => d.equipment.owned[0].reserve = 500, d => d.equipment.extra = 1];

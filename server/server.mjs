@@ -50,8 +50,9 @@ export async function startServer({ port = 0, host = '127.0.0.1', distDir = 'dis
   const broadcast = room => {
     if (!room || !room.players.size) return;
     const packet = { type: 'state', protocol: PROTOCOL_VERSION, room: manager.snapshot(room) };
-    for (const id of room.players.keys()) { const connection = connections.get(id); if (connection) send(connection.socket, { ...packet, equipment: manager.equipmentSnapshot(id) }); }
+    for (const id of room.players.keys()) { const connection = connections.get(id); if (connection) send(connection.socket, { ...packet, equipment: manager.equipmentSnapshot(id), progression: manager.progressionSnapshot(id) }); }
   };
+  const flushEnded = id => { const room = manager.roomFor(id); if (room?.phase === 'ended') broadcast(room); };
   wss.on('connection', socket => {
     const id = randomUUID();
     const connection = { socket, count: 0, windowStart: performance.now(), alive: true };
@@ -70,12 +71,16 @@ export async function startServer({ port = 0, host = '127.0.0.1', distDir = 'dis
         switch (packet.type) {
           case 'create': case 'join': {
             if (packet.protocol !== PROTOCOL_VERSION) throw new Error('Update required: install the latest Block Ops APK or reload the game.');
-            const room = packet.type === 'create' ? manager.create(id, packet.name, packet.weaponId, { mapId: packet.mapId, modeId: packet.modeId, skinId: packet.skinId }) : manager.join(id, packet.code, packet.name, packet.weaponId, { skinId: packet.skinId });
-            send(socket, { type: 'welcome', protocol: PROTOCOL_VERSION, id, room: manager.snapshot(room, false), equipment: manager.equipmentSnapshot(id) }); broadcast(room); break;
+            const room = packet.type === 'create' ? manager.create(id, packet.name, packet.weaponId, { mapId: packet.mapId, modeId: packet.modeId, skinId: packet.skinId, finishId: packet.finishId }) : manager.join(id, packet.code, packet.name, packet.weaponId, { skinId: packet.skinId, finishId: packet.finishId });
+            send(socket, { type: 'welcome', protocol: PROTOCOL_VERSION, id, room: manager.snapshot(room, false), equipment: manager.equipmentSnapshot(id), progression: manager.progressionSnapshot(id) }); broadcast(room); break;
           }
-          case 'configure': broadcast(manager.configure(id, { mapId: packet.mapId, modeId: packet.modeId })); break;
-          case 'skin': broadcast(manager.setSkin(id, packet.skinId)); break;
-          case 'start': broadcast(manager.start(id)); break;
+          case 'configure': flushEnded(id); broadcast(manager.configure(id, { mapId: packet.mapId, modeId: packet.modeId })); break;
+          case 'skin': case 'finish': {
+            const key = packet.type === 'skin' ? 'skinId' : 'finishId';
+            if (Object.keys(packet).length !== 2 || typeof packet[key] !== 'string') throw new Error('Invalid appearance message.');
+            broadcast(packet.type === 'skin' ? manager.setSkin(id, packet.skinId) : manager.setFinish(id, packet.finishId)); break;
+          }
+          case 'start': flushEnded(id); broadcast(manager.start(id)); break;
           case 'input': manager.input(id, packet); break;
           case 'loadout': broadcast(manager.setLoadout(id, packet.weaponId)); break;
           case 'equipment-action': {

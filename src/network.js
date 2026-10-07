@@ -5,11 +5,15 @@ import { SKINS, DEFAULT_SKIN_ID } from './skins.js';
 import { PROTOCOL_VERSION } from './protocol.js';
 import { validEquipmentAction, validEquipmentSnapshot, validGearEvent, validGearWorld } from './gear-protocol.js';
 import { hasOwn } from './has-own.js';
+import { GUN_FINISHES } from './cosmetics.js';
+import { validProgressionId, validProgressionReceipt } from './progression-protocol.js';
 
 const weaponIds = new Set(WEAPONS.map(weapon => weapon.id));
 const mapIds = new Set(MAPS.map(map => map.id));
 const modeIds = new Set(MODES.map(mode => mode.id));
 const skinIds = new Set(SKINS.map(skin => skin.id));
+const finishIds = new Set(GUN_FINISHES.map(finish => finish.id));
+const connectionOrigins = new WeakMap();
 const teams = ['red', 'blue'];
 const validId = id => typeof id === 'string' && id.trim().length > 0;
 const count = value => Number.isSafeInteger(value) && value >= 0;
@@ -27,7 +31,8 @@ export function normaliseServerUrl(raw) {
 }
 
 function validRoom(room) {
-  if (!exactKeys(room, ['code', 'hostId', 'phase', 'timeLeft', 'winnerId', 'winnerName', 'mapId', 'modeId', 'teamScores', 'winnerTeamId', 'flags', 'events', 'gear', 'players']) || !validGearWorld(room.gear)) return false;
+  if (!exactKeys(room, ['code', 'hostId', 'phase', 'roundId', 'timeLeft', 'winnerId', 'winnerName', 'mapId', 'modeId', 'teamScores', 'winnerTeamId', 'flags', 'events', 'gear', 'players']) || !validGearWorld(room.gear)) return false;
+  if (room.phase === 'lobby' ? room.roundId !== null : !validProgressionId(room.roundId)) return false;
   if (!room || !validId(room.code) || !validId(room.hostId) || !['lobby', 'playing', 'ended'].includes(room.phase) || !Number.isFinite(room.timeLeft) || room.timeLeft < 0 || room.timeLeft > 180 || !Array.isArray(room.players) || room.players.length < 1 || room.players.length > 8 || !Array.isArray(room.events)) return false;
   if (!mapIds.has(room.mapId) || !modeIds.has(room.modeId) || !room.teamScores || !teams.every(team => count(room.teamScores[team])) || Object.keys(room.teamScores).some(team => !teams.includes(team))) return false;
   if (room.winnerId !== null && !validId(room.winnerId)) return false;
@@ -37,10 +42,11 @@ function validRoom(room) {
   if (room.modeId === 'ffa' ? room.winnerTeamId !== null : room.winnerId !== null) return false;
   const ids = new Set();
   for (const player of room.players) {
-    if (!exactKeys(player, ['id', 'name', 'x', 'z', 'y', 'yaw', 'pitch', 'health', 'armour', 'kills', 'deaths', 'weaponId', 'teamId', 'skinId', 'pendingSkinId', 'lifeId', 'flashRemaining', 'heldItem', 'ammo', 'reserve', 'reloadRemaining', 'respawnRemaining', 'protectedRemaining'])
+    if (!exactKeys(player, ['id', 'name', 'x', 'z', 'y', 'yaw', 'pitch', 'health', 'armour', 'kills', 'deaths', 'weaponId', 'teamId', 'skinId', 'pendingSkinId', 'finishId', 'pendingFinishId', 'lifeId', 'flashRemaining', 'heldItem', 'ammo', 'reserve', 'reloadRemaining', 'respawnRemaining', 'protectedRemaining'])
       || !count(player.lifeId) || player.lifeId === 0 || !['gun', 'knife'].includes(player.heldItem)
       || !Number.isFinite(player.flashRemaining) || player.flashRemaining < 0 || player.flashRemaining > 3) return false;
     if (!player || !validId(player.id) || ids.has(player.id) || typeof player.name !== 'string' || !weaponIds.has(player.weaponId) || !skinIds.has(player.skinId) || (player.pendingSkinId !== null && !skinIds.has(player.pendingSkinId))) return false;
+    if (!finishIds.has(player.finishId) || (player.pendingFinishId !== null && !finishIds.has(player.pendingFinishId))) return false;
     if (room.modeId === 'ffa' ? player.teamId !== null : !teams.includes(player.teamId)) return false;
     ids.add(player.id);
     if (!['x', 'y', 'z', 'yaw', 'pitch', 'health', 'armour', 'kills', 'deaths', 'ammo', 'reserve', 'reloadRemaining', 'respawnRemaining', 'protectedRemaining'].every(key => Number.isFinite(player[key]))) return false;
@@ -77,6 +83,7 @@ function validRoom(room) {
 }
 
 export class RoomClient {
+  get serverOrigin() { return connectionOrigins.get(this) ?? null; }
   constructor({ onRoom = () => {}, onError = () => {}, onDisconnect = () => {} } = {}) {
     this.onRoom = onRoom; this.onError = onError; this.onDisconnect = onDisconnect;
     this.id = null; this.room = null; this.connected = false; this.socket = null; this.cancelPending = null;
@@ -86,6 +93,7 @@ export class RoomClient {
     const base = normaliseServerUrl(serverBase);
     if (!request || !['create', 'join'].includes(request.type)) throw new Error('Choose Create room or Join room.');
     this.close();
+    connectionOrigins.set(this, base);
     this.actionSeq = 0;
     return new Promise((resolve, reject) => {
       let socket;
@@ -102,7 +110,7 @@ export class RoomClient {
       this.cancelPending = () => { intentional = true; if (!settled) fail('Connection cancelled.'); };
       socket.addEventListener('open', () => {
         if (this.socket !== socket || intentional) return;
-        const packet = { type: request.type, protocol: PROTOCOL_VERSION, name: request.name, weaponId: request.weaponId, skinId: request.skinId ?? DEFAULT_SKIN_ID };
+        const packet = { type: request.type, protocol: PROTOCOL_VERSION, name: request.name, weaponId: request.weaponId, skinId: request.skinId ?? DEFAULT_SKIN_ID, finishId: request.finishId ?? 'standard' };
         if (request.type === 'join') packet.code = request.code;
         else Object.assign(packet, { mapId: request.mapId ?? DEFAULT_MAP_ID, modeId: request.modeId ?? 'ffa' });
         try { socket.send(JSON.stringify(packet)); } catch { fail('Unable to send the room request.'); }
@@ -124,12 +132,12 @@ export class RoomClient {
           if (packet.protocol !== PROTOCOL_VERSION) { if (!welcomed) fail(updateRequired); else this.onError(updateRequired); return; }
           const recipientId = packet.type === 'welcome' ? packet.id : this.id;
           const own = Array.isArray(packet.room?.players) ? packet.room.players.find(player => player?.id === recipientId) : null;
-          const valid = exactKeys(packet, packet.type === 'welcome' ? ['type', 'protocol', 'id', 'room', 'equipment'] : ['type', 'protocol', 'room', 'equipment'])
-            && validRoom(packet.room) && validEquipmentSnapshot(packet.equipment, own)
+          const valid = exactKeys(packet, packet.type === 'welcome' ? ['type', 'protocol', 'id', 'room', 'equipment', 'progression'] : ['type', 'protocol', 'room', 'equipment', 'progression'])
+            && validRoom(packet.room) && validEquipmentSnapshot(packet.equipment, own) && validProgressionReceipt(packet.progression, packet.room, recipientId)
             && (!welcomed || (packet.equipment.lifeId >= this.room.selfEquipment.lifeId
               && packet.equipment.lastActionSeq >= this.room.selfEquipment.lastActionSeq
               && !(packet.equipment.lifeId === this.room.selfEquipment.lifeId && packet.room.phase === 'playing'
-                && this.room.phase === 'playing' && packet.room.timeLeft > this.room.timeLeft + 1e-8)));
+                && this.room.phase === 'playing' && packet.room.roundId === this.room.roundId && packet.room.timeLeft > this.room.timeLeft + 1e-8)));
           if (!valid) {
             if (!welcomed) fail('The server sent an invalid room snapshot.'); else this.onError('The server sent an invalid room snapshot.');
             return;
@@ -137,11 +145,13 @@ export class RoomClient {
           if (packet.type === 'welcome' && !welcomed) {
             this.id = packet.id; this.connected = true; welcomed = true; settled = true; cleanup();
             packet.room.selfEquipment = packet.equipment;
+            packet.room.selfProgression = packet.progression;
             this.actionSeq = Math.max(this.actionSeq, packet.equipment.lastActionSeq);
             this.room = packet.room; resolve(packet); this.onRoom(this.room);
           } else if (packet.type === 'state' && welcomed) {
             if (!packet.room.players.some(player => player.id === this.id)) { this.onError('Your player is missing from the room snapshot.'); return; }
             packet.room.selfEquipment = packet.equipment;
+            packet.room.selfProgression = packet.progression;
             this.actionSeq = Math.max(this.actionSeq, packet.equipment.lastActionSeq);
             this.room = packet.room; this.onRoom(this.room);
           }
@@ -179,6 +189,7 @@ export class RoomClient {
     if (this.suppressDisconnect) this.suppressDisconnect();
     if (this.cancelPending) this.cancelPending();
     const socket = this.socket; this.socket = null; this.connected = false; this.id = null; this.room = null;
+    connectionOrigins.delete(this);
     if (socket) socket.close();
   }
 }
