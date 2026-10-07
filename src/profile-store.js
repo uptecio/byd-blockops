@@ -39,7 +39,7 @@ function decode(raw) {
   return {kind:'valid',value};
 }
 
-export function createProfileStore({getStorage = () => globalThis.localStorage, legacySkinId='ranger'} = {}) {
+export function createProfileStore({getStorage = () => localStorage, legacySkinId='ranger'} = {}) {
   const fresh=()=>({schemaVersion:1,lifetimeXP:0,skinId:FREE_SKIN_IDS.includes(legacySkinId)?legacySkinId:'ranger',finishId:'standard',receipts:[]});
   let profile=fresh(), storage, knownBase=false, protectedReason='', recovered=false, dirty=false;
   let confirmed=null, saveStatus='unavailable', saveMessage='Progress is not saved — storage unavailable';

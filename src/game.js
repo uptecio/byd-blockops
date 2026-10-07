@@ -6,6 +6,8 @@ import { gunHitDamage } from './gun-damage.js';
 import { assignTeams, createModeState, tickMode, recordElimination, getModeSnapshot, areEnemies } from './modes.js';
 import { getMap, DEFAULT_MAP_ID } from './maps.js';
 import { getSkin, SKINS, DEFAULT_SKIN_ID } from './skins.js';
+import { getGunFinish } from './cosmetics.js';
+import { createSoloProgression, newSoloRunId } from './solo-progression.js';
 import { createAvatarModel } from './avatar.js';
 import { createNavigation } from './navigation.js';
 import { chooseBotIntent, chooseBotEquipment } from './bot-brain.js';
@@ -74,8 +76,9 @@ export class ArenaGame {
   }
   presentHeldItem(weaponId, heldItem) {
     this.weapon = getWeapon(weaponId); this.heldItem = heldItem;
+    this.presentedFinishId = this.player.finishId ?? 'standard';
     disposeModel(this.weaponModel);
-    this.weaponModel = heldItem === 'knife' ? createKnifeModel(THREE) : createWeaponModel(THREE, this.weapon);
+    this.weaponModel = heldItem === 'knife' ? createKnifeModel(THREE) : createWeaponModel(THREE, this.weapon, { finishId: this.presentedFinishId });
     this.weaponModel.position.set(.28, -.27, -.5); this.camera.add(this.weaponModel);
     this.lastFire = false; this.recoil = 0;
   }
@@ -84,7 +87,7 @@ export class ArenaGame {
     this.inventory = equipment.owned;
     this.weaponState = equipment.owned.get(equipment.activeGunId)
       ?? { weaponId: equipment.activeGunId, ammo: 0, reserve: 0, cooldown: 0, reloadRemaining: 0 };
-    if (this.weapon.id !== equipment.activeGunId || this.heldItem !== equipment.heldItem)
+    if (this.weapon.id !== equipment.activeGunId || this.heldItem !== equipment.heldItem || this.presentedFinishId !== (this.player.finishId ?? 'standard'))
       this.presentHeldItem(equipment.activeGunId, equipment.heldItem);
     if (!isUsingSupply(equipment)) this.weaponModel.position.y = -.27;
   }
@@ -140,13 +143,17 @@ export class ArenaGame {
     this.scene.fog = new THREE.Fog(map.environment.fog, 42, 95);
   }
   start(id, settings = {}) {
+    this.soloProgression?.close(); this.soloProgression = null;
     this.zombieRuntime?.dispose(); this.zombieRuntime = null;
-    this.settings = { sensitivity: 1, bots: 5, difficulty: 'normal', mapId: DEFAULT_MAP_ID, modeId: 'ffa', skinId: DEFAULT_SKIN_ID, ...settings };
+    this.settings = { sensitivity: 1, bots: 5, difficulty: 'normal', mapId: DEFAULT_MAP_ID, modeId: 'ffa', skinId: DEFAULT_SKIN_ID, finishId: 'standard', progressionSource: 'solo', ...settings };
     const count = Math.max(0, Math.min(8, Math.trunc(this.settings.bots) || 0)); // zero reserved for online adapter
     getSkin(this.settings.skinId);
+    getGunFinish(this.settings.finishId);
+    if (!['solo','online'].includes(this.settings.progressionSource)) throw new RangeError('Invalid progression source');
     if (this.settings.modeId === 'zombies') {
       this.zombieRuntime = new ZombieRuntime(this);
       this.zombieRuntime.start(getWeapon(id).id, this.settings);
+      this.beginProgression();
       return;
     }
     const ids = ['local', ...Array.from({ length: count }, (_, i) => `bot-${i}`)];
@@ -154,13 +161,13 @@ export class ArenaGame {
     this.modeState = createModeState({ modeId: this.settings.modeId, map: getMap(this.settings.mapId), participants: ids.map(id => ({ id, teamId: teams[id] })) });
     this.loadMap(this.settings.mapId); this.player.equipment = createEquipment(getWeapon(id).id);
     this.botTuning = DIFFICULTY[this.settings.difficulty] || DIFFICULTY.normal;
-    Object.assign(this.player, { id: 'local', name: 'You', teamId: teams.local, lifeId: 0, pendingSkinId: this.settings.skinId });
+    Object.assign(this.player, { id: 'local', name: 'You', teamId: teams.local, lifeId: 0, pendingSkinId: this.settings.skinId, pendingFinishId: this.settings.finishId });
     this.hasRound = true; this.endReported = false;
     this.resetPlayer(true);
     const assigned = new Set();
     for (let i = 0; i < count; i++) {
       const botId = `bot-${i}`, teamId = teams[botId];
-      const skinId = SKINS[i % SKINS.length].id;
+      const skinId = SKINS[i % 8].id;
       const bot = { id: botId, name: `Bot ${i + 1}`, teamId, lifeId: 0, pendingSkinId: skinId,
         cooldown: 2 + i * .3, respawn: 0, phase: i * 2.3, waypoint: null, intentTimer: 0, pathTimer: 0,
         role: assigned.has(teamId) ? 'defend' : 'attack' };
@@ -171,7 +178,13 @@ export class ArenaGame {
     this.lootState = createLootState({ mapId: this.world.definition.id, seed: Math.floor(Math.random() * 4294967296),
       startingGunIds: [this.player.equipment.startingGunId, ...this.bots.map(bot => bot.equipment.startingGunId)] });
     this.simulationTime = 0; this.gearEvents = []; this.pickupEvents = []; this.gearEventId = 0;
+    this.beginProgression();
     this.refreshMatchView(); this.refreshGearView(); this.input.clear(); this.resume();
+  }
+  beginProgression() {
+    if (this.settings.progressionSource === 'solo') this.soloProgression = createSoloProgression({
+      runId: newSoloRunId(), modeId: this.settings.modeId, onEvent: event => this.events.onProgression?.(event),
+    });
   }
   spawnPoints(teamId) {
     const map = this.world.definition;
@@ -191,7 +204,11 @@ export class ArenaGame {
       lastGrenadeAttempt: bot.lastGrenadeAttempt ?? -Infinity, weaponState: bot.equipment.owned.get('m4a1') });
     for (const other of this.bots) other.lastKnownTargets?.delete(bot.id);
   }
-  setPendingSkin(skinId) { getSkin(skinId); this.player.pendingSkinId = skinId; }
+  setPendingAppearance({ skinId, finishId }) {
+    getSkin(skinId); getGunFinish(finishId);
+    this.player.pendingSkinId = skinId; this.player.pendingFinishId = finishId;
+  }
+  setPendingSkin(skinId) { this.setPendingAppearance({ skinId, finishId: this.player.pendingFinishId ?? this.player.finishId ?? 'standard' }); }
   getActors() {
     return [{ id: this.player.id, name: this.player.name, teamId: this.player.teamId, x: this.player.x, y: this.player.jump, z: this.player.z,
       alive: this.player.health > 0 && this.player.dead <= 0, protectedRemaining: this.player.protected, lifeId: this.player.lifeId, skinId: this.player.skinId,
@@ -211,6 +228,7 @@ export class ArenaGame {
   getMatchView() { return this.matchView; }
   finishRound(actors) {
     if (!this.modeState.ended || this.endReported) return;
+    this.soloProgression?.finish({ winnerId: this.modeState.winnerId, winnerTeamId: this.modeState.winnerTeamId, teamId: this.player.teamId });
     for (const actor of [this.player, ...this.bots]) if (actor.equipment) cancelSupplyUse(actor.equipment);
     this.clearSupplyCombat();
     this.refreshMatchView(actors); this.endReported = true; this.pause(); this.events.onEnd(this.match);
@@ -224,7 +242,7 @@ export class ArenaGame {
         return distance > best.distance ? { ...point, distance } : best;
       }, { ...spawn, distance: -1 });
     }
-    Object.assign(this.player, { x: spawn.x, z: spawn.z, health: 100, armour: 0, dead: 0, jump: 0, velocity: 0, protected: 2.5, flashRemaining: 0, skinId: this.player.pendingSkinId });
+    Object.assign(this.player, { x: spawn.x, z: spawn.z, health: 100, armour: 0, dead: 0, jump: 0, velocity: 0, protected: 2.5, flashRemaining: 0, skinId: this.player.pendingSkinId, finishId: this.player.pendingFinishId ?? this.player.finishId ?? 'standard' });
     this.player.lifeId++;
     this.yaw = initial ? 0 : Math.atan2(spawn.x, spawn.z); this.pitch = 0; this.recoil = 0;
     resetEquipment(this.player.equipment); this.syncPlayerEquipment(); this.input.clear(); this.placeCamera();
@@ -233,6 +251,7 @@ export class ArenaGame {
   resume() { if (this.hasRound && !this.match.ended) { this.active = true; this.lastFire = false; this.input.setEnabled(true); } }
   pause() { this.active = false; this.input.setEnabled(false); this.lastFire = false; }
   quit() {
+    this.soloProgression?.close();
     for (const actor of [this.player, ...this.bots]) if (actor.equipment) cancelSupplyUse(actor.equipment);
     this.clearSupplyCombat();
     this.pause(); this.hasRound = false; this.gearView?.clear();
@@ -251,7 +270,10 @@ export class ArenaGame {
     if (this.active) {
       this.gearEvents = []; this.pickupEvents = [];
       this.simulate(this.zombieRuntime ? dt : Math.min(dt, this.modeState.timeLeft));
-      if (!this.zombieRuntime) tickMode(this.modeState, dt, this.getActors());
+      if (!this.zombieRuntime) {
+        const events = tickMode(this.modeState, dt, this.getActors());
+        this.soloProgression?.objectives(events);
+      }
       this.refreshMatchView(); this.finishRound();
     }
     if (this.hasRound) this.refreshGearView(this.active ? dt : 0);
@@ -546,7 +568,11 @@ export class ArenaGame {
       }
       if (victim.id === 'local') this.syncPlayerEquipment();
       else victim.weaponState = { weaponId: victim.equipment.activeGunId, ammo: 0, reserve: 0, cooldown: 0, reloadRemaining: 0 };
-      recordElimination(this.modeState, { killerId: attackerId, victimId: victim.id, position, lifeId: victim.lifeId });
+      const previousKills = this.modeState.stats[attackerId]?.kills;
+      const objectiveEvents = recordElimination(this.modeState, { killerId: attackerId, victimId: victim.id, position, lifeId: victim.lifeId });
+      if (this.modeState.stats[attackerId]?.kills > previousKills)
+        this.soloProgression?.elimination({ killerId: attackerId, victimId: victim.id, victimLifeId: victim.lifeId, enemy: true });
+      this.soloProgression?.objectives(objectiveEvents);
       if (victim.id === 'local') { victim.dead = 2.5; this.input.clear(); this.events.onToast('ELIMINATED · RESPAWNING'); }
       else { victim.respawn = 2.5; victim.model.visible = false; }
       this.refreshMatchView(actors); this.finishRound(actors);

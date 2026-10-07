@@ -38,7 +38,7 @@ export class OnlineArena {
     this.id = id; this.running = true; this.suspended = false; this.endReported = false;
     this.lastEvent = room.events.reduce((maximum, event) => Math.max(maximum, event.id), -1);
     this.sendTimer = 0; this.hudTimer = 0; this.previousRespawn = own.respawnRemaining;
-    this.game.start(own.weaponId, { ...settings, mapId: room.mapId, modeId: room.modeId, skinId: own.skinId, bots: 0 }); this.game.active = false;
+    this.game.start(own.weaponId, { ...settings, mapId: room.mapId, modeId: room.modeId, skinId: own.skinId, bots: 0, progressionSource: 'online' }); this.game.active = false;
     this.game.lootState = null;
     this.game.yaw = own.yaw; this.game.pitch = own.pitch;
     Object.assign(this.game.player, { x: own.x, z: own.z, jump: own.y });

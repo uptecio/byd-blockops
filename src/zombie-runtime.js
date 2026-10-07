@@ -14,7 +14,7 @@ export class ZombieRuntime {
     const game = this.game;
     this.state = createSurvival(settings.mapId); game.modeState = this.state;
     game.loadMap(settings.mapId); game.player.equipment = createEquipment(weaponId);
-    Object.assign(game.player, { id:'local', name:'You', teamId:null, lifeId:0, pendingSkinId:settings.skinId });
+    Object.assign(game.player, { id:'local', name:'You', teamId:null, lifeId:0, pendingSkinId:settings.skinId, pendingFinishId:settings.finishId });
     game.hasRound = true; game.endReported = false; game.resetPlayer(true);
     game.lootState = createLootState({ mapId:settings.mapId, seed:Math.floor(Math.random()*4294967296), startingGunIds:[weaponId] });
     game.simulationTime = 0; game.gearEvents = []; game.pickupEvents = []; game.gearEventId = 0;
@@ -82,7 +82,7 @@ export class ZombieRuntime {
     if (victim.id === 'local') {
       this.finishStep();
     } else {
-      recordZombieDeath(this.state,victim.id); victim.model.visible=false; this.refreshView();
+      recordZombieDeath(this.state,victim.id); this.reportProgression(); victim.model.visible=false; this.refreshView();
     }
   }
   finishStep() {
@@ -105,7 +105,10 @@ export class ZombieRuntime {
         game.audio.zombieRecovery?.(); game.events.onToast('WAVE CLEAR · HEALTH & AMMO RESTORED'); this.record();
       } else if (event.type === 'ended') this.record();
     }
-    this.refreshView(); game.finishRound();
+    this.reportProgression(); this.refreshView(); game.finishRound();
+  }
+  reportProgression() {
+    this.game.soloProgression?.survival({ kills:this.state.kills, wavesCleared:this.state.completedWaves, ended:this.state.ended });
   }
   refreshView() {
     const game=this.game,survival=survivalView(this.state);
