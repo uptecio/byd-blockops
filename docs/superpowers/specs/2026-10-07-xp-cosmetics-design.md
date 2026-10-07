@@ -2,7 +2,7 @@
 
 Date: 2026-10-07
 
-Status: proposed written design for user review. The conversational choices below are approved; the precise tuning, reward catalogue and technical details are proposed defaults in this document. Implementation and deployment have not started.
+Status: written design approved by the user on 2026-10-07. Implementation-plan review and execution-method selection are next. Implementation and deployment have not started.
 
 Baseline: Block Ops 0.6.0, source `f9a1261`, Android version code 8, network protocol 4. Work stays in the existing checkout; unrelated files, the published game and previous release artifacts remain untouched during design.
 
@@ -26,7 +26,7 @@ Alternatives discussed were character-only or gun-only rewards, account-based cr
 
 Play any existing solo bot mode, solo Zombies, or online FFA/TDM/CTF. Earn action XP as legitimate scoring actions occur. Apply each gain to the local profile immediately, show a compact notification, and unlock every level crossed by that gain. Returning Home, leaving a room or closing the app never deliberately deducts credited XP. Starting a new life or match does not reset lifetime progress.
 
-Proposed initial values:
+Initial values:
 
 | Action | XP | Who receives it |
 | --- | ---: | --- |
@@ -147,4 +147,4 @@ No public restart or tunnel change occurs during design, implementation or ordin
 
 No new maps, combat upgrades, aim assist, minimap, gun effects, new zombie behavior, cosmetic drops, loot boxes, paid purchases, login, cloud sync, cross-device save transfer, permanent hosting or unrelated refactoring. Those remaining roadmap features are not part of this delivery.
 
-Please review this written design, particularly the proposed XP values, level-17 reward-track endpoint, reward list, next-respawn appearance rule and local-save limitations. Written-spec approval permits preparing the implementation plan. Coding begins only after that plan is reviewed and its execution method is selected.
+The user approved this written design, including the XP values, level-17 reward-track endpoint, reward list, next-respawn appearance rule and local-save limitations. Written-spec approval permits preparing the implementation plan. Coding begins only after that plan is reviewed and its execution method is selected.
