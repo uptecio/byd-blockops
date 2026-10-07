@@ -1,4 +1,5 @@
 import { DEFAULT_MAP_ID, getMap } from './maps.js';
+import { getGunFinish } from './cosmetics.js';
 
 // Procedural, texture-free meshes keep the complete arena available offline.
 function blocks(THREE, group) {
@@ -79,16 +80,17 @@ export function createBotModel(THREE, colour = '#ef896c') {
   return group;
 }
 
-export function createWeaponModel(THREE, weapon) {
+export function createWeaponModel(THREE, weapon, { finishId = 'standard' } = {}) {
+  const palette = getGunFinish(finishId).palette;
   const group = new THREE.Group();
   group.name = weapon.name || weapon.id || 'Weapon';
   const { box } = blocks(THREE, group);
   const id = String(weapon.id || '').toLowerCase();
   const classId = String(weapon.classId || '').toLowerCase();
-  const colour = weapon.colour || '#ddad62';
-  const steel = '#334554';
+  const colour = palette?.body ?? (weapon.colour || '#ddad62');
+  const steel = palette?.steel ?? '#334554';
   const black = '#21313e';
-  const light = '#758792';
+  const light = palette?.light ?? '#758792';
   const sidearm = /sidearm|pistol|handgun/.test(classId);
   const sniper = /sniper/.test(classId);
   const marksman = /marksman|dmr/.test(classId);

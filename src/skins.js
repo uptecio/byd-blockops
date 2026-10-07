@@ -1,4 +1,5 @@
 // Bundled, texture-free cosmetics. Combat properties belong to the runtime.
+import { EXTRA_SKINS } from './cosmetics.js';
 function skin(id, name, description, colours, headgear, accessory) {
   const [body, trim, face, visor, boots] = colours;
   return Object.freeze({ id, name, description,
@@ -23,6 +24,7 @@ export const SKINS = Object.freeze([
     ['#7c94a6', '#f1ce62', '#afc1cc', '#67e5b3', '#405260'], 'sensor-antenna', 'power-pack'),
   skin('space-guard', 'Space Guard', 'Orange pressure armour, a sealed helmet and air tanks.',
     ['#d98045', '#eee8d4', '#ddd7ca', '#6ed3ec', '#514a48'], 'sealed-helmet', 'air-tanks'),
+  ...EXTRA_SKINS,
 ]);
 
 const skinsById = new Map(SKINS.map(item => [item.id, item]));

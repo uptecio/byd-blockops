@@ -38,10 +38,11 @@ function meshSignature(model, includeColours = true) {
   return JSON.stringify(result);
 }
 
-test('eight selectable skins have strict IDs and immutable cosmetic definitions', () => {
-  assert.deepEqual(SKINS.map(skin => skin.id), ids);
+test('original eight skins remain first and all sixteen have strict immutable cosmetic definitions', () => {
+  assert.deepEqual(SKINS.slice(0,8).map(skin => skin.id), ids);
+  assert.equal(SKINS.length,16);
   assert.equal(DEFAULT_SKIN_ID, 'ranger');
-  assert.equal(new Set(SKINS.map(skin => skin.name)).size, 8);
+  assert.equal(new Set(SKINS.map(skin => skin.name)).size, 16);
   assert.equal(Object.isFrozen(SKINS), true);
   for (const id of ids) {
     const skin = getSkin(id);

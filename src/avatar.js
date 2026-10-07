@@ -1,4 +1,5 @@
 import { getSkin } from './skins.js';
+import { getGunFinish } from './cosmetics.js';
 import { getWeapon } from './weapons.js';
 import { createWeaponModel } from './world.js';
 import { createKnifeModel } from './gear-view.js';
@@ -6,14 +7,16 @@ import { AVATAR_HITBOX } from './avatar-hitbox.js';
 export { AVATAR_HITBOX } from './avatar-hitbox.js';
 
 // All geometry/materials belong to one model so disposeModel can release them.
-export function createAvatarModel(THREE, { skinId, teamId = null, weaponId = 'm4a1', heldItem = 'gun' }) {
+export function createAvatarModel(THREE, { skinId, teamId = null, weaponId = 'm4a1', heldItem = 'gun', finishId = 'standard' }) {
   const skin = getSkin(skinId);
+  getGunFinish(finishId);
   if (teamId !== null && teamId !== 'red' && teamId !== 'blue') throw new RangeError(`Unknown team: ${String(teamId)}`);
   const weapon = getWeapon(weaponId);
   if (heldItem !== 'gun' && heldItem !== 'knife') throw new RangeError(`Unknown held item: ${String(heldItem)}`);
   const model = new THREE.Group();
   model.name = skin.name;
   model.userData = { skinId: skin.id, teamId, weaponId: weapon.id };
+  if (finishId !== 'standard') model.userData.finishId = finishId;
   if (heldItem === 'knife') model.userData.heldItem = heldItem;
   Object.defineProperty(model.userData, 'hitbox', { value: AVATAR_HITBOX, enumerable: true });
   const geometry = new THREE.BoxGeometry(1, 1, 1), materials = new Map();
@@ -148,6 +151,6 @@ export function createAvatarModel(THREE, { skinId, teamId = null, weaponId = 'm4
   const attachment = new THREE.Group(); attachment.name = 'weapon';
   attachment.userData.weaponId = weapon.id;
   attachment.position.set(.28, 1.04, .43); attachment.rotation.y = Math.PI;
-  attachment.add(heldItem === 'knife' ? createKnifeModel(THREE) : createWeaponModel(THREE, weapon)); model.add(attachment);
+  attachment.add(heldItem === 'knife' ? createKnifeModel(THREE) : createWeaponModel(THREE, weapon, { finishId })); model.add(attachment);
   return model;
 }
