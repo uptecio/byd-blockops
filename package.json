@@ -1,6 +1,6 @@
 {
   "name": "block-ops-offline",
-  "version": "0.6.0",
+  "version": "0.7.0",
   "private": true,
   "type": "module",
   "scripts": {
@@ -19,6 +19,11 @@
     "test:inventory": "node tests/inventory.browser.mjs",
     "test:zombies": "node tests/zombies.browser.mjs && node tests/zombies-layout.browser.mjs",
     "test:supplies": "node tests/supplies.browser.mjs && node tests/supplies-layout.browser.mjs",
+    "test:progression": "node tests/progression.browser.mjs && node tests/progression-layout.browser.mjs",
+    "test:progression:modes": "node tests/progression-modes.browser.mjs",
+    "test:progression:online": "node tests/progression-online.browser.mjs",
+    "test:progression:android": "node android/tests/progression-smoke.mjs",
+    "test:progression:android:online": "node android/tests/progression-online-smoke.mjs",
     "apk": "npm run build && bash scripts/build-apk.sh",
     "test:apk": "node android/tests/package-smoke.mjs"
   },

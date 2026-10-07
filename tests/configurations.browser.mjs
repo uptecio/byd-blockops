@@ -85,7 +85,7 @@ try {
     await host.keyboard.up('KeyF');
     await leave(host);
     const saved = await host.evaluate(() => JSON.parse(localStorage.getItem('block-ops-v1')).selection);
-    assert.deepEqual(saved, { mapId, modeId: mode.id, skinId: 'space-guard', weaponId: 'm4a1' });
+    assert.deepEqual(saved, { mapId, modeId: mode.id, skinId: 'space-guard', weaponId: 'm4a1', finishId: 'standard' });
 
     rooms.fill(null);
     for (let index = 0; index < 2; index++) {

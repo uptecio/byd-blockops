@@ -94,7 +94,8 @@ try {
   await wait(current => current.mode === 'home' && !current.hidden && !current.fatal && current.classes === 7);
   assert.equal(await evaluate('innerWidth > innerHeight'), true);
   assert.equal(await evaluate('document.querySelectorAll("[data-map]").length'), 8);
-  assert.equal(await evaluate('document.querySelectorAll("[data-skin]").length'), 8);
+  assert.equal(await evaluate('document.querySelectorAll("[data-skin]").length'), 16);
+  assert.equal(await evaluate('Array.from(document.querySelectorAll("[data-skin]")).slice(0,8).every(button => !button.disabled)'), true);
   await evaluate('document.querySelector("[data-map=space-station]").click(); document.querySelector("[data-skin=space-guard]").click()');
   await reload();
   await wait(current => current.mode === 'home');

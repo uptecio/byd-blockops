@@ -115,7 +115,7 @@ test('bot membership ignores inherited and shadowed stats without Object.hasOwn'
   assert.deepEqual(chooseBotIntent(actor, context), { goal: null, targetId: null });
 });
 
-test('protocol 4 action and event validation retains exact shapes without Object.hasOwn', t => {
+test('protocol 5 action and event validation retains exact shapes without Object.hasOwn', t => {
   unavailable(t, Object, 'hasOwn');
   const action = { type: 'equipment-action', seq: 1, lifeId: 1, kind: 'equip-gun', weaponId: 'mp5', source: 'armory' };
   assert.equal(validEquipmentAction(nullPrototype(action)), true);

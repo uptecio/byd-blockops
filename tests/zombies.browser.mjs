@@ -4,6 +4,7 @@ import { mkdir } from 'node:fs/promises';
 import { WebSocket } from 'ws';
 import { fixture, walkSolo, until, onlinePair } from './helpers/loot-browser.js';
 import { emulateLegacyWebView } from './helpers/legacy-webview.js';
+import { readProfile } from './helpers/progression-browser.js';
 
 const legacy=process.env.LEGACY_WEBVIEW==='1';
 const artifacts=process.env.ZOMBIE_ARTIFACTS || 'artifacts/zombies-review';
@@ -128,9 +129,13 @@ try {
   await page.keyboard.down('KeyF'); await page.waitForTimeout(200); await page.keyboard.up('KeyF');
   assert.equal(await page.locator('#ammo-count').textContent(),ammo);
   await page.locator('#resume-button').tap(); await home();
+  const beforeZombieXP=(await readProfile(page)).lifetimeXP;
   await start('neon-city'); await fightUntilWaveThree();
   await page.waitForSelector('body[data-mode="results"]',{timeout:90000});
   assert.equal(await page.locator('#result-kills').textContent(),'2');
+  const genuineZombieKills=Number(await page.locator('#result-deaths').textContent());
+  assert.equal((await readProfile(page)).lifetimeXP-beforeZombieXP,genuineZombieKills*2+2*25+50,'genuine zombie kills, two cleared waves and one natural game-over bonus');
+  assert.match(await page.locator('#results-progression').textContent(),/Waves \+50.*Match finish \+50/);
   assert.match(await page.locator('#zombie-best').textContent(),/2 WAVES/);
   await page.screenshot({path:`${artifacts}/results-${legacy?'legacy':'modern'}.png`});
   await page.locator('#again-button').tap(); await page.waitForSelector('body[data-mode="playing"]');
