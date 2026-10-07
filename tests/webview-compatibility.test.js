@@ -65,7 +65,7 @@ test('online roster refresh removes obsolete players without Element.replaceChil
   const dom = createInputFixture(); t.after(dom.restore);
   unavailable(t, InputElement.prototype, 'replaceChildren');
   const { snapshot } = roomFixture(), room = snapshot();
-  const ui = Object.assign(Object.create(MultiplayerUI.prototype), { room, client: { id: 'self' } });
+  const ui = Object.assign(Object.create(MultiplayerUI.prototype), { room, client: { id: 'self' }, getSelection: () => ({skinId:'ranger'}) });
   ui.renderRoom();
   assert.deepEqual(dom.buttons.get('room-roster').children.map(row => row.children[0].textContent), ['Host (YOU)', 'Guest']);
   room.players = room.players.slice(0, 1); room.players[0].kills = 2;

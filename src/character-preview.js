@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { createAvatarModel } from './avatar.js';
 import { disposeModel } from './game.js';
+import { getGunFinish } from './cosmetics.js';
 
 export class CharacterPreview {
   constructor(canvas) {
@@ -18,7 +19,7 @@ export class CharacterPreview {
   equip(selection) {
     disposeModel(this.model);
     this.model = createAvatarModel(THREE, selection); this.pivot.add(this.model);
-    this.canvas.setAttribute('aria-label', `${this.model.name} holding selected weapon${selection.teamId ? `, ${selection.teamId} team` : ''}`);
+    this.canvas.setAttribute('aria-label', `${this.model.name} holding selected weapon, ${getGunFinish(selection.finishId || 'standard').name} finish${selection.teamId ? `, ${selection.teamId} team` : ''}`);
   }
   render(time) {
     const w = this.canvas.clientWidth, h = this.canvas.clientHeight;

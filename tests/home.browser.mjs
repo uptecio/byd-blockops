@@ -39,7 +39,9 @@ try {
   await page.waitForSelector('body[data-mode="home"]', { timeout: 5000 });
   assert.equal(await page.locator('[data-map]').count(), 8, 'all eight bundled maps can be selected');
   assert.equal(await page.locator('[data-mode-id]').count(), 4, 'three ordinary modes and solo Zombies are separate from navigation');
-  assert.equal(await page.locator('[data-skin]').count(), 8, 'all eight skins are unlocked');
+  assert.equal(await page.locator('[data-skin]').count(), 16, 'eight free and eight unlockable skins are bundled');
+  assert.equal(await page.locator('[data-skin]:enabled').count(), 8, 'all eight original skins remain free');
+  assert.equal(await page.locator('[data-skin="crimson-ninja"]').getAttribute('aria-disabled'), 'true');
   await page.waitForFunction(() => document.getElementById('character-preview').width > 1);
   await page.locator('[data-map="space-station"]').click();
   await page.locator('[data-mode-id="ctf"]').click();
@@ -54,7 +56,7 @@ try {
   for (const selector of ['[data-map="space-station"]', '[data-mode-id="ctf"]', '[data-skin="space-guard"]']) assert.equal(await page.locator(selector).getAttribute('aria-pressed'), 'true', 'selection survives armory and reload');
   const saved = await page.evaluate(() => JSON.parse(localStorage.getItem('block-ops-v1')));
   assert.equal(saved.weaponId, 'awp');
-  assert.deepEqual(saved.selection, { mapId: 'space-station', modeId: 'ctf', skinId: 'space-guard', weaponId: 'awp' });
+  assert.deepEqual(saved.selection, { mapId: 'space-station', modeId: 'ctf', skinId: 'space-guard', weaponId: 'awp', finishId: 'standard' });
   await mkdir(artifacts, { recursive: true });
   for (const size of [{ width: 1200, height: 700 }, { width: 960, height: 540 }, { width: 854, height: 480 }, { width: 853, height: 480 }]) {
     await page.setViewportSize(size);
@@ -161,7 +163,14 @@ try {
   await page.evaluate(() => localStorage.setItem('block-ops-v1', JSON.stringify({ weaponId: 'invalid', selection: { mapId: 'invalid', modeId: 'invalid', skinId: 'invalid', weaponId: 'invalid' }, settings: { bots: 1 } })));
   await page.reload();
   await page.waitForSelector('body[data-mode="home"]');
-  for (const selector of ['[data-map="courtyard"]', '[data-mode-id="ffa"]', '[data-skin="ranger"]']) assert.equal(await page.locator(selector).getAttribute('aria-pressed'), 'true', 'corrupt IDs use defaults');
+  for (const selector of ['[data-map="courtyard"]', '[data-mode-id="ffa"]']) assert.equal(await page.locator(selector).getAttribute('aria-pressed'), 'true', 'corrupt match IDs use defaults');
+  assert.equal(await page.locator('[data-skin="space-guard"]').getAttribute('aria-pressed'), 'true', 'valid profile appearance takes precedence over corrupt legacy settings');
+  await page.evaluate(() => {
+    const profile = JSON.parse(localStorage.getItem('block-ops-progression-v1')); profile.skinId = 'invalid';
+    localStorage.setItem('block-ops-progression-v1', JSON.stringify(profile));
+  });
+  await page.reload(); await page.waitForSelector('body[data-mode="home"]');
+  assert.equal(await page.locator('[data-skin="ranger"]').getAttribute('aria-pressed'), 'true', 'corrupt profile appearance falls back to Ranger');
   await page.locator('#home-armory').click();
   assert.equal(await page.locator('#selected-name').textContent(), 'M4A1');
   assert.deepEqual(errors, [], 'no page exceptions');

@@ -12,10 +12,16 @@ import { createZombieRecords } from './zombie-records.js';
 import { renderMatchHud, renderMatchResults } from './match-ui.js';
 import { EquipmentUI } from './equipment-ui.js';
 import { installRuntimeErrors } from './runtime-errors.js';
+import { createProfileStore } from './profile-store.js';
+import { createProgressionSession } from './progression-session.js';
+import { createProgressionController } from './progression-controller.js';
+import { createProgressionUI } from './progression-ui.js';
+import { getGunFinish } from './cosmetics.js';
 
 const $ = id => document.getElementById(id);
 let mode = 'home', settingsOrigin = 'home', game, preview, home, multiplayer, equipmentUI, audio, input, toastUntil = 0, confirmation = null;
 let backgroundSuspended = false, frameRequest = null;
+let progressionUI;
 const runtimeErrors = installRuntimeErrors(stopAfterFatal);
 
 function stopAfterFatal() {
@@ -48,12 +54,28 @@ const settings = {
   sound: typeof rawSettings.sound === 'boolean' ? rawSettings.sound : true,
 };
 let selection = validateSelection(saved.selection, saved.weaponId);
+const profileStore = createProfileStore({ getStorage: () => window.localStorage, legacySkinId: selection.skinId });
+const progressionSession = createProgressionSession(profileStore);
+Object.assign(selection, { skinId: profileStore.view().skinId, finishId: profileStore.view().finishId });
+const progression = createProgressionController({ store: profileStore, session: progressionSession,
+  onChange: view => { Object.assign(selection, { skinId: view.skinId, finishId: view.finishId }); renderProgression(); },
+  onDelta: (delta, view) => progressionUI?.notify(delta, view),
+});
 let selected = getWeapon(selection.weaponId), activeClass = selected.classId;
 audio = new GameAudio();
 input = new Input(() => pauseGame());
 const classNames = { assault: 'ASSAULT', smg: 'SMG', shotgun: 'SHOTGUN', sniper: 'SNIPER', marksman: 'MARKSMAN', lmg: 'LMG', sidearm: 'SIDEARM' };
 const traits = { assault: 'Versatile. Reliable. Ready for anything.', smg: 'Fast hands. Close quarters. No hesitation.', shotgun: 'Get close. Make every shot count.', sniper: 'One sightline. One perfect shot.', marksman: 'Precision at your own pace.', lmg: 'Big magazines. Keep the pressure on.', sidearm: 'Travel light. Hit above your weight.' };
 function persist() { try { localStorage.setItem(storageKey, JSON.stringify({ weaponId: selection.weaponId, selection, settings })); } catch { /* Play remains available without storage. */ } }
+function renderProgression() {
+  const connected = multiplayer?.isConnected();
+  const own = connected ? multiplayer.room.players.find(player => player.id === multiplayer.client.id) : game?.player;
+  progressionUI?.render(profileStore.view(), {
+    live: connected ? multiplayer.room.phase === 'playing' : Boolean(game?.hasRound && !game.match.ended),
+    modeId: connected ? multiplayer.room.modeId : game?.hasRound ? game.settings.modeId : selection.modeId,
+    currentSkinId: own?.skinId || selection.skinId, currentFinishId: own?.finishId || selection.finishId,
+  });
+}
 function setMode(next) {
   if (runtimeErrors.failed) return;
   // A remote start may create/enable an arena while native rendering is
@@ -77,8 +99,9 @@ function setMode(next) {
   $('quit-button').textContent = online ? 'Leave room & return Home' : 'End round & return Home';
   input.clear();
   if (next !== 'playing' && game) { if (online) multiplayer.pause(); else game.pause(); }
+  renderProgression();
 }
-function showHome() { setMode('home'); home.render(); }
+function showHome() { progression.retry(); setMode('home'); home.render(); renderProgression(); }
 function sessionToken() { return multiplayer?.isConnected() ? multiplayer.arena || multiplayer.room.code : game?.modeState; }
 function requestHome(after = showHome) {
   const connected = multiplayer?.isConnected(), liveSolo = game?.hasRound && !game.match.ended;
@@ -113,13 +136,22 @@ $('cancel-home').addEventListener('click', () => {
 for (const id of ['home-button', 'pause-home', 'armory-home', 'results-home', 'quit-button']) $(id).addEventListener('click', () => requestHome());
 function selectConfiguration(next) {
   const apply = () => {
-    selection = validateSelection(next); selected = getWeapon(selection.weaponId);
-    if (game) game.setPendingSkin(selection.skinId);
-    if (multiplayer?.isConnected()) multiplayer.client.send({ type: 'skin', skinId: selection.skinId });
-    persist(); home.render();
+    const before = { skinId: selection.skinId, finishId: selection.finishId };
+    const result = progression.equip({ skinId: next.skinId ?? selection.skinId, finishId: next.finishId ?? selection.finishId });
+    if (!result.ok) { renderProgression(); return result; }
+    const profile = profileStore.view();
+    selection = { ...validateSelection(next), skinId: profile.skinId, finishId: profile.finishId };
+    if (mode !== 'armory') selected = getWeapon(selection.weaponId);
+    if (game) game.setPendingAppearance({ skinId: selection.skinId, finishId: selection.finishId });
+    if (multiplayer?.isConnected()) {
+      if (before.skinId !== selection.skinId) multiplayer.client.send({ type: 'skin', skinId: selection.skinId });
+      if (before.finishId !== selection.finishId) multiplayer.client.send({ type: 'finish', finishId: selection.finishId });
+    }
+    persist(); home.render(); renderSelected(); renderProgression();
+    return result;
   };
   if (game?.hasRound && !game.match.ended && !multiplayer?.isConnected() && (next.mapId !== selection.mapId || next.modeId !== selection.modeId)) requestHome(() => { apply(); showHome(); });
-  else apply();
+  else return apply();
 }
 function pauseGame() {
   if (mode === 'grenade-picker') { setMode('paused'); $('resume-button').focus({ preventScroll: true }); return; }
@@ -127,7 +159,8 @@ function pauseGame() {
 }
 function suspendForBackground() { if (runtimeErrors.failed) return; backgroundSuspended = true; input.clear(); equipmentUI?.close(); if (mode === 'grenade-picker') setMode('paused'); else pauseGame(); }
 window.pauseGame = suspendForBackground;
-document.addEventListener('visibilitychange', () => { if (document.hidden) suspendForBackground(); });
+document.addEventListener('visibilitychange', () => { if (document.hidden) suspendForBackground(); else { progression.retry(); renderProgression(); } });
+window.addEventListener('focus', () => { progression.retry(); renderProgression(); });
 window.addEventListener('blur', suspendForBackground);
 
 function silhouette(weapon) {
@@ -153,7 +186,7 @@ function renderSelected() {
   const accuracy = Math.round(Math.max(10, 100 - selected.spread * 600));
   $('weapon-stats').innerHTML = [['POWER', power], ['FIRE RATE', rate], ['ACCURACY', accuracy]].map(([label, amount]) => `<div><div class="stat-label"><span>${label}</span><span>${amount}</span></div><div class="stat-track"><i style="width:${amount}%"></i></div></div>`).join('') + `<div class="gun-meta"><span><b>${selected.magazine}</b> MAG</span><span><b>${selected.magazine + selected.reserve}</b> TOTAL</span><span><b>${selected.reloadTime.toFixed(1)}s</b> RELOAD</span><span><b>${Math.round(60 / selected.fireInterval)}</b> RPM</span></div>`;
   renderTabs();
-  if (preview) preview.equip(selected);
+  if (preview) preview.equip(selected, { finishId: selection.finishId });
 }
 $('class-tabs').addEventListener('click', event => { const button = event.target.closest('[data-class]'); if (button) { activeClass = button.dataset.class; renderTabs(); } });
 $('weapon-grid').addEventListener('click', event => {
@@ -239,10 +272,11 @@ class WeaponPreview {
     const light = new THREE.DirectionalLight('#fff7d1', 3.5); light.position.set(-2, 5, 3); this.scene.add(light);
     this.camera = new THREE.PerspectiveCamera(34, 1, .01, 20); this.camera.position.set(0, .18, 1.65); this.camera.lookAt(0, 0, 0);
     this.pivot = new THREE.Group(); this.scene.add(this.pivot);
-    this.equip(selected);
+    this.equip(selected, { finishId: selection.finishId });
   }
-  equip(weapon) {
-    disposeModel(this.model); this.model = createWeaponModel(THREE, weapon);
+  equip(weapon, { finishId = 'standard' } = {}) {
+    disposeModel(this.model); this.model = createWeaponModel(THREE, weapon, { finishId });
+    this.canvas.setAttribute('aria-label', `${weapon.name} · ${getGunFinish(finishId).name} finish`);
     const bounds = new THREE.Box3().setFromObject(this.model), centre = bounds.getCenter(new THREE.Vector3());
     this.model.position.sub(centre); this.pivot.add(this.model);
     const size = bounds.getSize(new THREE.Vector3());
@@ -258,6 +292,7 @@ class WeaponPreview {
 }
 function onHud(current) {
   equipmentUI?.render();
+  renderProgression();
   const recovery = current.getMatchView()?.survival?.phase === 'recovery';
   $('fire-button').disabled = $('fire-button').disabled || recovery;
   $('throw-button').disabled = $('throw-button').disabled || recovery;
@@ -284,12 +319,17 @@ renderSelected(); updateSettings();
 try {
   game = new ArenaGame($('arena'), input, audio, {
     onHud,
-    onEnd: () => { renderMatchResults(game.getMatchView(), 'local', { best:zombieRecords.best(game.settings.mapId) }); setMode('results'); },
+    onEnd: () => { renderMatchResults(game.getMatchView(), 'local', { best:zombieRecords.best(game.settings.mapId) }); progressionUI?.renderResults(progressionSession.summary(), profileStore.view()); setMode('results'); },
+    onProgression: event => progression.solo(event),
     onSurvivalRecord: ({ mapId,waves,kills }) => zombieRecords.record(mapId,{ waves,kills }),
     onToast: message => { $('toast').textContent = message; toastUntil = performance.now() + 1900; },
     onFatal: showFatal,
   });
-  multiplayer = new MultiplayerUI({ getGame: () => game, getSettings: () => settings, getSelected: () => selected, getSelection: () => selection, onSkin: skinId => selectConfiguration({ ...selection, skinId }), onConfiguration: next => { selection = validateSelection({ ...selection, ...next }); persist(); home.render(); }, onRoomSettings: () => { if (mode === 'armory') renderArmorySession(); }, onRemoteStart: () => { if (backgroundSuspended || document.hidden) setMode('paused'); }, onHome: requestHome, onMode: setMode, onLoadout: showArmory, onToast: message => { $('toast').textContent = message; toastUntil = performance.now() + 1900; } });
+  multiplayer = new MultiplayerUI({ getGame: () => game, getSettings: () => settings, getSelected: () => selected, getSelection: () => selection, onSkin: skinId => selectConfiguration({ ...selection, skinId }), onConfiguration: next => { selection = { ...validateSelection({ ...selection, ...next }), finishId: selection.finishId }; persist(); home.render(); renderProgression(); }, onRoomSettings: () => { if (mode === 'armory') renderArmorySession(); }, onRemoteStart: () => { if (backgroundSuspended || document.hidden) setMode('paused'); }, onHome: requestHome, onMode: setMode, onLoadout: showArmory, onToast: message => { $('toast').textContent = message; toastUntil = performance.now() + 1900; },
+    onProgressionRoom: (room, client) => { progression.room(room, client); renderProgression(); },
+    onProgressionStop: () => progression.stop(),
+    onResults: () => progressionUI?.renderResults(progressionSession.summary(), profileStore.view()),
+  });
   equipmentUI = new EquipmentUI({ getView: equipmentView,
     canSelectInventory: () => mode === 'playing' && input.enabled && !backgroundSuspended && !document.hidden,
     onAction: action => multiplayer?.isActive() ? action.kind === 'equip-gun' && mode === 'armory'
@@ -303,6 +343,8 @@ try {
   });
   $('armory-cancel').addEventListener('click', () => { equipmentUI.close(); if (equipmentView().roundId) setMode('paused'); else if (multiplayer?.isConnected()) multiplayer.open(); else showHome(); });
   home = new HomeUI({ getSelection: () => selection, onSelection: selectConfiguration, onSolo: () => deploy(), onOnline: () => multiplayer.open(), onArmory: showArmory, onSettings: openSettings });
+  progressionUI = createProgressionUI({ document, onEquip: patch => selectConfiguration({ ...selection, ...patch }) });
+  renderProgression();
   preview = new WeaponPreview($('weapon-preview'));
   let previous = performance.now();
   function frame(now) {

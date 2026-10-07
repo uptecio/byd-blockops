@@ -10,8 +10,8 @@ import { onlineSelection } from './solo-modes.js';
 
 const $ = id => document.getElementById(id);
 export class MultiplayerUI {
-  constructor({ getGame, getSettings, getSelected, getSelection, onSkin, onConfiguration, onRoomSettings, onRemoteStart, onHome, onMode, onLoadout, onToast }) {
-    Object.assign(this, { getGame, getSettings, getSelected, getSelection, onSkin, onConfiguration, onRoomSettings, onRemoteStart, onHome, onMode, onLoadout, onToast });
+  constructor({ getGame, getSettings, getSelected, getSelection, onSkin, onConfiguration, onRoomSettings, onRemoteStart, onHome, onMode, onLoadout, onToast, onProgressionRoom, onProgressionStop, onResults }) {
+    Object.assign(this, { getGame, getSettings, getSelected, getSelection, onSkin, onConfiguration, onRoomSettings, onRemoteStart, onHome, onMode, onLoadout, onToast, onProgressionRoom, onProgressionStop, onResults });
     this.arena = null; this.room = null; this.busy = false; this.pendingDeployment = null;
     this.client = new RoomClient({ onRoom: room => this.receive(room), onError: message => {
       this.pendingDeployment = null; this.status(message, true);
@@ -20,7 +20,10 @@ export class MultiplayerUI {
     $('room-map').innerHTML = MAPS.map(map => `<option value="${map.id}">${map.name}</option>`).join('');
     $('room-mode').innerHTML = MODES.map(mode => `<option value="${mode.id}">${mode.name}</option>`).join('');
     $('room-skin').innerHTML = SKINS.map(skin => `<option value="${skin.id}">${skin.name}</option>`).join('');
-    $('room-skin').addEventListener('change', () => this.onSkin($('room-skin').value));
+    $('room-skin').addEventListener('change', () => {
+      this.onSkin($('room-skin').value);
+      $('room-skin').value = this.getSelection().skinId;
+    });
     for (const id of ['room-map', 'room-mode']) $(id).addEventListener('change', () => {
       if (!this.room || this.room.hostId !== this.client.id || this.room.phase === 'playing') return;
       this.client.send({ type: 'configure', mapId: $('room-map').value, modeId: $('room-mode').value });
@@ -70,12 +73,14 @@ export class MultiplayerUI {
   }
   receive(room) {
     const previous = this.room;
-    this.room = room; this.renderRoom();
+    this.room = room;
+    this.onProgressionRoom?.(room, this.client);
+    this.renderRoom();
     if (!previous || previous.mapId !== room.mapId || previous.modeId !== room.modeId) this.onRoomSettings?.();
     if (room.hostId === this.client.id && (!previous || previous.hostId !== room.hostId || previous.mapId !== room.mapId || previous.modeId !== room.modeId)) this.onConfiguration({ mapId: room.mapId, modeId: room.modeId });
     $('mode-badge').textContent = `ONLINE / ${room.code}`;
     $('online-setup').hidden = true; $('room-lobby').hidden = false;
-    if (room.phase === 'playing' && (!this.arena || !previous || previous.phase !== 'playing')) {
+    if (room.phase === 'playing' && (!this.arena || !previous || previous.phase !== 'playing' || previous.roundId !== room.roundId)) {
       this.pendingDeployment = null;
       const retainMenu = !['lobby', 'playing', 'confirm-home', undefined].includes(document.body.dataset.mode) || !$('settings-screen').hidden;
       if (this.arena) this.arena.stop();
@@ -107,8 +112,7 @@ export class MultiplayerUI {
     $('room-phase').textContent = room.phase === 'playing' ? 'MATCH IN PROGRESS' : room.phase === 'ended' ? 'ROUND COMPLETE' : 'WAITING FOR FRIENDS';
     const host = room.hostId === this.client.id;
     $('room-map').value = room.mapId; $('room-mode').value = room.modeId;
-    const own = room.players.find(player => player.id === this.client.id);
-    $('room-skin').value = own?.pendingSkinId || own?.skinId || this.getSelection().skinId;
+    $('room-skin').value = this.getSelection().skinId;
     $('room-map').disabled = $('room-mode').disabled = !host || room.phase === 'playing';
     $('room-settings-help').textContent = room.phase === 'playing' ? 'Map and mode are fixed for this round.' : host ? 'Choose the next round’s map and mode.' : 'The host chooses map and mode between rounds.';
     const sorted = [...room.players].sort((a, b) => b.kills - a.kills || a.deaths - b.deaths);
@@ -134,6 +138,7 @@ export class MultiplayerUI {
     room = room && Array.isArray(room.players) ? room : this.room;
     if (!room) return;
     renderMatchResults(room, this.client.id);
+    this.onResults?.();
     $('again-button').textContent = 'BACK TO ROOM ↗';
     this.onMode('results');
   }
@@ -158,6 +163,7 @@ export class MultiplayerUI {
   update(dt) { if (this.arena) this.arena.update(dt); }
   leave() {
     this.pendingDeployment = null;
+    this.onProgressionStop?.();
     this.client.send({ type: 'leave' }); this.client.close();
     if (this.arena) this.arena.stop(); this.arena = null; this.room = null;
     const game = this.getGame(); if (game) game.quit();

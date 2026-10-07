@@ -80,7 +80,7 @@ test('full health explains rejection and changing guns cancels without spending'
 test('real HUD cannot undo supply recovery death or throw locks and renders armour', t => {
   const { collect, game, ui, tap, document } = fixture(t), $ = id => document.getElementById(id);
   const onHud = runInNewContext(`(${main.match(/function onHud\(current\) \{[\s\S]*?\n\}/)[0]})`, {
-    $, equipmentUI: ui, renderMatchHud() {}, multiplayer:null, input:game.input, performance:{now:()=>0}, toastUntil:1,
+    $, equipmentUI: ui, renderMatchHud() {}, renderProgression() {}, multiplayer:null, input:game.input, performance:{now:()=>0}, toastUntil:1,
   });
   pickupEquipment(game.player.equipment, { kind:'grenade', grenadeType:'frag' });
   game.player.armour = 35; game.player.health = 30; collect('health'); tap('supply:health'); onHud(game);

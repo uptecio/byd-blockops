@@ -63,7 +63,7 @@ test('main HUD adds recovery suppression without undoing equipment death or thro
   let equipmentBlocked=false,phase;
   const onHud=runInNewContext(`(${callback})`,{$,equipmentUI:{render(){
     $('fire-button').disabled=equipmentBlocked;$('throw-button').disabled=equipmentBlocked;
-  }},renderMatchHud(){},multiplayer:null,input:{zoom:false},performance:{now:()=>0},toastUntil:1});
+  }},renderMatchHud(){},renderProgression(){},multiplayer:null,input:{zoom:false},performance:{now:()=>0},toastUntil:1});
   const game={getMatchView:()=>phase?{survival:{phase}}:{modeId:'ffa'},
     player:{health:100,dead:0},weapon:{name:'M4A1'},weaponState:{ammo:30,reserve:470,reloadRemaining:0},
     hitFlash:0,damageFlash:0,heldItem:'gun'};
