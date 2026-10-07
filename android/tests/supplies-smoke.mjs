@@ -118,6 +118,11 @@ try {
   await tap('home-settings');
   await evaluate('document.getElementById("bots").value="1"; document.getElementById("bots").dispatchEvent(new Event("input",{bubbles:true})); document.getElementById("difficulty").value="easy"; document.getElementById("difficulty").dispatchEvent(new Event("change",{bubbles:true}))');
   await tap('settings-done');
+  // Update-install intentionally preserves the preceding XP test's loadout.
+  // Select this route's rifle explicitly rather than relying on fresh app data.
+  await tap('home-armory');await wait(s=>s.mode==='armory');
+  await evaluate('document.querySelector("[data-class=assault]").click(); document.querySelector("[data-weapon=m4a1]").click()');
+  await tap('armory-home');await wait(s=>s.mode==='home');
   await tap('home-solo'); await wait(s => s.mode === 'playing');
   assert.match((await state()).timer,/^\d\d:\d\d$/);
   const key = (type, code) => send('Input.dispatchKeyEvent', {type,code,key:code.slice(-1).toLowerCase(),windowsVirtualKeyCode:code.slice(-1).charCodeAt(0)});
