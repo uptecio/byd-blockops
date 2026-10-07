@@ -62,7 +62,7 @@ Dependencies: 1 → 2; 3 consumes the reward IDs from 1; 4 consumes 1/3; 5 consu
 - `awardTally(tally, modeId, action, count=1) -> Tally`, returning a fresh tally for action names matching the five count fields; reject invalid actions/counts/mode combinations with RangeError. `finishTally(tally, { modeId, naturalEnd, won }) -> Tally` sets eligible once-only markers; no action credit means no normal finish, Zombies requires at least one cleared wave and never wins.
 - `validateTally(value, modeId) -> boolean`: exact keys/types, compatible actions, win implies eligible completion, weighted saturating sum equals earnedTotal. Normal modes allow eliminations, CTF also captures/returns; Zombies only kills/waves. Modules import no DOM/render/socket code.
 
-- [ ] **Write failing `progression.test.js` tests**, including these exact boundary assertions and table-driven tests for every action/non-action in the spec:
+- [x] **Write failing `progression.test.js` tests**, including these exact boundary assertions and table-driven tests for every action/non-action in the spec:
 
 ```js
 assert.equal(rankForXP(149).level, 1);
@@ -81,10 +81,10 @@ assert.equal(ownsCosmetic(149, 'skin', 'crimson-ninja'), false);
 
 Also pin the full reward order/thresholds, exact 2/10/25 rates, draw vs win, repeated finish, early quit, Zombies death before/after a wave, multi-level gains, all integer boundaries and malformed/extra fields. Damage/headshot/loot/auto-return are not accepted action names.
 
-- [ ] **Run RED:** `node --test tests/progression.test.js`. Expected: failure for missing exports/behavior, not unrelated environment setup.
-- [ ] **Implement the interfaces** in `src/progression.js`. Clamp sums, not input validation; invalid negative/fractional/non-finite XP is rejected. Keep reward ownership derived, with no persisted level or unlock list.
-- [ ] **Run GREEN:** same command; all new cases pass. Run `npm test` for baseline integration.
-- [ ] **Commit only Task 1 files:** `feat: define cosmetic XP progression and reward rules`.
+- [x] **Run RED:** `node --test tests/progression.test.js`. Expected: failure for missing exports/behavior, not unrelated environment setup.
+- [x] **Implement the interfaces** in `src/progression.js`. Clamp sums, not input validation; invalid negative/fractional/non-finite XP is rejected. Keep reward ownership derived, with no persisted level or unlock list.
+- [x] **Run GREEN:** same command; all new cases pass. Run `npm test` for baseline integration.
+- [x] **Commit only Task 1 files:** `feat: define cosmetic XP progression and reward rules`.
 
 ### Task 2: Durable profile and active-session reconciliation
 
