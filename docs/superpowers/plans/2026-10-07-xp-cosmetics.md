@@ -10,7 +10,7 @@
 
 **Spec:** `docs/superpowers/specs/2026-10-07-xp-cosmetics-design.md` (approved 2026-10-07).
 
-**Status:** Plan awaiting user review and execution-method selection. No product implementation is included in the planning commit.
+**Status:** Approved on 2026-10-07; user selected Native execution. Implementation underway; public deployment remains separately gated.
 
 ## Global Constraints
 

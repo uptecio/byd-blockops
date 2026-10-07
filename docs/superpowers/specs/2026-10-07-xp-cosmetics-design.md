@@ -2,7 +2,7 @@
 
 Date: 2026-10-07
 
-Status: written design approved by the user on 2026-10-07. Implementation-plan review and execution-method selection are next. Implementation and deployment have not started.
+Status: written design and implementation plan approved on 2026-10-07; user selected Native execution. Implementation underway. Public deployment has not started.
 
 Baseline: Block Ops 0.6.0, source `f9a1261`, Android version code 8, network protocol 4. Work stays in the existing checkout; unrelated files, the published game and previous release artifacts remain untouched during design.
 
