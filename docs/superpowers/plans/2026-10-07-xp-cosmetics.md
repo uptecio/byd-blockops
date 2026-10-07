@@ -98,7 +98,7 @@ Also pin the full reward order/thresholds, exact 2/10/25 rates, draw vs win, rep
 - `createProgressionSession(store) -> session`: `begin(key,modeId)` activates a trusted new participation (same key is idempotent; invalid key/mode throws RangeError); `accept(key,tally) -> Delta` validates mode/tally and accepts only the active key, otherwise zero credit. `end(key)` deactivates without bonus. `summary() -> null | {key,modeId,tally,creditedXP,newRewards}` returns detached presentation-only data, retained after end and reset on a genuine new begin. Repeated/lower receipts never downgrade the summary tally or repeat unlock notifications.
 - Offline keys are `JSON.stringify(['solo',runId])`; online keys `JSON.stringify(['online',normalizedServerOrigin,roundId,playerId])`. IDs are nonempty ASCII `[A-Za-z0-9_-]`, max 96; normalized origin max 512. Only trusted start/accepted-network lifecycle activates a key; receipt/results callbacks cannot activate themselves.
 
-- [ ] **Write failing storage/session tests.** Use separate store instances over shared fake storage and a child Node process reading the serialized record for restart verification. Named cases include `quota retry is atomic and duplicate safe`, `protected records are never overwritten`, and `evicted stale session stays inactive`.
+- [x] **Write failing storage/session tests.** Use separate store instances over shared fake storage and a child Node process reading the serialized record for restart verification. Named cases include `quota retry is atomic and duplicate safe`, `protected records are never overwritten`, and `evicted stale session stays inactive`.
 
 ```js
 // Given shared fake storage and a store with an active valid receipt key:
@@ -118,13 +118,13 @@ assert.equal(session.accept(oldKey, oldTally).creditedXP, 0);
 
 Pin getter/read/primary-write/backup-write failures separately; genuine absent keys; legacy original skin migration; valid-primary precedence; valid-backup recovery; invalid appearances with valid XP; malformed/oversized/future records; session stop/rematch; saturated total with receipt still saved; current-summary immutability; unchanged settings/online/zombie keys. For a denied initial read that later succeeds, assert existing 100 XP plus 150 newly earned XP becomes 250 once, not 150 or 400; overlapping pending keys keep the stored base untouched.
 
-- [ ] **Run RED:** `node --test tests/profile-store.test.js tests/progression-session.test.js`. Expected: new module/contract failures.
-- [ ] **Implement save/recovery and active gating.** Write previous confirmed valid primary as best-effort backup, then one complete primary JSON write containing XP and receipts. Backup failure never blocks primary success. Retain in-memory high-water after failure; even a duplicate receipt retries a dirty write without recrediting.
+- [x] **Run RED:** `node --test tests/profile-store.test.js tests/progression-session.test.js`. Expected: new module/contract failures.
+- [x] **Implement save/recovery and active gating.** Write previous confirmed valid primary as best-effort backup, then one complete primary JSON write containing XP and receipts. Backup failure never blocks primary success. Retain in-memory high-water after failure; even a duplicate receipt retries a dirty write without recrediting.
 
 Use a valid backup when primary is invalid/missing and show `Recovered previous save`. With no usable save, preserve unreadable records and run temporary in memory; unsupported future schema protects stored keys from overwrite even if a readable backup is available. Storage unavailable copy is exactly `Progress is not saved — storage unavailable`; unrecoverable/future data uses an explicit temporary-session/newer-save explanation instead. If the initial read was denied, track the unsaved session's XP increment and fresh receipt keys separately. On retry, first read/validate the stored base; only disjoint fresh participations can merge their accumulated increment and receipt ledger into it, once, before the atomic write. Apply explicitly changed valid desired appearances; otherwise retain the base's preferences. On overlap, corruption or unsupported schema keep the base untouched and explain temporary/conflicting progress. This is not multi-tab synchronization. Missing keys after a successful read are a valid zero base; a failed read is not.
 
-- [ ] **Run GREEN:** both files plus `npm test`; require reopened-store and subprocess assertions to pass, not only same-instance reads.
-- [ ] **Commit only Task 2 files:** `feat: persist XP and cosmetic preferences with safe recovery`.
+- [x] **Run GREEN:** both files plus `npm test`; require reopened-store and subprocess assertions to pass, not only same-instance reads.
+- [x] **Commit only Task 2 files:** `feat: persist XP and cosmetic preferences with safe recovery`.
 
 ### Task 3: New procedural skins and global gun finishes
 
@@ -137,7 +137,7 @@ Use a valid backup when primary is invalid/missing and show `Recovered previous 
 - Use flat palettes, with body/trim/face/visor/boots respectively: Crimson `#8f2038/#dfad45/#d9aa7d/#ffda63/#211b27`; Midnight `#172638/#536681/#bd8f70/#60bfd8/#111923`; Frost `#dbeaf0/#5fa7c0/#bc9078/#8ef3ff/#526778`; Solar `#db8b2b/#f5df8a/#a16c46/#56dcf0/#483d31`; Golden `#c99b34/#24202d/#d3a27e/#fff1ad/#1a1923`; Urban `#63717c/#a6b2b8/#bc8c68/#8bd0bc/#303943`; Lava `#943326/#ef8740/#563b32/#ffe17a/#2a2329`; Void `#38284f/#9379b6/#55526e/#b59dff/#1b1928`.
 - Finish palettes replace existing weapon body/steel/light slots, retaining black grips/barrels: Crimson `#ae2943/#4e2631/#e6a077`; Ice `#74c8ed/#36546a/#e7f7ff`; Forest `#557447/#6d644b/#c9bb82`; Violet `#9256cc/#493757/#dac0fa`; Orange `#eb8431/#604a38/#ffd797`; Arctic `#e5edf0/#788e9e/#ffffff`; Stealth `#222831/#353e49/#687481`; Gold `#d5ab43/#70582f/#fff0ad`.
 
-- [ ] **Write failing catalogue/model tests**, retaining the original eight-skin/Standard signature assertion and adding `all finishes preserve geometry and ownership`:
+- [x] **Write failing catalogue/model tests**, retaining the original eight-skin/Standard signature assertion and adding `all finishes preserve geometry and ownership`:
 
 ```js
 assert.equal(SKINS.length, 16);
@@ -152,10 +152,10 @@ assert.deepEqual(weaponCatalogueAfter, weaponCatalogueBefore);
 
 Iterate all 28 guns × nine finishes; all 16 characters × null/red/blue teams; ray-test existing badge directions, distinct palettes, knife independence and disposal. Reuse `tests/skins.test.js` signatures, do not replace its original golden with a new unchecked hash.
 
-- [ ] **Run RED:** `node --test tests/cosmetics.test.js tests/skins.test.js`. Expected: missing new looks/finish behavior, originals still intact.
-- [ ] **Implement catalogue/model extensions** with existing boxes/material ownership, no geometry increase or new renderer. Color slots may be named locally to avoid global color replacement accidentally tinting badges, face or knife.
-- [ ] **Run GREEN:** same command plus `npm test`. Original free visuals, hitboxes and per-model disposal stay unchanged.
-- [ ] **Commit only Task 3 files:** `feat: add unlockable block skins and gun finishes`.
+- [x] **Run RED:** `node --test tests/cosmetics.test.js tests/skins.test.js`. Expected: missing new looks/finish behavior, originals still intact.
+- [x] **Implement catalogue/model extensions** with existing boxes/material ownership, no geometry increase or new renderer. Color slots may be named locally to avoid global color replacement accidentally tinting badges, face or knife.
+- [x] **Run GREEN:** same command plus `npm test`. Original free visuals, hitboxes and per-model disposal stay unchanged.
+- [x] **Commit only Task 3 files:** `feat: add unlockable block skins and gun finishes`.
 
 ### Task 4: Offline earning and pending appearance lifecycle
 
@@ -167,7 +167,7 @@ Iterate all 28 guns × nine finishes; all 16 characters × null/red/blue teams; 
 - `ArenaGame.start(id, settings)` adds `settings.progressionSource: 'solo'|'online'` (default solo) and `finishId` (default Standard); create a collision-resistant runId on each actual solo start. Online adapter explicitly passes online and creates no solo progression. Use crypto.getRandomValues for legacy-compatible random IDs; do not require crypto.randomUUID.
 - `ArenaGame.setPendingAppearance({skinId,finishId})` validates known IDs and stores player pending fields without inventory mutation; keep `setPendingSkin(skinId)` as a wrapper preserving `pendingFinishId ?? finishId ?? 'standard'`. Reset applies both current fields, before equipment/model refresh. `events.onProgression` is optional for existing callers.
 
-- [ ] **Write failing headless integration tests** via `createHeadlessGame/cleanupGame`. Named case `pending appearance is not equipment` covers live/dead/knife/supply states. Exact outcomes:
+- [x] **Write failing headless integration tests** via `createHeadlessGame/cleanupGame`. Named case `pending appearance is not equipment` covers live/dead/knife/supply states. Exact outcomes:
 
 ```js
 assert.equal(afterEnemyKill.earnedTotal, 10);
@@ -185,13 +185,13 @@ assert.equal(game.player.pendingFinishId, 'crimson-red');
 
 Exercise gun/knife/grenade multi-kill, self/team/protected/no-kill damage, no headshot double bonus, both flag return types, capture ending round before completion, all bot difficulties, normal win/draw/idle finish, repeated finish/records, replay and stale closed adapter. For Zombies cover early death, wave recovery without applying pending choices, and next-run application.
 
-- [ ] **Run RED:** `node --test tests/progression-solo.test.js`. Expected: missing event/accounting/pending-finish behavior.
-- [ ] **Implement offline adapter hooks.** Accepted normal kills enter before `finishRound`; consume `tickMode` objective events before ending. Zombies report kill gains immediately at accepted death, wave gains at recovery, completion only at natural game-over. `quit()` never calls completion. Keep existing personal-best callback independent.
+- [x] **Run RED:** `node --test tests/progression-solo.test.js`. Expected: missing event/accounting/pending-finish behavior.
+- [x] **Implement offline adapter hooks.** Accepted normal kills enter before `finishRound`; consume `tickMode` objective events before ending. Zombies report kill gains immediately at accepted death, wave gains at recovery, completion only at natural game-over. `quit()` never calls completion. Keep existing personal-best callback independent.
 
 Include current finish in first-person weapon presentation cache checks. Respawn appearance rebuild alone must not refill weapons; existing respawn equipment reset retains its own original behavior. Original bots use the first eight skins/Standard. Neutral ground/death-drop models do not receive holder preferences.
 
-- [ ] **Run GREEN:** new tests plus `node --test tests/zombie-*.test.js tests/loot-solo.test.js tests/supply-solo.test.js tests/offline-modes.test.js tests/headshots.test.js`, then `npm test`.
-- [ ] **Commit only Task 4 files:** `feat: earn persistent progression from solo match actions`.
+- [x] **Run GREEN:** new tests plus `node --test tests/zombie-*.test.js tests/loot-solo.test.js tests/supply-solo.test.js tests/offline-modes.test.js tests/headshots.test.js`, then `npm test`.
+- [x] **Commit only Task 4 files:** `feat: earn persistent progression from solo match actions`.
 
 ### Task 5: Authoritative online receipts and cosmetic replication
 
@@ -204,7 +204,7 @@ Include current finish in first-person weapon presentation cache checks. Respawn
 - `RoomClient` atomically validates receipt, room and equipment, then exposes `room.selfProgression`; immutable validated connection origin is available as `client.serverOrigin`. Use roundId to permit legitimate new-round clock/award resets without weakening existing monotonically increasing connection life IDs or equipment action sequences.
 - Create/join include desired finishId. Retain existing `{type:'skin',skinId}`; add exact `{type:'finish',finishId}` and `RoomManager.setFinish(id,finishId)`. Known IDs only, existing size/rate limits; no claim of secure unlock proof. During playing defer until respawn, outside playing apply immediately.
 
-- [ ] **Write failing room/protocol/socket tests**, using existing RoomManager and fake Socket helpers. Include `final receipt precedes immediate rematch` with a real owned WebSocket server and new-start request between simulation broadcasts:
+- [x] **Write failing room/protocol/socket tests**, using existing RoomManager and fake Socket helpers. Include `final receipt precedes immediate rematch` with a real owned WebSocket server and new-start request between simulation broadcasts:
 
 ```js
 assert.equal(killerReceipt.tally.earnedTotal, 10);
@@ -222,13 +222,13 @@ assert.equal(receivedPhasesBeforeNewRound.at(-1), 'ended');
 
 Also pin all online modes/objectives, scoring-kill end order, no-action survivor bonus exclusion, repeated/lower receipts, gaps in event arrays, menu-time packets, player leave/new participation, duplicate victim life, config without new round, atomic rejection preserving previous valid state, prototype/extra-key/non-finite/wrong-mode/future totals, 4→5 update guidance, and malformed appearance messages. Every client fixture must include the deliberate new exact shape.
 
-- [ ] **Run RED:** `node --test tests/progression-rooms.test.js tests/progression-protocol.test.js tests/network.test.js tests/network-client.test.js`. Expected: missing new protocol fields/behavior.
-- [ ] **Implement server accounting before transient events.** Initialize tally on start/new participation. In `eliminate`, credit only the accepted killer-stat increment before `syncMode`; count actor-attributed flag events before queue consumption. Finalize eligible present players only on the transition to ended. `broadcast`/welcome attach private receipts. Before configuration or start replaces an ended round, broadcast its finalized state first; no history replay or acknowledgement service is added.
+- [x] **Run RED:** `node --test tests/progression-rooms.test.js tests/progression-protocol.test.js tests/network.test.js tests/network-client.test.js`. Expected: missing new protocol fields/behavior.
+- [x] **Implement server accounting before transient events.** Initialize tally on start/new participation. In `eliminate`, credit only the accepted killer-stat increment before `syncMode`; count actor-attributed flag events before queue consumption. Finalize eligible present players only on the transition to ended. `broadcast`/welcome attach private receipts. Before configuration or start replaces an ended round, broadcast its finalized state first; no history replay or acknowledgement service is added.
 
 Update OnlineArena to pass progressionSource online; replicate current/pending finish and include finish in remote/first-person model cache identity. Same-map rematches key off roundId, not only phase/map. Keep authoritative appearance out of the profile store; Task 6 handles desired choices. Protocol validators reject malformed whole packets rather than partially applying cosmetics or XP.
 
-- [ ] **Run GREEN:** targeted command, `node --test tests/online-modes.test.js tests/rooms.test.js tests/gear-protocol.test.js`, then `npm test`. Old-protocol rejection must be a clear update message, not silent failure.
-- [ ] **Commit only Task 5 files:** `feat: replicate round-scoped XP receipts and gun finishes`.
+- [x] **Run GREEN:** targeted command, `node --test tests/online-modes.test.js tests/rooms.test.js tests/gear-protocol.test.js`, then `npm test`. Old-protocol rejection must be a clear update message, not silent failure.
+- [x] **Commit only Task 5 files:** `feat: replicate round-scoped XP receipts and gun finishes`.
 
 ### Task 6: Profile-bound UI, unlock controls and results
 
@@ -241,7 +241,7 @@ Update OnlineArena to pass progressionSource online; replicate current/pending f
 - Keep `renderMatchResults` unchanged, including its existing `best` option. After it renders, call `ui.renderResults(session.summary(),store.view())`. MultiplayerUI gains `onResults()` for that presentation callback, plus `onProgressionRoom(room,client)` and `onProgressionStop()`, invoked after accepted network state but before render/end handling, including menus.
 - Main owns one store/session/UI. Boot validates legacy selection, migrates skin, then overlays profile desired appearance. Solo start/update/stop wire to begin/accept/end. Online keys derive from accepted own receipt + validated origin; activate only on new accepted round/participation, reconcile before results; deactivate on lobby reconfiguration/leave/disconnect. Results read summary only.
 
-- [ ] **Write failing UI/wiring tests** with minimal DOM stubs patterned after the existing inventory fixture. Name `authoritative old look cannot revert preference`; no new DOM dependency. Assertions include:
+- [x] **Write failing UI/wiring tests** with minimal DOM stubs patterned after the existing inventory fixture. Name `authoritative old look cannot revert preference`; no new DOM dependency. Assertions include:
 
 ```js
 assert.equal(lockedChoiceResult.ok, false);
@@ -257,13 +257,13 @@ assert.equal(toastComputedPointerEvents, 'none');
 
 Cover Home/Armory/room selector gates, save failure/success announcements, all levels crossed coalesced once, no auto-equip, pending preference across restart, ordinary weapon selection unchanged, session lifecycle callback ordering, denied storage boot, and large XP formatting.
 
-- [ ] **Run RED:** `node --test tests/progression-ui.test.js`. Expected: missing UI/bindings rather than fixture errors.
-- [ ] **Implement adapter and narrow wiring.** Show level/next reward, lock requirements, warnings, desired/current timing and breakdown. Remove misleading `ALL SKINS UNLOCKED` text. Reuse existing preview renderers; no per-card WebGL contexts. Selection saves even while pending; online authoritative current/pending updates affect gameplay display only.
+- [x] **Run RED:** `node --test tests/progression-ui.test.js`. Expected: missing UI/bindings rather than fixture errors.
+- [x] **Implement adapter and narrow wiring.** Show level/next reward, lock requirements, warnings, desired/current timing and breakdown. Remove misleading `ALL SKINS UNLOCKED` text. Reuse existing preview renderers; no per-card WebGL contexts. Selection saves even while pending; online authoritative current/pending updates affect gameplay display only.
 
 Retry dirty saves on subsequent accepted receipts, cosmetic actions and foreground/Home return; do not depend on those for initial write. Coalesce gameplay XP/unlock notices in a pointer-transparent, nonmodal region away from crosshair/controls/inventory. Omit an extra unlock sound in this release (the spec makes it optional); Sound off remains silent. Preserve offline pause and online neutral-input/live-clock behavior.
 
-- [ ] **Run GREEN:** new unit file and `npm test`; build then run existing `npm run test:home`, `npm run test:inventory`, `npm run test:multiplayer`. Expectations: controls/previews remain usable, no page/runtime errors.
-- [ ] **Commit only Task 6 files:** `feat: show saved XP and unlockable cosmetic selections`.
+- [x] **Run GREEN:** new unit file and `npm test`; build then run existing `npm run test:home`, `npm run test:inventory`, `npm run test:multiplayer`. Expectations: controls/previews remain usable, no page/runtime errors.
+- [x] **Commit only Task 6 files:** `feat: show saved XP and unlockable cosmetic selections`.
 
 ### Task 7: Persistent browser/native acceptance and candidate packaging
 
@@ -274,7 +274,7 @@ Retry dirty saves on subsequent accepted receipts, cosmetic actions and foregrou
 - New scripts: `test:progression` runs progression.browser and progression-layout; `test:progression:android` runs android/tests/progression-smoke.mjs. Tests use `ARTIFACT_DIR`, `DIST_DIR`, and Android `ANDROID_APK_PATH`, `ANDROID_SERIAL`, `GAME_TEST_SERVER_URL` (owned TLS only).
 - Native harness refuses a serial not explicitly identified as an owned test emulator. Use a unique CDP forward; never target a physical device automatically, uninstall, or clear app data. UI input/observations may use existing helpers; no product debug hooks or artificial XP injection for earning gates.
 
-- [ ] **Write acceptance tests and run RED against current integrated assets.** Add concrete assertions before missing harness/version updates. A deterministic real-play route is solo FFA: earn 14 eliminations (140 XP), quit; earn one in the next round (150), select Crimson Ninja as pending, quit and reopen. Then win a fresh FFA (150 action +50 finish +25 win =225) to reach 375, unlock/select Crimson Red, and reopen again. Use actual aim/fire/respawn controls with one Easy bot; no forced score or simulated time advancement.
+- [x] **Write acceptance tests and run RED against current integrated assets.** Add concrete assertions before missing harness/version updates. A deterministic real-play route is solo FFA: earn 14 eliminations (140 XP), quit; earn one in the next round (150), select Crimson Ninja as pending, quit and reopen. Then win a fresh FFA (150 action +50 finish +25 win =225) to reach 375, unlock/select Crimson Red, and reopen again. Use actual aim/fire/respawn controls with one Easy bot; no forced score or simulated time advancement.
 
 ```js
 assert.equal(afterEarlyExitXP, 150);
@@ -290,12 +290,12 @@ assert.equal(afterSignedUpdateXP, beforeSignedUpdateXP);
 
 Other cases: genuine zombie wave/finish credit, solo TDM/CTF objectives, online two-peer XP and current/pending appearance (observe actual models plus labels), server restart/new participation, cross-origin browser isolation, corrupt/denied/future save warnings, and pending preference while an online menu is open. Synthetic max-XP profiles are permitted only in separate catalogue/layout cases, never as the earning/restart evidence.
 
-- [ ] **Implement the test harnesses and version bump.** Use passive simulation observations from `tests/helpers/loot-browser.js` for real movement timing; native touch uses actual adb gestures with feedback, not compressed drag sequences. Add exact 0.7.0/code9 assertions to package smoke and compare signer fingerprint to the existing release. Refresh lockfile metadata without dependency upgrades. Canonical new artifact is `artifacts/block-ops-v0.7.0-xp-cosmetics.apk`.
+- [x] **Implement the test harnesses and version bump.** Use passive simulation observations from `tests/helpers/loot-browser.js` for real movement timing; native touch uses actual adb gestures with feedback, not compressed drag sequences. Add exact 0.7.0/code9 assertions to package smoke and compare signer fingerprint to the existing release. Refresh lockfile metadata without dependency upgrades. Canonical new artifact is `artifacts/block-ops-v0.7.0-xp-cosmetics.apk`.
 
 Check 16 skins/nine finishes/save warnings/large totals at 854×480, 1200×700, 1280×720 and control scale 1/1.3 in modern and legacy modes. Check no overlap/input interception at touch controls. Android: test genuine offline earning, force-stop/relaunch, background/foreground, and retained choice/XP through same-signed update-install. Separately verify actual versionCode 8→9 migration preserves old settings/zombie records; version 8 never had XP. To test earned XP across replacement, earn in the preliminary code9 candidate then `adb install -r` the final same-signed code9 candidate; report this accurately as update-install, not invented XP in v0.6.0.
 
-- [ ] **Run GREEN:** `npm run build`, `npm run test:progression`, native progression smoke against owned emulator and separate TLS staging. Use `BUILD_DIR` for the browser build, then `DIST_DIR`/`APK_OUTPUT_PATH` for `bash scripts/build-apk.sh`, inside a fresh `mktemp -d` artifact directory; `ANDROID_APK_PATH=... DIST_DIR=... npm run test:apk` must prove exact bundled bytes/version/signer. Capture real screenshots, raw test logs and measured outcomes; failure is not a pass because a screenshot was created.
-- [ ] **Commit only Task 7 source/test/version files:** `test: verify XP saves across browser and Android restarts`. Retain candidate APK and evidence outside source commits as existing conventions require.
+- [x] **Run GREEN:** `npm run build`, `npm run test:progression`, native progression smoke against owned emulator and separate TLS staging. Use `BUILD_DIR` for the browser build, then `DIST_DIR`/`APK_OUTPUT_PATH` for `bash scripts/build-apk.sh`, inside a fresh `mktemp -d` artifact directory; `ANDROID_APK_PATH=... DIST_DIR=... npm run test:apk` must prove exact bundled bytes/version/signer. Capture real screenshots, raw test logs and measured outcomes; failure is not a pass because a screenshot was created.
+- [x] **Commit only Task 7 source/test/version files:** `test: verify XP saves across browser and Android restarts`. Retain candidate APK and evidence outside source commits as existing conventions require.
 
 ### Task 8: Full regression, independent review and release gate
 
@@ -303,10 +303,10 @@ Check 16 skins/nine finishes/save warnings/large totals at 854×480, 1200×700, 
 
 **Interfaces:** Release evidence records source commit, exact browser asset hashes, APK path/hash/signer/code, configured default server, tested save scenarios, owned staging/emulator identities, cleanup results and unresolved parked-BYD checks. It distinguishes `candidate verified` from `publicly deployed`.
 
-- [ ] **Freeze a unique source/assets snapshot and run the complete gate.** Use test-specific owned ports/origins; never restart the existing public server to run tests. Commands: `npm test`; build-output/WebView checks; all package browser scripts (`test:browser`, `test:home`, `test:touch`, `test:configurations`, `test:multiplayer`, `test:loot`, `test:loot:touch`, `test:webview`, `test:inventory`, `test:zombies`, `test:supplies`, `test:progression`); additional existing carried-flag/inventory-layout/native cleanup smokes; existing native offline/Zombies/supplies/online matrix plus new progression smoke and package smoke against frozen assets. Expected: every assertion passes, no console/runtime errors, no test peers/resources leaked. Preserve failures and their fixes; do not substitute a later untested build.
-- [ ] **Request independent code review using the required skill.** Review approved spec, commits and real test evidence; fix material findings with regression tests and rerun affected gates. Native execution has this final whole-feature independent review; subagent execution also performs its required per-task reviews. No review changes are accepted blindly.
-- [ ] **Write and verify candidate evidence.** Read back release document and check all named artifacts/hashes exist. `git diff --check` and scoped diff/status must show no accidental user-file changes. Commit release evidence/checked plan only: `docs: record verified XP and cosmetics candidate`.
-- [ ] **Stop at the public release boundary and ask for a fresh empty-room window.** Until that authority exists, report candidate ready with its APK and local/staging test instructions; public game remains old. Do not reuse prior “no one is in the lobbys” approval.
+- [x] **Freeze a unique source/assets snapshot and run the complete gate.** Use test-specific owned ports/origins; never restart the existing public server to run tests. Commands: `npm test`; build-output/WebView checks; all package browser scripts (`test:browser`, `test:home`, `test:touch`, `test:configurations`, `test:multiplayer`, `test:loot`, `test:loot:touch`, `test:webview`, `test:inventory`, `test:zombies`, `test:supplies`, `test:progression`); additional existing carried-flag/inventory-layout/native cleanup smokes; existing native offline/Zombies/supplies/online matrix plus new progression smoke and package smoke against frozen assets. Expected: every assertion passes, no console/runtime errors, no test peers/resources leaked. Preserve failures and their fixes; do not substitute a later untested build.
+- [x] **Request independent code review using the required skill.** Review approved spec, commits and real test evidence; fix material findings with regression tests and rerun affected gates. Native execution has this final whole-feature independent review; subagent execution also performs its required per-task reviews. No review changes are accepted blindly.
+- [x] **Write and verify candidate evidence.** Read back release document and check all named artifacts/hashes exist. `git diff --check` and scoped diff/status must show no accidental user-file changes. Commit release evidence/checked plan only: `docs: record verified XP and cosmetics candidate`.
+- [x] **Stop at the public release boundary and ask for a fresh empty-room window.** Until that authority exists, report candidate ready with its APK and local/staging test instructions; public game remains old. Do not reuse prior “no one is in the lobbys” approval.
 - [ ] **Only after fresh release approval**, rediscover live route/process/cwd/assets and current room state, preserve an exact rollback snapshot, coordinate protocol-5 server/browser/APK, and verify current default server plus previously saved server settings. If a new default URL changes bundled bytes, rebuild/freeze/retest relevant browser/native online/persistence/package gates before publishing the replacement. Retain old artifacts. Verify live asset hashes, two-peer protocol/appearance/XP, cleanup and health; document rollback/final URLs. Ask the user to validate reopening/progress/rendering on the parked BYD. No push/merge.
 
 ## Plan self-review and handoff
