@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import {mkdir,writeFile} from 'node:fs/promises';
 import {chromium} from 'playwright';
 import {nativeProgressionFixture} from './helpers/progression-native.js';
-import {observer,moveTo,lookAt,until} from '../../tests/helpers/loot-browser.js';
+import {observer,moveTo,lookTo,lookAt,until} from '../../tests/helpers/loot-browser.js';
 import {readProfile} from '../../tests/helpers/progression-browser.js';
 
 const server=process.env.GAME_TEST_SERVER_URL;assert.ok(server,'Explicit owned TLS staging required');
@@ -18,6 +18,22 @@ function observeModels(){
     return {...o.userData,weaponColors,colors:o.children.filter(c=>c.material?.color).map(c=>c.material.color.getHexString())};
   });
   Array.prototype.push=function(...items){for(const o of items)if(o?.isObject3D&&o.userData?.skinId)models.add(o);return push.apply(this,items);};
+}
+async function moveNative(page, observed, x, z){
+  await lookTo(page,observed,0);
+  // Match the existing native online smoke: remote TLS snapshots lag key-up.
+  // Bounded real-key pulses and a neutral interval avoid chasing stale positions.
+  for(const [axis,target,positive,negative] of [['x',x,'KeyD','KeyA'],['z',z,'KeyS','KeyW']]){
+    const deadline=Date.now()+30000;
+    while(Math.abs(target-observed.player[axis])>.6&&Date.now()<deadline){
+      const difference=target-observed.player[axis],key=difference>0?positive:negative;
+      await page.keyboard.down(key);
+      try{await page.waitForTimeout(Math.min(300,Math.abs(difference)/5.3*1000));}
+      finally{await page.keyboard.up(key);}
+      await page.waitForTimeout(650);
+    }
+    assert.ok(Math.abs(target-observed.player[axis])<=.6,`Native walk settles at ${axis}=${target}: ${JSON.stringify(observed.player)}`);
+  }
 }
 let page;
 try {
@@ -39,7 +55,7 @@ try {
   await until(()=>a.player&&b.player,'real native/browser snapshots');
   await until(async()=>(await peer.evaluate(()=>window.__xpModelRead())).some(m=>m.skinId==='crimson-ninja'&&m.finishId==='crimson-red'&&m.colors.includes('8f2038')&&m.weaponColors.includes('ae2943')),'browser renders native earned skin palette and actual gun finish');
   await until(async()=>(await page.evaluate(()=>window.__xpModelRead())).some(m=>m.skinId==='robo-unit'&&m.colors.includes('7c94a6')),'native renders peer actual Robo palette');
-  await moveTo(page,a,0,10);await moveTo(peer,b,0,0);await lookAt(page,a,b);
+  await moveNative(page,a,0,10);await moveTo(peer,b,0,0);await lookAt(page,a,b);
   const victimLife=b.player.lifeId;await page.keyboard.press('KeyF');await until(()=>b.player.lifeId>victimLife,'real native shot eliminates and peer respawns');
   await until(async()=>(await readProfile(page)).lifetimeXP===original.lifetimeXP+10,'native receives and saves its private10XP');
   assert.equal((await readProfile(peer)).lifetimeXP,0);
@@ -58,4 +74,8 @@ try {
   page=await f.relaunch();assert.deepEqual(await readProfile(page),saved,'stable APK origin preserves online XP and preference after force-stop');
   await writeFile(`${artifacts}/native-online-evidence.json`,JSON.stringify({server,beforeXP:original.lifetimeXP,afterXP:saved.lifetimeXP,appearance:saved},null,2));
   f.clean();assert.deepEqual(errors,[]);console.log('PASS native TLS online: actual private XP, both rendered peer palettes, pending skin/finish through open menu/respawn, force-stop retention');
+}catch(error){
+  await writeFile(`${artifacts}/failure-packets.json`,JSON.stringify({native:f.packets.slice(-80),peer:peerPackets.slice(-80)},null,2));
+  if(page)await page.screenshot({path:`${artifacts}/failure-native.png`}).catch(()=>{});
+  throw error;
 }finally{await browser.close();await f.close();}
