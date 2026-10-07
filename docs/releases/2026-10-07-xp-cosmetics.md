@@ -1,6 +1,6 @@
-# XP and cosmetics 0.7.0 candidate verification
+# XP and cosmetics 0.7.0 release verification
 
-Status: **candidate verified, not publicly deployed**. The existing public game remains 0.6.0 / protocol 4. Publishing the protocol-5 browser, server and APK requires a newly approved maintenance window. Physical BYD rendering, responsiveness and restart behaviour remain a parked-device acceptance check.
+Status: **publicly deployed and verified** on 2026-10-07, after fresh user approval and a second empty-room confirmation. [Play Block Ops](https://myth-referring-tablets-venture.trycloudflare.com). Browser/server are 0.7.0 / protocol 5, using the exact verified APK asset bytes. Physical BYD rendering, responsiveness and restart behaviour remain a parked-device acceptance check.
 
 ## What this update adds
 
@@ -18,7 +18,7 @@ Progress is local to the device and browser origin, without accounts or cloud sy
 - APK SHA-256: `faa2f4f2cf0252b9f9f135344c748664572c16de0c1ebfe841a679b9e6e152ed`.
 - Signing certificate SHA-256: `6b2d84eb4133168fec0850ed710acffa01d8399b75c8410621b2d0ce9881cb49`, unchanged from 0.6.0.
 - Package `au.local.blockops`, version 0.7.0 / code 9, minSdk 26, targetSdk 36, INTERNET permission only. The ES2017 target and WebGL1 fallback remain.
-- Bundled default server: `https://myth-referring-tablets-venture.trycloudflare.com`. Until the coordinated server update, use the candidate offline or with a separately configured protocol-5 test server; the public protocol-4 server is not compatible.
+- Bundled default server: `https://myth-referring-tablets-venture.trycloudflare.com`, unchanged during publication and now serving protocol 5. Install the 0.7.0 APK for online play; the old protocol-4 APK cannot join the new server.
 
 | Bundled asset | SHA-256 |
 | --- | --- |
@@ -31,7 +31,7 @@ The canonical APK and preliminary Android-tested APK are byte-identical. Package
 
 ## Genuine earning and save evidence
 
-Task 7 acceptance and its final full unit suite passed: **826/826** tests, no skips. Evidence is under `artifacts/xp-cosmetics-x2pHsi`; `execution-evidence.tar.gz` preserves the execution logs, final-review record and pre-publication ledger. The working ledger remains in `.superpowers/sdd/2026-10-07-xp-cosmetics` because Task 8's separately authorised public release is still pending.
+Task 7 acceptance and its final full unit suite passed: **826/826** tests, no skips. Evidence is under `artifacts/xp-cosmetics-x2pHsi`; `execution-evidence.tar.gz` preserves the execution logs, final-review record and pre-publication ledger. After Task 8 completion, the final execution workspace is archived recoverably at `artifacts/xp-cosmetics-live-dEhwLP/final-execution-workspace`, rather than deleting its logs.
 
 Execution-evidence archive SHA-256: `51217994fd3a5175604c97f47e55d788ca167a37e3ec65c854197eac89e1c378`. Final process inspection found no remaining owned test browsers, scripts or emulator processes.
 
@@ -80,9 +80,23 @@ The disposable Android 36 AVD is `BlockOpsXPTask`, serial `emulator-5584`, with 
 
 Owned TLS staging used Node port 39523 and `https://glasgow-desirable-walt-bomb.trycloudflare.com`, separate from the public game. After all native checks, fresh command/cwd/DIST_DIR and zero-room checks verified Node PID 571139 and tunnel PID 571255 before graceful termination. The owned AVD name, registry/disk paths and PID 567694/port 5584 were rechecked before `adb emu kill`. All three processes exited; the adb device and forward lists were empty. Disks, saves and evidence were retained. These historical identifiers are not authority for future signalling. Cleanup evidence: `frozen-sppocv/logs/owned-cleanup.log` and execution ledger.
 
-The public tunnel PID 21648 and Node PID 22931 were not signalled. A read-only HTTPS check returned healthy/zero rooms and the unchanged 0.6.0 footer; that observation is not ongoing empty-room permission. An independently owned ephemeral server returned each exact frozen asset with `Cache-Control: no-store` and was closed afterward (`logs/served-assets.log`).
+During candidate verification, public tunnel PID 21648 and old Node PID 22931 were left untouched. A read-only HTTPS check returned healthy/zero rooms and the then-current 0.6.0 footer; that observation was not reused as empty-room permission. An independently owned ephemeral server returned each exact frozen asset with `Cache-Control: no-store` and was closed afterward (`logs/served-assets.log`).
 
-Do not treat earlier empty-lobby permission as approval for this release. Before publication, freshly discover the current public route and server, coordinate an empty-room window, preserve exact rollback source/assets, then deploy protocol-5 server/browser/APK together. Recheck preserved saved server addresses as well as the bundled default. If the tunnel URL changes, rebuild and retest the changed bytes under a distinct verified identity. Previous APKs remain available; no push, merge or branch deletion is part of this work.
+Publication used fresh approval, rediscovered identity and an immediately rechecked empty-room window, as recorded below. Any future deployment or rollback must repeat identity and room checks; historical PIDs are not authority to signal a process. If a future tunnel URL changes, rebuild and retest changed bytes under a distinct verified identity. Previous APKs remain available; no push, merge or branch deletion is part of this work.
+
+## Approved public deployment
+
+- Evidence root: `artifacts/xp-cosmetics-live-dEhwLP`. `release-source` is extracted from the frozen source archive plus byte-identical frozen assets; `rollback-source` is an exact copy of the actual 0.6.0 live source/assets. Both retain their dependency link. Old APKs are untouched.
+- At 2026-10-07 10:25:05 UTC, `cutover.mjs` verified old PID 22931's exact executable, cwd, serving environment, local/public assets and zero rooms immediately before SIGTERM. It kept tunnel PID 21648 and the same public hostname. Replacement detached Node PID 620214 serves `release-source` on `127.0.0.1:4185`; live readiness/asset verification passed at 10:25:06 UTC. The cutover includes automatic rollback if its asset gate fails; it was not needed.
+- `live-browser-corrected.log`: two real public browser clients completed protocol-5 handshakes, two natural CTF wins (host 450 XP, idle guest zero), real elimination (guest 10 XP), pending/respawn cosmetic transitions, actual Crimson Ninja/Crimson Red palettes, rejoin, exact profile retention on reload, and saved-server reconnect. The test never restarted the public server. `browser/evidence.json` and screenshots record the result.
+- `live-native-corrected.log`: actual APK SHA-256 on the emulator matched the canonical download. The retained saved-server setting took precedence as intended; reloading the owned default-address fixture selected the current bundled URL without filling it. Actual public TLS play earned 870→880 XP, replicated both peer models, applied pending skin/finish during a menu-open respawn, saved the public server and retained the exact XP/look after force-stop. `native-corrected/native-online-evidence.json` records the result. No progression data was reset or seeded.
+- `delivery-final.log` / `delivery-manifest.json`: all four local/public HTTP assets exactly match the frozen candidate and APK; `Cache-Control: no-store`, version, protocol evidence, bundled URL, signer and package checks pass. Package **3/3** and fresh full unit **826/826** passed. No URL change or APK rebuild was needed.
+- Failed publication-test attempts remain retained. The first browser cleanup used the gameplay Home selector while Armory was open; the corrected one-off fixture uses each screen's actual Home/Leave button. The first native default fixture immediately force-stopped after manually removing its saved-server property, and the old persisted override returned. Diagnosis proved the installed APK hash correct and a normal page reload selected the current default; the corrected setup reloads and waits for the JavaScript UI, then retains the separate real-play force-stop assertion. An attempted diagnostic fetch of a packaged asset was rejected; on-device APK hashing supplied that evidence instead. No product code or assertions were weakened.
+- Both test rooms were left, health returned `{ok:true, rooms:0}`, and owned native forwards were removed. Emulator PID 620592 / serial 5584 / `BlockOpsXPTask` was revalidated and stopped; its disks/saves remain. Public Node 620214 and tunnel 21648 remain running. `cleanup.log` records the boundary.
+
+For rollback, first obtain a fresh maintenance window, rediscover and verify the live Node's exact identity, and check rooms. Stop only that verified Node and launch `rollback-source/server/server.mjs` with `HOST=127.0.0.1`, `PORT=4185` and `DIST_DIR` pointing to `rollback-source/dist`; leave the tunnel running. Verify public/local bytes against rollback assets and restore use of the retained 0.6.0 APK. Do not clear any browser/app saves; the older release does not understand the new XP profile.
+
+Reload the browser tab to obtain 0.7.0. If an older installation has a saved **different/expired** server hostname, Online Friends → Server settings must be changed to the current public URL; an app update intentionally does not overwrite that preference. This is a temporary tunnel requiring the host computer and tunnel process to stay running, not permanent hosting.
 
 For local browser testing of the candidate, run this from the repository root, then open the local address printed by the server:
 
@@ -104,5 +118,6 @@ Online testing requires a protocol-5 server; the APK's Online Friends → Server
 8. Keep only server awards actually received and confirmed locally. Cost if wrong: an abrupt disconnect can lose undelivered final actions.
 9. Uninstalling, clearing storage and hardware failure remain outside the local-save promise. Cost if wrong: progress can be lost without cloud/export recovery.
 10. Require a parked physical-BYD acceptance test. Cost if wrong: emulator checks may miss car-specific rendering, performance or power-cycle issues.
+11. Archive the completed execution workspace recoverably rather than erase its logs. Cost if wrong: a small amount of extra disk usage; source checkout and live release are unaffected.
 
 Deferred Minor: the temporary recovered-appearance mismatch described in the review section. No Critical/Important review findings were left unfixed.
