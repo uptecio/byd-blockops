@@ -87,3 +87,17 @@ export function segmentClear(a, b, world, { ignoreSolidIds = [] } = {}) {
     return rayBoxHit(a, direction, range, bounds) !== null;
   });
 }
+
+export function interactionReach(a, b, world, { horizontal = 1.2, vertical = .75 } = {}) {
+  if (!finitePoint(a) || !finitePoint(b) || !Number.isFinite(horizontal) || horizontal < 0 || !Number.isFinite(vertical) || vertical < 0) return false;
+  return Math.hypot(a.x - b.x, a.z - b.z) <= horizontal + 1e-10 && Math.abs(a.y - b.y) <= vertical + 1e-10
+    && segmentClear({ ...a, y: a.y + .1 }, { ...b, y: b.y + .1 }, world);
+}
+
+export function dropAnchor(position, world, { radius = .34, height = .2 } = {}) {
+  if (!finitePoint(position) || position.y < 0 || !Number.isFinite(radius) || radius <= 0 || !Number.isFinite(height) || height <= 0) return null;
+  const support = supportBelow(position, radius, world);
+  if (!support) return null;
+  const anchor = { x: position.x, y: support.y, z: position.z };
+  return canOccupyBody(anchor, radius, height, world) ? anchor : null;
+}

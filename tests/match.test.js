@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createModeState, tickMode, recordElimination } from '../src/modes.js';
 
-function round() { return createModeState({ modeId: 'ffa', map: { id: 'test' }, participants: [{ id: 'local', teamId: null }, { id: 'bot-0', teamId: null }] }); }
+function round() { return createModeState({ modeId: 'ffa', map: { id: 'test', bounds: { min: -30, max: 30 }, solids: [] }, participants: [{ id: 'local', teamId: null }, { id: 'bot-0', teamId: null }] }); }
 function kill(state, lifeId, killerId = 'local', victimId = 'bot-0') { recordElimination(state, { killerId, victimId, lifeId, position: { x: 0, z: 0 } }); }
 test('a round expires after three minutes, never going below zero', () => {
   const state = round(); tickMode(state, 179, []); assert.equal(state.ended, false);

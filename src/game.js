@@ -376,7 +376,7 @@ export class ArenaGame {
       this.presentGearEvents(this.gearCombatState.events.splice(0));
     }
     if (!this.modeState.ended) {
-      const pickups = collectLoot(this.lootState, this.zombieRuntime ? [playerActor] : actors, { solids: this.world.solids })
+      const pickups = collectLoot(this.lootState, this.zombieRuntime ? [playerActor] : actors, { solids: this.world.solids, world: this.world.spatial })
         .map(event => ({ ...event, id: ++this.gearEventId }));
       this.pickupEvents.push(...pickups); this.gearEvents.push(...pickups);
       for (const event of pickups) if (event.playerId === 'local') this.audio.pickup?.();
@@ -567,9 +567,9 @@ export class ArenaGame {
     else victim.bar.scale.x = (this.zombieRuntime ? .65 : 1) * victim.health / 100;
     if (victim.health === 0) {
       if (this.zombieRuntime) { this.zombieRuntime.onEliminated(victim, actors); return true; }
-      const position = victim.id === 'local' ? victim : victim.model.position;
+      const position = victim.id === 'local' ? victim : victim.body;
       addDeathDrops(this.lootState, { actorId: victim.id, lifeId: victim.lifeId, position,
-        items: deathItems(victim.equipment), solids: this.world.solids });
+        items: deathItems(victim.equipment), solids: this.world.solids, world: this.world.spatial });
       clearEquipment(victim.equipment);
       victim.armour = 0;
       for (const bot of this.bots) {

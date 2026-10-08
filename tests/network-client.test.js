@@ -28,7 +28,7 @@ function room() {
 function ctfRoom() {
   const snapshot = room(); snapshot.modeId = 'ctf';
   snapshot.players[0].teamId = 'red'; snapshot.players[1].teamId = 'blue';
-  snapshot.flags = { red: { teamId: 'red', status: 'home', x: 0, z: 18, carrierId: null, returnRemaining: 0 }, blue: { teamId: 'blue', status: 'home', x: 0, z: -18, carrierId: null, returnRemaining: 0 } };
+  snapshot.flags = { red: { teamId: 'red', status: 'home', x: 0, y: 0, z: 18, carrierId: null, returnRemaining: 0 }, blue: { teamId: 'blue', status: 'home', x: 0, y: 0, z: -18, carrierId: null, returnRemaining: 0 } };
   return snapshot;
 }
 class Socket extends EventTarget {
@@ -250,6 +250,8 @@ test('invalid protocol 5 updates preserve the last valid room including objectiv
       snapshot => { snapshot.winnerId = 'p1'; }, snapshot => { snapshot.flags = null; },
       snapshot => { snapshot.flags.red.teamId = 'blue'; }, snapshot => { snapshot.flags.blue.status = 'missing'; },
       snapshot => { snapshot.flags.blue.x = NaN; }, snapshot => { snapshot.flags.red.returnRemaining = NaN; },
+      snapshot => { delete snapshot.flags.blue.y; }, snapshot => { snapshot.flags.blue.y = NaN; },
+      snapshot => { snapshot.flags.blue.y = -1; },
       snapshot => { snapshot.flags.red.carrierId = 'p2'; },
       snapshot => { Object.assign(snapshot.flags.blue, { status: 'carried', carrierId: 'departed' }); },
       snapshot => { Object.assign(snapshot.flags.blue, { status: 'carried', carrierId: 'p2' }); },

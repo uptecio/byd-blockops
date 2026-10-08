@@ -10,7 +10,7 @@ export class ObjectiveView {
     for (const teamId of ['red', 'blue']) {
       const material = new THREE.MeshBasicMaterial({ color: teamId === 'red' ? '#ff4141' : '#3185ff' });
       const base = mesh(new THREE.RingGeometry(.8, 1.2, 24), material);
-      base.rotation.x = -Math.PI / 2; base.position.set(map.bases[teamId].x, .025, map.bases[teamId].z);
+      base.rotation.x = -Math.PI / 2; base.position.set(map.bases[teamId].x, (map.bases[teamId].y ?? 0) + .025, map.bases[teamId].z);
       const flag = new THREE.Group(); flag.name = `${teamId}-flag`;
       const pole = mesh(new THREE.CylinderGeometry(.035, .035, 2, 6), new THREE.MeshBasicMaterial({ color: '#ffffff' })); pole.position.y = 1;
       const cloth = mesh(new THREE.BoxGeometry(.65, .4, .03), material); cloth.position.set(.325, 1.7, 0);
@@ -26,8 +26,8 @@ export class ObjectiveView {
       const carrier = state.status === 'carried' ? actors.find(actor => actor.id === state.carrierId) : null;
       const flag = this.flags[teamId];
       // Share the current avatar decision; reset home/dropped/local flags too.
-      flag.visible = !carrier || carrier.id === viewerId || actorVisibility?.get(carrier.id) !== false;
-      flag.position.set(carrier?.x ?? state.x, carrier?.y ?? 0, carrier?.z ?? state.z);
+      flag.visible = !carrier || (!carrier.hiddenSpotId && (carrier.id === viewerId || actorVisibility?.get(carrier.id) !== false));
+      flag.position.set(carrier?.x ?? state.x, carrier?.y ?? state.y ?? 0, carrier?.z ?? state.z);
       // First-person carrier gets a lower pole beside the camera, not a HUD asset.
       flag.rotation.y = carrier?.id === viewerId ? Math.PI : 0;
       this.group.add(this.bases[teamId], flag);

@@ -24,6 +24,17 @@ function solo(t) {
   };
 }
 
+test('hidden local carriers conceal the world flag, and dropped flags retain roof elevation', t => {
+  const { game } = solo(t);
+  const carrier = { id: 'local', x: 0, y: 3, z: 0, hiddenSpotId: 'locker' };
+  const flags = { red: { status: 'carried', carrierId: carrier.id, x: 0, y: 3, z: 0 } };
+  game.objectives.update({ flags, actors: [carrier], viewerId: 'local' });
+  assert.equal(game.objectives.flags.red.visible, false);
+  Object.assign(flags.red, { status: 'dropped', carrierId: null });
+  game.objectives.update({ flags, actors: [carrier], viewerId: 'local' });
+  assert.equal(game.objectives.flags.red.visible, true); assert.equal(game.objectives.flags.red.position.y, 3);
+});
+
 function online(t) {
   const game = createHeadlessGame(); t.after(() => cleanupGame(game));
   const manager = new RoomManager(), room = manager.create('self', 'Viewer', 'm4a1', { modeId: 'ctf' });

@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { MODES, getMode, assignTeams, createModeState, addParticipant, areEnemies, recordElimination, tickMode, removeParticipant, getModeSnapshot } from '../src/modes.js';
 
-const map = { id: 'fixture', bases: { red: { x: 0, z: 0 }, blue: { x: 10, z: 0 } } };
+const map = { id: 'fixture', bounds: { min: -30, max: 30 }, solids: [], bases: { red: { x: 0, z: 0 }, blue: { x: 10, z: 0 } } };
 const participants = [{ id: 'a', teamId: 'red' }, { id: 'b', teamId: 'blue' }, { id: 'c', teamId: 'red' }];
 const stateFor = (modeId = 'ctf') => createModeState({ modeId, map, participants: participants.map(p => ({ ...p, teamId: modeId === 'ffa' ? null : p.teamId })) });
 const actor = (id, x, extra = {}) => ({ id, teamId: id === 'b' ? 'blue' : 'red', x, y: 0, z: 0, alive: true, protectedRemaining: 0, lifeId: 0, ...extra });
@@ -94,10 +94,11 @@ test('invalid deltas neither advance timers nor perform nearby flag interactions
   assert.deepEqual(state, before);
 });
 
-test('CTF pickup and capture use inclusive 1.2 horizontal units regardless of jump', () => {
+test('CTF pickup and capture use inclusive 1.2 horizontal and .75 vertical reach', () => {
   const state = stateFor();
   assert.deepEqual(tickMode(state, .1, [actor('a', 8.799)]), []);
-  assert.deepEqual(tickMode(state, .1, [actor('a', 8.8, { y: 2 })]), [event('flag-pickup', 'blue', 'a')]);
+  assert.deepEqual(tickMode(state, .1, [actor('a', 8.8, { y: .75001 })]), []);
+  assert.deepEqual(tickMode(state, .1, [actor('a', 8.8, { y: .75 })]), [event('flag-pickup', 'blue', 'a')]);
   assert.equal(state.flags.blue.carrierId, 'a');
   assert.deepEqual(tickMode(state, .1, [actor('a', 1.201)]), []);
   assert.deepEqual(tickMode(state, .1, [actor('a', 1.2)]), [event('flag-capture', 'red', 'a')]);
@@ -122,7 +123,7 @@ test('a carrier cannot capture while their own flag is missing', () => {
 test('death drops carried flag at supplied position, duplicate death cannot re-drop it', () => {
   const state = stateFor(); tickMode(state, .1, [actor('a', 10)]);
   assert.deepEqual(kill(state, 0, 'b', 'a', { x: 4, z: 2 }), [event('flag-drop', 'blue', 'a')]);
-  assert.deepEqual(state.flags.blue, { teamId: 'blue', status: 'dropped', x: 4, z: 2, carrierId: null, returnRemaining: 15 });
+  assert.deepEqual(state.flags.blue, { teamId: 'blue', status: 'dropped', x: 4, y: 0, z: 2, carrierId: null, returnRemaining: 15 });
   tickMode(state, 1, []); kill(state, 0, 'b', 'a', { x: 9, z: 9 });
   assert.equal(state.flags.blue.x, 4); assert.equal(state.flags.blue.returnRemaining, 14);
 });

@@ -1,3 +1,5 @@
+import { createSpatialWorld, interactionReach, dropAnchor } from './spatial.js';
+
 export const MODES = Object.freeze([
   Object.freeze({ id: 'ffa', name: 'Free For All', duration: 180, scoreLimit: 15 }),
   Object.freeze({ id: 'tdm', name: 'Team Deathmatch', duration: 180, scoreLimit: 30 }),
@@ -8,12 +10,12 @@ const teams = ['red', 'blue'];
 const privateState = new WeakMap();
 const owns = (object, key) => Object.prototype.hasOwnProperty.call(object, key);
 const validId = id => typeof id === 'string' && id.trim().length > 0;
-const validPoint = point => point && Number.isFinite(point.x) && Number.isFinite(point.z);
+const validPoint = point => point && Number.isFinite(point.x) && Number.isFinite(point.z) && Number.isFinite(point.y ?? 0);
 const validLife = lifeId => Number.isSafeInteger(lifeId) && lifeId >= 0;
 const registered = (state, id) => validId(id) && owns(state.stats, id);
 const define = (object, key, value) => Object.defineProperty(object, key, { value, enumerable: true, configurable: true, writable: true });
 const otherTeam = teamId => teamId === 'red' ? 'blue' : 'red';
-const closeEnough = (a, b) => Math.hypot(a.x - b.x, a.z - b.z) <= 1.2 + 1e-10;
+const closeEnough = (state, a, b) => interactionReach(a, b, privateState.get(state).world);
 const flagEvent = (type, teamId, playerId) => ({ type, teamId, playerId });
 
 export function getMode(id) {
@@ -45,13 +47,13 @@ export function createModeState({ modeId, map, participants } = {}) {
     if (!map.bases || !teams.every(team => validPoint(map.bases[team]))) throw new Error('CTF requires two finite flag bases.');
     bases = {}; flags = {};
     for (const teamId of teams) {
-      const { x, z } = map.bases[teamId];
-      bases[teamId] = { x, z };
-      flags[teamId] = { teamId, status: 'home', x, z, carrierId: null, returnRemaining: 0 };
+      const { x, y = 0, z } = map.bases[teamId];
+      bases[teamId] = { x, y, z };
+      flags[teamId] = { teamId, status: 'home', x, y, z, carrierId: null, returnRemaining: 0 };
     }
   }
   const state = { modeId, mapId: map.id, timeLeft: mode.duration, ended: false, winnerId: null, winnerTeamId: null, teamScores: { red: 0, blue: 0 }, stats, flags };
-  privateState.set(state, { bases, eliminatedLives: new Map() });
+  privateState.set(state, { bases, world: createSpatialWorld(map), eliminatedLives: new Map() });
   return state;
 }
 
@@ -77,7 +79,9 @@ function dropFlags(state, id, position) {
   if (state.flags) for (const teamId of teams) {
     const flag = state.flags[teamId];
     if (flag.status !== 'carried' || flag.carrierId !== id) continue;
-    Object.assign(flag, { status: 'dropped', x: position.x, z: position.z, carrierId: null, returnRemaining: 15 });
+    const anchor = dropAnchor({ x: position.x, y: position.y ?? 0, z: position.z }, privateState.get(state).world);
+    if (!anchor) { returnFlag(state, flag); events.push(flagEvent('flag-return', teamId, null)); continue; }
+    Object.assign(flag, { status: 'dropped', ...anchor, carrierId: null, returnRemaining: 15 });
     events.push(flagEvent('flag-drop', teamId, id));
   }
   return events;
@@ -133,7 +137,7 @@ function tickFlags(state, dt, actors) {
   // Coordinates follow the carrier; adapters report deaths/disconnects through
   // recordElimination/removeParticipant so drops use the authoritative location.
   for (const actor of actors) for (const flag of Object.values(state.flags)) {
-    if (flag.status === 'carried' && flag.carrierId === actor.id) { flag.x = actor.x; flag.z = actor.z; }
+    if (flag.status === 'carried' && flag.carrierId === actor.id) { flag.x = actor.x; flag.y = actor.y; flag.z = actor.z; }
   }
   // Automatic returns have no participant; use stable Red/Blue flag order.
   for (const teamId of teams) {
@@ -144,22 +148,22 @@ function tickFlags(state, dt, actors) {
   }
   for (const actor of actors) {
     const ownFlag = state.flags[actor.teamId];
-    if (actor.alive && ownFlag.status === 'dropped' && closeEnough(actor, ownFlag)) {
+    if (actor.alive && !actor.hiddenSpotId && ownFlag.status === 'dropped' && closeEnough(state, actor, ownFlag)) {
       returnFlag(state, ownFlag); events.push(flagEvent('flag-return', actor.teamId, actor.id));
     }
   }
   for (const actor of actors) {
-    if (!actor.alive || actor.protectedRemaining > 0 || Object.values(state.flags).some(flag => flag.carrierId === actor.id)) continue;
+    if (!actor.alive || actor.hiddenSpotId || actor.protectedRemaining > 0 || Object.values(state.flags).some(flag => flag.carrierId === actor.id)) continue;
     const enemy = state.flags[otherTeam(actor.teamId)];
-    if (enemy.status !== 'carried' && closeEnough(actor, enemy)) {
-      Object.assign(enemy, { status: 'carried', x: actor.x, z: actor.z, carrierId: actor.id, returnRemaining: 0 });
+    if (enemy.status !== 'carried' && closeEnough(state, actor, enemy)) {
+      Object.assign(enemy, { status: 'carried', x: actor.x, y: actor.y, z: actor.z, carrierId: actor.id, returnRemaining: 0 });
       events.push(flagEvent('flag-pickup', enemy.teamId, actor.id));
     }
   }
   for (const actor of actors) {
-    if (!actor.alive) continue;
+    if (!actor.alive || actor.hiddenSpotId) continue;
     const enemy = state.flags[otherTeam(actor.teamId)], ownFlag = state.flags[actor.teamId];
-    if (enemy.status === 'carried' && enemy.carrierId === actor.id && ownFlag.status === 'home' && closeEnough(actor, ownFlag)) {
+    if (enemy.status === 'carried' && enemy.carrierId === actor.id && ownFlag.status === 'home' && closeEnough(state, actor, ownFlag)) {
       returnFlag(state, enemy); state.teamScores[actor.teamId]++;
       events.push(flagEvent('flag-capture', actor.teamId, actor.id));
       if (state.teamScores[actor.teamId] >= getMode(state.modeId).scoreLimit) { finish(state, null, actor.teamId); return events; }

@@ -63,7 +63,7 @@ function validRoom(room) {
     const carriers = new Set();
     for (const team of teams) {
       const flag = room.flags[team];
-      if (!exactKeys(flag, ['teamId', 'status', 'x', 'z', 'carrierId', 'returnRemaining']) || flag.teamId !== team || !['home', 'carried', 'dropped'].includes(flag.status) || !Number.isFinite(flag.x) || !Number.isFinite(flag.z) || !Number.isFinite(flag.returnRemaining) || flag.returnRemaining < 0 || flag.returnRemaining > 15) return false;
+      if (!exactKeys(flag, ['teamId', 'status', 'x', 'y', 'z', 'carrierId', 'returnRemaining']) || flag.teamId !== team || !['home', 'carried', 'dropped'].includes(flag.status) || !Number.isFinite(flag.x) || !Number.isFinite(flag.y) || flag.y < 0 || !Number.isFinite(flag.z) || !Number.isFinite(flag.returnRemaining) || flag.returnRemaining < 0 || flag.returnRemaining > 15) return false;
       if (flag.status === 'carried') {
         if (!validId(flag.carrierId) || carriers.has(flag.carrierId) || flag.returnRemaining !== 0 || room.phase === 'lobby') return false;
         carriers.add(flag.carrierId);

@@ -239,7 +239,7 @@ export class RoomManager {
     const items = deathItems(target.equipment);
     target.health = 0; target.armour = 0; target.respawnRemaining = 2.5; target.input = emptyInput(); target.inputAt = -Infinity;
     clearEquipment(target.equipment);
-    addDeathDrops(room.lootState, { actorId: target.id, lifeId: target.lifeId, position: target, items, solids: room.physics.solids });
+    addDeathDrops(room.lootState, { actorId: target.id, lifeId: target.lifeId, position: target, items, solids: room.physics.solids, world: room.physics.spatial });
     const previousKills = room.modeState.stats[killerId]?.kills;
     const events = recordElimination(room.modeState, { killerId, victimId: target.id, position: target, lifeId: target.lifeId });
     const killer = room.players.get(killerId);
@@ -379,7 +379,7 @@ export class RoomManager {
       if (target?.health > 0 && target.protectedRemaining === 0) target.flashRemaining = Math.min(3, Math.max(target.flashRemaining, intent.duration));
     }
     const actors = this.actors(room);
-    for (const event of collectLoot(room.lootState, actors, { solids: room.physics.solids })) this.event(room, event);
+    for (const event of collectLoot(room.lootState, actors, { solids: room.physics.solids, world: room.physics.spatial })) this.event(room, event);
     for (const event of tickMode(room.modeState, dt, actors)) this.event(room, event);
     this.syncMode(room);
     for (const { player, equipment, use } of pendingUses) {

@@ -5,6 +5,7 @@ import { WEAPONS, createWeaponState } from './weapons.js';
 import { getMap } from './maps.js';
 import { canOccupy, hasLineOfSight } from './collision.js';
 import { SUPPLY_BALANCE } from './supplies.js';
+import { interactionReach, dropAnchor } from './spatial.js';
 
 const gunIds = new Set(WEAPONS.map(gun => gun.id));
 // Drops must fit wherever the smallest runtime actor (solo human) can stand.
@@ -43,7 +44,7 @@ export function createLootState({ mapId, seed, startingGunIds = [] }) {
   return {
     mapId,
     slots: LOOT_SPAWNS[mapId].map(location => ({
-      id: location.id, x: location.x, y: 0, z: location.z,
+      id: location.id, x: location.x, y: location.y ?? 0, z: location.z,
       item: location.kind === 'gun' ? freshGun(assignments[gunIndex++])
         : location.kind === 'knife' ? { kind: 'knife' }
           : location.kind === 'supply' ? { kind: 'supply', supplyType: location.supplyType }
@@ -86,11 +87,11 @@ export function tickLoot(state, dt) {
   state.drops = state.drops.filter(drop => drop.expiresRemaining > 0);
 }
 
-function eligible(actor, record, solids) {
-  if (!actor.alive || !Number.isFinite(actor.x) || !Number.isFinite(actor.y) || !Number.isFinite(actor.z)) return false;
+function eligible(actor, record, solids, world) {
+  if (!actor.alive || actor.hiddenSpotId || !Number.isFinite(actor.x) || !Number.isFinite(actor.y) || !Number.isFinite(actor.z)) return false;
   if (Math.hypot(actor.x - record.x, actor.z - record.z) > GEAR_BALANCE.pickupRadius + 1e-10
     || Math.abs(actor.y - record.y) > GEAR_BALANCE.pickupVerticalReach) return false;
-  if (!hasLineOfSight({ x: actor.x, z: actor.z }, { x: record.x, z: record.z }, solids)) return false;
+  if (world ? !interactionReach(actor, record, world) : !hasLineOfSight({ x: actor.x, z: actor.z }, { x: record.x, z: record.z }, solids)) return false;
   const equipment = actor.equipment;
   if (!equipment?.owned.has(equipment.activeGunId)) return false;
   if (record.item.kind === 'gun') return !equipment.owned.has(record.item.weaponId);
@@ -99,11 +100,11 @@ function eligible(actor, record, solids) {
   return GRENADE_TYPES.reduce((total, type) => total + equipment.grenades[type], 0) < GEAR_BALANCE.grenadeCapacity;
 }
 
-export function collectLoot(state, actors, { solids }) {
+export function collectLoot(state, actors, { solids, world }) {
   const events = [];
   for (const record of [...state.slots.filter(slot => slot.present), ...state.drops]) {
     if (record.availableRemaining > 0) continue;
-    const candidates = actors.filter(actor => eligible(actor, record, solids));
+    const candidates = actors.filter(actor => eligible(actor, record, solids, world));
     candidates.sort((a, b) => {
       const distance = actor => (actor.x - record.x) ** 2 + (actor.z - record.z) ** 2;
       return distance(a) - distance(b) || (String(a.id) < String(b.id) ? -1 : String(a.id) > String(b.id) ? 1 : 0);
@@ -119,21 +120,25 @@ export function collectLoot(state, actors, { solids }) {
   return events;
 }
 
-export function addDeathDrops(state, { actorId, lifeId, position, items, solids }) {
+export function addDeathDrops(state, { actorId, lifeId, position, items, solids, world }) {
   if (state.lastDroppedLife.get(actorId) === lifeId) return;
   const { bounds } = getMap(state.mapId);
   const safe = point => Number.isFinite(point?.x) && Number.isFinite(point?.z)
     && point.x >= bounds.min + dropRadius && point.x <= bounds.max - dropRadius
     && point.z >= bounds.min + dropRadius && point.z <= bounds.max - dropRadius
     && canOccupy(point.x, point.z, dropRadius, solids);
-  if (!safe(position) || (position.y !== undefined && !Number.isFinite(position.y))) return;
+  const anchor = world ? dropAnchor({ ...position, y: position?.y ?? 0 }, world) : safe(position) ? { ...position, y: 0 } : null;
+  if (!anchor || (position.y !== undefined && !Number.isFinite(position.y))) return;
   state.lastDroppedLife.set(actorId, lifeId);
   for (const [index, item] of items.entries()) {
     const angle = index * Math.PI * 2 / Math.max(1, items.length);
-    const spread = { x: position.x + .35 * Math.cos(angle), z: position.z + .35 * Math.sin(angle) };
-    const point = safe(spread) && hasLineOfSight({ x: position.x, z: position.z }, spread, solids) ? spread : position;
+    const spread = { x: anchor.x + .35 * Math.cos(angle), y: anchor.y, z: anchor.z + .35 * Math.sin(angle) };
+    const projected = world ? dropAnchor(spread, world) : safe(spread) ? spread : null;
+    const clear = projected && (world ? projected.y === anchor.y && interactionReach(anchor, projected, world)
+      : hasLineOfSight(anchor, projected, solids));
+    const point = clear ? projected : anchor;
     state.drops.push({
-      id: `drop:${state.nextDropId++}`, x: point.x, y: 0, z: point.z, item: { ...item }, source: 'drop',
+      id: `drop:${state.nextDropId++}`, x: point.x, y: point.y, z: point.z, item: { ...item }, source: 'drop',
       availableRemaining: GEAR_BALANCE.dropUnlock, expiresRemaining: GEAR_BALANCE.dropExpiry,
     });
   }
