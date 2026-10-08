@@ -1,4 +1,5 @@
 import test from 'node:test';
+import { HidingUI } from '../src/hiding-ui.js';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { runInNewContext } from 'node:vm';
@@ -80,7 +81,7 @@ test('full health explains rejection and changing guns cancels without spending'
 test('real HUD cannot undo supply recovery death or throw locks and renders armour', t => {
   const { collect, game, ui, tap, document } = fixture(t), $ = id => document.getElementById(id);
   const onHud = runInNewContext(`(${main.match(/function onHud\(current\) \{[\s\S]*?\n\}/)[0]})`, {
-    $, equipmentUI: ui, renderMatchHud() {}, renderProgression() {}, multiplayer:null, input:game.input, performance:{now:()=>0}, toastUntil:1,
+    $, equipmentUI: ui, hidingUI: new HidingUI({ button: $('hide-button'), status: $('hiding-status') }), renderMatchHud() {}, renderProgression() {}, multiplayer:null, input:game.input, performance:{now:()=>0}, toastUntil:1,
   });
   pickupEquipment(game.player.equipment, { kind:'grenade', grenadeType:'frag' });
   game.player.armour = 35; game.player.health = 30; collect('health'); tap('supply:health'); onHud(game);
@@ -96,4 +97,20 @@ test('real HUD cannot undo supply recovery death or throw locks and renders armo
   game.modeState.phase = 'recovery'; game.refreshMatchView(); onHud(game);
   assert.equal($('fire-button').disabled, true); assert.equal($('throw-button').disabled, true);
   assert.equal($('armour-count').textContent, '0'); assert.equal($('supply-use-status').hidden, true);
+});
+
+test('hidden supply users can press touch Fire to exit without firing or consuming extra supplies', t => {
+  const { collect, game, ui, tap, document } = fixture(t), $ = id => document.getElementById(id);
+  const onHud = runInNewContext(`(${main.match(/function onHud\(current\) \{[\s\S]*?\n\}/)[0]})`, {
+    $, equipmentUI: ui, hidingUI: new HidingUI({ button: $('hide-button'), status: $('hiding-status') }), renderMatchHud() {}, renderProgression() {}, multiplayer:null, input:game.input, performance:{now:()=>0}, toastUntil:1,
+  });
+  const spot = game.world.definition.hideSpots[0];
+  Object.assign(game.player, spot.entry, { health: 30, jump: 0 });
+  assert.equal(game.requestHide({ kind: 'enter', spotId: spot.id }).ok, true);
+  collect('health'); tap('supply:health'); onHud(game);
+  assert.equal($('fire-button').disabled, false); assert.equal($('throw-button').disabled, false);
+  assert.equal($('hide-button').textContent, 'Exit'); assert.equal($('hiding-status').textContent, 'Hiding');
+  const ammo = game.weaponState.ammo; game.input.firePressed = true; game.update(.01);
+  assert.equal(game.player.hiddenSpotId, null); assert.equal(game.weaponState.ammo, ammo); assert.equal(game.player.equipment.supplies.health, 1);
+  assert.ok(game.player.equipment.supplyUse);
 });

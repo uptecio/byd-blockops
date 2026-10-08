@@ -138,7 +138,7 @@ export class GearView {
     const actorVisibility = new Map();
     for (const actor of actors) {
       const enemy = actor.id !== viewer.id && (viewer.teamId == null || actor.teamId !== viewer.teamId);
-      const visible = actor.alive !== false && !(enemy && flashRemaining > 0) && !smokeBlocksSight(origin, eye(actor), this.smokeRecords);
+      const visible = actor.alive !== false && !actor.hiddenSpotId && !(enemy && flashRemaining > 0) && !smokeBlocksSight(origin, eye(actor), this.smokeRecords);
       actorVisibility.set(actor.id, visible);
       if (actor.model) actor.model.visible = visible;
       if (actor.label) actor.label.visible = visible;

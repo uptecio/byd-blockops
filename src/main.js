@@ -17,11 +17,13 @@ import { createProgressionSession } from './progression-session.js';
 import { createProgressionController } from './progression-controller.js';
 import { createProgressionUI } from './progression-ui.js';
 import { getGunFinish } from './cosmetics.js';
+import { HidingUI } from './hiding-ui.js';
 
 const $ = id => document.getElementById(id);
 let mode = 'home', settingsOrigin = 'home', game, preview, home, multiplayer, equipmentUI, audio, input, toastUntil = 0, confirmation = null;
 let backgroundSuspended = false, frameRequest = null;
 let progressionUI;
+const hidingUI = new HidingUI({ button: $('hide-button'), status: $('hiding-status') });
 const runtimeErrors = installRuntimeErrors(stopAfterFatal);
 
 function stopAfterFatal() {
@@ -229,7 +231,8 @@ function deploy(forceNew = false) {
     // Explicit foreground deployment authorizes a NEW solo round, not a
     // resumed/remote one. Background clicks retain the Resume requirement.
     if (!document.hidden && document.hasFocus()) backgroundSuspended = false;
-    game.start(selection.weaponId, { ...settings, ...selection });
+    const started = game.tryStart(selection.weaponId, { ...settings, ...selection });
+    if (!started.ok) { showHome(); game.events.onToast(`Could not start this map: ${started.reason}`); return; }
   }
   else { const result = equipmentUI.confirmGun(); if (result && !result.ok) return; game.resume(); }
   setMode('playing'); game.events.onHud(game); document.activeElement.blur();
@@ -296,6 +299,12 @@ function onHud(current) {
   const recovery = current.getMatchView()?.survival?.phase === 'recovery';
   $('fire-button').disabled = $('fire-button').disabled || recovery;
   $('throw-button').disabled = $('throw-button').disabled || recovery;
+  const hiding = (multiplayer?.isActive() ? multiplayer.arena : current).getHidingView?.();
+  hidingUI.render(hiding);
+  // Raw attacks are also exit controls; runtime resource/supply gates still decide whether they fire.
+  if (hiding?.hidden && current.player.health > 0 && current.player.dead <= 0) {
+    $('fire-button').disabled = false; $('throw-button').disabled = false;
+  }
   renderMatchHud(current.getMatchView(), multiplayer?.isActive() ? multiplayer.client.id : 'local');
   $('health-count').textContent = Math.ceil(current.player.health);
   $('health-bar').style.width = `${current.player.health}%`;

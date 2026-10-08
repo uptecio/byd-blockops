@@ -1,4 +1,5 @@
 import test from 'node:test';
+import { HidingUI } from '../src/hiding-ui.js';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { runInNewContext } from 'node:vm';
@@ -54,7 +55,7 @@ test('ordinary minimal result fixture stays supported and shipped markup contain
 });
 
 test('main HUD adds recovery suppression without undoing equipment death or throw locks',t=>{
-  const node=dom(t),$=id=>{const result=node(id);result.style??={};return result;};
+  const node=dom(t),$=id=>{const result=node(id);result.style??={};result.setAttribute??=((key,value)=>{result[key]=String(value);});return result;};
   // Execute the actual private composition callback without booting main's
   // renderer. EquipmentUI's separately-tested output is the boundary input.
   const source=readFileSync(new URL('../src/main.js',import.meta.url),'utf8');
@@ -63,7 +64,7 @@ test('main HUD adds recovery suppression without undoing equipment death or thro
   let equipmentBlocked=false,phase;
   const onHud=runInNewContext(`(${callback})`,{$,equipmentUI:{render(){
     $('fire-button').disabled=equipmentBlocked;$('throw-button').disabled=equipmentBlocked;
-  }},renderMatchHud(){},renderProgression(){},multiplayer:null,input:{zoom:false},performance:{now:()=>0},toastUntil:1});
+  }},hidingUI:new HidingUI({button:$('hide-button'),status:$('hiding-status')}),renderMatchHud(){},renderProgression(){},multiplayer:null,input:{zoom:false},performance:{now:()=>0},toastUntil:1});
   const game={getMatchView:()=>phase?{survival:{phase}}:{modeId:'ffa'},
     player:{health:100,dead:0},weapon:{name:'M4A1'},weaponState:{ammo:30,reserve:470,reloadRemaining:0},
     hitFlash:0,damageFlash:0,heldItem:'gun'};

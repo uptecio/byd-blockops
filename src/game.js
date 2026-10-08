@@ -26,6 +26,8 @@ import { ZombieRuntime } from './zombie-runtime.js';
 import { lootItemLabel } from './loot-labels.js';
 import { damageVitals } from './vitals.js';
 import { startSupplyUse, cancelSupplyUse, advanceSupplyUse, isUsingSupply, chooseBotSupply } from './supplies.js';
+import { createHidingState, requestHide as transitionHide, exitHiding, releaseHiding, hidingContext, attackExit, hidingDropPosition } from './hiding.js';
+import { spotDamageTargets, raySpotHit } from './hiding-combat.js';
 
 export function disposeModel(model) {
   if (!model) return;
@@ -83,6 +85,7 @@ export class ArenaGame {
     disposeModel(this.weaponModel);
     this.weaponModel = heldItem === 'knife' ? createKnifeModel(THREE) : createWeaponModel(THREE, this.weapon, { finishId: this.presentedFinishId });
     this.weaponModel.position.set(.28, -.27, -.5); this.camera.add(this.weaponModel);
+    this.weaponModel.visible = !this.player.hiddenSpotId;
     this.lastFire = false; this.recoil = 0;
   }
   syncPlayerEquipment() {
@@ -95,6 +98,38 @@ export class ArenaGame {
     if (!isUsingSupply(equipment)) this.weaponModel.position.y = -.27;
   }
   getEquipmentView() { return equipmentDTO(this.player.equipment); }
+  hidingOptions() { return { map: this.world.definition, world: this.world.spatial, active: this.active && this.hasRound && !this.modeState?.ended }; }
+  getHidingView() {
+    const context = this.hidingState ? hidingContext(this.hidingState, this.actorRecord(this.player), this.hidingOptions()) : { label: null, enabled: false, spotId: null };
+    return { ...context, hidden: !!this.player.hiddenSpotId, pending: false, reason: this.hidingReason ?? null };
+  }
+  requestHide(action) {
+    const result = transitionHide(this.hidingState, this.actorRecord(this.player), { ...action, lifeId: this.player.lifeId }, this.hidingOptions());
+    this.hidingReason = result.reason; this.applyHidingTransition(this.player, result);
+    return result;
+  }
+  applyHidingTransition(entity, transition) {
+    if (!transition?.ok || !transition.changed) return;
+    entity.hiddenSpotId = transition.hiddenSpotId;
+    const body = createBody(transition.position, this.world.spatial, { radius: entity.id === this.player.id ? PLAYER_RADIUS : BOT_RADIUS });
+    if (entity.id === this.player.id) Object.assign(entity, body, { jump: body.y });
+    else { entity.body = body; entity.model.position.set(body.x, body.y, body.z); }
+    if (transition.hiddenSpotId) {
+      for (const bot of this.bots) forgetTarget(bot.brain ?? bot, entity.id);
+      if (entity.id === this.player.id) {
+        const spot = this.world.definition.hideSpots.find(s => s.id === transition.hiddenSpotId);
+        this.yaw = Math.atan2(spot.view.x - spot.entry.x, spot.view.z - spot.entry.z); this.pitch = 0; this.recoil = 0;
+      }
+    }
+    if (entity.id === this.player.id) {
+      this.weaponModel.visible = !entity.hiddenSpotId; this.muzzle.visible = false; this.placeCamera();
+    }
+  }
+  exposeAttack(actor, intent) {
+    const transition = attackExit(this.hidingState, actor, intent, this.hidingOptions());
+    if (transition) this.applyHidingTransition(this.actorEntity(actor.id), transition);
+    return transition;
+  }
   clearSupplyCombat() {
     this.input.clearCombat(); this.lastFire = false;
     if (this.weaponModel && !isUsingSupply(this.player.equipment)) this.weaponModel.position.y = -.27;
@@ -127,6 +162,8 @@ export class ArenaGame {
     if (action.kind === 'held-item') return setHeldItem(actor.equipment, action.heldItem);
     if (action.kind === 'select-grenade') return selectGrenade(actor.equipment, action.grenadeType);
     if (!this.active) return { ok: false, reason: 'Cannot throw while paused' };
+    this.exposeAttack(actor, action);
+    actor = this.actorRecord(this.actorEntity(actor.id));
     if (isUsingSupply(actor.equipment)) return { ok: false, reason: 'Finish or cancel supply use first' };
     if (this.zombieRuntime && !this.zombieRuntime.canAttack()) return { ok: false, reason: 'Get ready for the next wave' };
     return throwGrenade(this.gearCombatState, actor, action.grenadeType, { solids: this.world.solids });
@@ -138,6 +175,7 @@ export class ArenaGame {
     this.gearView?.dispose(); this.gearView = new GearView(THREE, this.scene);
     this.gearWorld = { loot: [], projectiles: [], smokes: [] };
     this.lootState = null; this.gearCombatState = createGearCombatState();
+    this.hidingState = createHidingState(); this.player.hiddenSpotId = null; this.hidingReason = null;
     this.navigation?.clearCache(); this.world?.dispose();
     this.world = createWorld(THREE, this.scene, map.id);
     this.navigation = createNavigation(map, { radius: BOT_RADIUS });
@@ -184,6 +222,10 @@ export class ArenaGame {
     this.beginProgression();
     this.refreshMatchView(); this.refreshGearView(); this.input.clear(); this.resume();
   }
+  tryStart(id, settings = {}) {
+    try { this.start(id, settings); return { ok: true }; }
+    catch (error) { this.quit(); return { ok: false, reason: error.message }; }
+  }
   beginProgression() {
     if (this.settings.progressionSource === 'solo') this.soloProgression = createSoloProgression({
       runId: newSoloRunId(), modeId: this.settings.modeId, onEvent: event => this.events.onProgression?.(event),
@@ -194,6 +236,7 @@ export class ArenaGame {
     return teamId === null ? [map.playerSpawn, ...map.spawns] : map.teamSpawns[teamId];
   }
   spawnBot(bot, index = this.bots.indexOf(bot)) {
+    releaseHiding(this.hidingState, bot.id, bot.lifeId); bot.hiddenSpotId = null;
     const points = bot.teamId === null ? this.world.definition.spawns : this.spawnPoints(bot.teamId);
     const spawn = points[index % points.length];
     disposeModel(bot.model); bot.skinId = bot.pendingSkinId; bot.lifeId++;
@@ -213,16 +256,20 @@ export class ArenaGame {
     this.player.pendingSkinId = skinId; this.player.pendingFinishId = finishId;
   }
   setPendingSkin(skinId) { this.setPendingAppearance({ skinId, finishId: this.player.pendingFinishId ?? this.player.finishId ?? 'standard' }); }
-  getActors() {
-    return [{ id: this.player.id, name: this.player.name, teamId: this.player.teamId, x: this.player.x, y: this.player.jump, z: this.player.z,
+  actorRecord(entity) {
+    if (entity.id === this.player.id) return { id: this.player.id, name: this.player.name, teamId: this.player.teamId, x: this.player.x, y: this.player.jump, z: this.player.z,
       grounded: this.player.grounded, supportId: this.player.supportId, velocityY: this.player.velocityY, hiddenSpotId: this.player.hiddenSpotId ?? null,
       alive: this.player.health > 0 && this.player.dead <= 0, protectedRemaining: this.player.protected, lifeId: this.player.lifeId, skinId: this.player.skinId,
-      yaw: this.yaw, pitch: this.pitch, flashRemaining: this.player.flashRemaining ?? 0, equipment: this.player.equipment, health: this.player.health, armour: this.player.armour },
-    ...(this.zombieRuntime ? this.zombieRuntime.actors() : this.bots.map(bot => ({ id: bot.id, name: bot.name, teamId: bot.teamId, x: bot.body.x, y: bot.body.y, z: bot.body.z,
-      grounded: bot.body.grounded, supportId: bot.body.supportId, velocityY: bot.body.velocityY, hiddenSpotId: null,
+      yaw: this.yaw, pitch: this.pitch, flashRemaining: this.player.flashRemaining ?? 0, equipment: this.player.equipment, health: this.player.health, armour: this.player.armour };
+    const bot = entity;
+    return { id: bot.id, name: bot.name ?? bot.model.name, kind: bot.kind, teamId: bot.teamId ?? null, x: bot.body.x, y: bot.body.y, z: bot.body.z,
+      grounded: bot.body.grounded, supportId: bot.body.supportId, velocityY: bot.body.velocityY, hiddenSpotId: bot.hiddenSpotId ?? null,
       alive: bot.health > 0 && bot.respawn <= 0, protectedRemaining: bot.protected, lifeId: bot.lifeId, skinId: bot.skinId,
       yaw: bot.yaw, pitch: 0, flashRemaining: bot.flashRemaining, equipment: bot.equipment, health: bot.health, armour: bot.armour,
-      lastGrenadeAttempt: bot.lastGrenadeAttempt, carryingFlag: Object.values(this.modeState.flags ?? {}).some(flag => flag.carrierId === bot.id) })))];
+      lastGrenadeAttempt: bot.lastGrenadeAttempt, carryingFlag: Object.values(this.modeState.flags ?? {}).some(flag => flag.carrierId === bot.id) };
+  }
+  getActors() {
+    return [this.actorRecord(this.player), ...(this.zombieRuntime ? this.zombieRuntime.actors() : this.bots.map(bot => this.actorRecord(bot)))];
   }
   refreshMatchView(actors = this.getActors()) {
     if (this.zombieRuntime) { this.zombieRuntime.refreshView(); return; }
@@ -240,6 +287,7 @@ export class ArenaGame {
     this.refreshMatchView(actors); this.endReported = true; this.pause(); this.events.onEnd(this.match);
   }
   resetPlayer(initial = false) {
+    releaseHiding(this.hidingState, this.player.id, this.player.lifeId); this.player.hiddenSpotId = null;
     const points = this.spawnPoints(this.player.teamId);
     let spawn = points[0];
     if (!initial && this.bots.length) {
@@ -261,13 +309,15 @@ export class ArenaGame {
     for (const actor of [this.player, ...this.bots]) if (actor.equipment) cancelSupplyUse(actor.equipment);
     this.clearSupplyCombat();
     this.pause(); this.hasRound = false; this.gearView?.clear();
+    this.hidingState = createHidingState(); this.player.hiddenSpotId = null;
     if (this.zombieRuntime) {
       this.zombieRuntime.record(); this.zombieRuntime.dispose(); this.zombieRuntime = null;
     }
   }
   clearEffects() { for (const effect of this.effects) { effect.line.removeFromParent(); effect.line.geometry.dispose(); effect.line.material.dispose(); } this.effects = []; }
   placeCamera() {
-    this.camera.position.set(this.player.x, 1.65 + this.player.jump, this.player.z);
+    const view = this.player.hiddenSpotId && this.world.definition.hideSpots.find(spot => spot.id === this.player.hiddenSpotId)?.view;
+    this.camera.position.set(view ? view.x : this.player.x, view ? view.y : 1.65 + this.player.jump, view ? view.z : this.player.z);
     this.camera.rotation.set(this.pitch + this.recoil, this.yaw, 0, 'YXZ');
   }
   update(dt) {
@@ -310,6 +360,15 @@ export class ArenaGame {
       this.player.dead -= dt;
       if (this.player.dead <= 0) { this.resetPlayer(); this.events.onToast('BACK IN THE FIGHT'); }
     }
+    if (this.player.dead <= 0 && input.hidePressed) {
+      const context = this.getHidingView();
+      if (context.spotId) {
+        const result = this.requestHide({ kind: context.hidden ? 'exit' : 'enter', spotId: context.spotId });
+        if (!result.ok) this.events.onToast(result.reason);
+      }
+    }
+    const wasHidden = !!this.player.hiddenSpotId;
+    if (this.player.dead <= 0) this.exposeAttack(this.actorRecord(this.player), input.throwPressed ? { ...input, kind: 'throw' } : input);
     const actors = this.getActors(), playerActor = actors[0];
     if (this.player.dead <= 0) {
       if (input.knifePressed) {
@@ -326,9 +385,11 @@ export class ArenaGame {
       const speed = humanMoveSpeed(this.weapon.classId, zoom);
       const vx = (Math.cos(this.yaw) * input.x - Math.sin(this.yaw) * input.y) * speed;
       const vz = (-Math.sin(this.yaw) * input.x - Math.cos(this.yaw) * input.y) * speed;
-      const moved = moveCharacter({ x: this.player.x, y: this.player.jump, z: this.player.z, velocityY: this.player.velocityY,
-        grounded: this.player.grounded, supportId: this.player.supportId }, { vx, vz, jump: input.jump }, dt, { world: this.world.spatial, radius: PLAYER_RADIUS });
-      Object.assign(this.player, moved.body, { jump: moved.body.y });
+      if (!wasHidden && !this.player.hiddenSpotId) {
+        const moved = moveCharacter({ x: this.player.x, y: this.player.jump, z: this.player.z, velocityY: this.player.velocityY,
+          grounded: this.player.grounded, supportId: this.player.supportId }, { vx, vz, jump: input.jump }, dt, { world: this.world.spatial, radius: PLAYER_RADIUS });
+        Object.assign(this.player, moved.body, { jump: moved.body.y });
+      }
       Object.assign(playerActor, { x: this.player.x, y: this.player.jump, z: this.player.z, yaw: this.yaw, pitch: this.pitch });
       if (input.throwPressed) {
         const result = this.requestEquipment({ kind: 'throw', grenadeType: this.player.equipment.selectedGrenade });
@@ -345,7 +406,7 @@ export class ArenaGame {
       this.lastFire = input.fire;
       const targetFov = zoom ? 75 / this.weapon.zoom : 75;
       this.camera.fov += (targetFov - this.camera.fov) * Math.min(1, dt * 14); this.camera.updateProjectionMatrix();
-      this.weaponModel.visible = !(this.heldItem === 'gun' && zoom && this.weapon.classId === 'sniper');
+      this.weaponModel.visible = !this.player.hiddenSpotId && !(this.heldItem === 'gun' && zoom && this.weapon.classId === 'sniper');
       const reload = this.heldItem === 'gun' && this.weaponState.reloadRemaining > 0;
       this.weaponModel.position.set(zoom ? .08 : .28, -.27 - (isUsingSupply(this.player.equipment) ? .24 : reload ? .17 : 0) + Math.sin(this.time * 10) * Math.hypot(input.x, input.y) * .012, -.5 + this.recoil * .7);
       this.weaponModel.rotation.z = reload ? Math.sin(this.time * 6) * .15 - .3 : 0;
@@ -359,6 +420,7 @@ export class ArenaGame {
     if (!this.modeState.ended) {
       const result = stepGearCombat(this.gearCombatState, actors, dt, {
         solids: this.world.solids, isEnemy: (sourceId, targetId) => this.isEnemy(sourceId, targetId),
+        hiding: { state: this.hidingState, map: this.world.definition, world: this.world.spatial },
       });
       for (const hit of result.damage) {
         if (this.modeState.ended) break;
@@ -425,7 +487,7 @@ export class ArenaGame {
     }
     const actorVisibility = this.gearView.update({ viewer: { id: this.player.id, teamId: this.player.teamId, x: this.player.x, y: this.player.jump, z: this.player.z, camera: this.camera },
       actors: this.bots.map(bot => ({ id: bot.id, teamId: bot.teamId, x: bot.model.position.x, y: bot.model.position.y, z: bot.model.position.z,
-        alive: bot.health > 0 && bot.respawn <= 0, model: bot.model, label: bot.bar })), flashRemaining: this.player.flashRemaining, dt });
+        alive: bot.health > 0 && bot.respawn <= 0, hiddenSpotId: bot.hiddenSpotId, model: bot.model, label: bot.bar })), flashRemaining: this.player.flashRemaining, dt });
     this.objectives.update({ flags: this.matchView?.flags, actors: this.getActors(), viewerId: this.player.id, actorVisibility });
   }
   actorEntity(id) { return id === this.player.id ? this.player : this.bots.find(bot => bot.id === id); }
@@ -439,6 +501,7 @@ export class ArenaGame {
     const candidates = actor.id === 'local' ? actors
       : actors.filter(other => canPerceive(actor, other, { world: this.world.spatial, smokes: this.gearCombatState.smokes }));
     const targetId = meleeTarget(actor, candidates, { solids: this.world.solids,
+      hiding: { state: this.hidingState, map: this.world.definition, world: this.world.spatial },
       isEnemy: (sourceId, victimId) => this.isEnemy(sourceId, victimId) });
     if (targetId) {
       const victim = this.actorEntity(targetId);
@@ -560,14 +623,18 @@ export class ArenaGame {
   damageActor(attackerId, victim, damage, actors) {
     if (this.modeState.ended || !victim || !this.isEnemy(attackerId, victim.id) || victim.health <= 0
       || (victim.dead ?? victim.respawn) > 0 || victim.protected > 0) return false;
-    if (!damageVitals(victim, damage).ok) return false;
+    const before = this.actorRecord(victim);
+    const dropPosition = hidingDropPosition(this.hidingState, before, this.world.definition);
+    const applied = damageVitals(victim, damage);
+    if (!applied.ok || applied.healthDamage + applied.armourDamage <= 0) return false;
+    this.applyHidingTransition(victim, exitHiding(this.hidingState, before, { ...this.hidingOptions(), reason: 'damage' }));
     const record = actors?.find(actor => actor.id === victim.id);
-    if (record) { record.health = victim.health; record.armour = victim.armour; record.alive = victim.health > 0; }
+    if (record) Object.assign(record, this.actorRecord(victim), { alive: victim.health > 0 });
     if (victim.id === 'local') this.damageFlash = .3;
     else victim.bar.scale.x = (this.zombieRuntime ? .65 : 1) * victim.health / 100;
     if (victim.health === 0) {
       if (this.zombieRuntime) { this.zombieRuntime.onEliminated(victim, actors); return true; }
-      const position = victim.id === 'local' ? victim : victim.body;
+      const position = dropPosition;
       addDeathDrops(this.lootState, { actorId: victim.id, lifeId: victim.lifeId, position,
         items: deathItems(victim.equipment), solids: this.world.solids, world: this.world.spatial });
       clearEquipment(victim.equipment);
@@ -602,8 +669,9 @@ export class ArenaGame {
       const direction = new THREE.Vector3((Math.random() - .5) * spread * 2, (Math.random() - .5) * spread * 2, -1).normalize().applyQuaternion(this.camera.quaternion);
       const ray = new THREE.Ray(origin, direction);
       let closest = this.weapon.range, victim = null, hitPoint = null;
+      let proxyHit = false;
       for (const bot of this.bots) {
-        if (bot.health <= 0 || bot.respawn > 0 || bot.protected > 0 || !this.isEnemy('local', bot.id)) continue;
+        if (bot.hiddenSpotId || bot.health <= 0 || bot.respawn > 0 || bot.protected > 0 || !this.isEnemy('local', bot.id)) continue;
         const p = bot.body ?? bot.model.position;
         const box = new THREE.Box3(new THREE.Vector3(p.x - .32, p.y + .05, p.z - .32), new THREE.Vector3(p.x + .32, p.y + 1.84, p.z + .32));
         const hit = ray.intersectBox(box, new THREE.Vector3());
@@ -611,9 +679,15 @@ export class ArenaGame {
         const distance = origin.distanceTo(hit);
         if (distance < closest && hasLineOfSight(origin, hit, this.world.solids)) { closest = distance; victim = bot; hitPoint = hit; }
       }
+      const eligible = (actors ?? this.getActors()).filter(actor => actor.protectedRemaining <= 0 && this.isEnemy('local', actor.id));
+      const proxy = raySpotHit(origin, direction, this.weapon.range, spotDamageTargets(this.hidingState, eligible, this.world.definition), this.world.spatial);
+      if (proxy && proxy.distance < closest) {
+        victim = this.actorEntity(proxy.actorId); closest = proxy.distance;
+        hitPoint = new THREE.Vector3(proxy.point.x, proxy.point.y, proxy.point.z); proxyHit = true;
+      }
       if (victim) {
         const falloff = this.weapon.classId === 'shotgun' || this.weapon.classId === 'smg' ? Math.max(.35, 1 - closest / this.weapon.range * .6) : 1;
-        landed = this.damageActor('local', victim, gunHitDamage(this.weapon.damage * falloff, hitPoint.y, (victim.body ?? victim.model.position).y), actors) || landed;
+        landed = this.damageActor('local', victim, proxyHit ? this.weapon.damage * falloff : gunHitDamage(this.weapon.damage * falloff, hitPoint.y, (victim.body ?? victim.model.position).y), actors) || landed;
         if (victim.health <= 0) { killed = true; this.events.onToast(`+1 ELIMINATION · ${this.match.kills}`); }
       }
       if (pellet === 0) {

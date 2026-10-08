@@ -10,6 +10,7 @@ export class Input {
     this.jump = false;
     this.reload = false;
     this.zoom = false;
+    this.hidePressed = false; this.hidePointers = new Set();
     this.knifePressed = this.throwPressed = this.grenadePickerPressed = false;
     this.pointers = new Map();
     const stick = document.getElementById('joystick');
@@ -69,17 +70,26 @@ export class Input {
       button.addEventListener('pointerdown', e => { if (this.enabled && !button.disabled) { e.preventDefault(); button.setPointerCapture(e.pointerId); this[action] = true; } });
       button.addEventListener('pointercancel', () => this.clear());
     }
+    const hideButton = document.getElementById('hide-button');
+    hideButton.addEventListener('pointerdown', e => {
+      if (!this.enabled || hideButton.disabled || this.hidePointers.has(e.pointerId)) return;
+      e.preventDefault(); hideButton.setPointerCapture(e.pointerId); this.hidePointers.add(e.pointerId); this.hidePressed = true;
+    });
+    hideButton.addEventListener('pointerup', e => this.hidePointers.delete(e.pointerId));
+    hideButton.addEventListener('pointercancel', () => this.clear());
+    hideButton.addEventListener('lostpointercapture', e => { if (this.hidePointers.has(e.pointerId)) this.clear(); });
     document.getElementById('zoom-button').addEventListener('click', () => { if (this.enabled) this.zoom = !this.zoom; });
     window.addEventListener('keydown', e => {
       if (e.code === 'Escape') { onPause(); return; }
       if (!this.enabled) return;
-      if (['KeyW','KeyA','KeyS','KeyD','KeyF','KeyR','Space','KeyE','KeyQ','KeyG','KeyT','ArrowUp','ArrowDown','ArrowLeft','ArrowRight'].includes(e.code)) e.preventDefault();
+      if (['KeyW','KeyA','KeyS','KeyD','KeyF','KeyR','Space','KeyE','KeyQ','KeyG','KeyT','KeyH','ArrowUp','ArrowDown','ArrowLeft','ArrowRight'].includes(e.code)) e.preventDefault();
       const fresh = !e.repeat && !this.keys.has(e.code);
       this.keys.add(e.code);
       if (this.combatBlockedKeys.has(e.code)) return;
       if (fresh && e.code === 'KeyQ') this.knifePressed = true;
       if (fresh && e.code === 'KeyG') this.throwPressed = true;
       if (fresh && e.code === 'KeyT') this.grenadePickerPressed = true;
+      if (fresh && e.code === 'KeyH') this.hidePressed = true;
       if (e.code === 'KeyF' && fresh) { this.fire = true; this.firePressed = true; }
       if (e.code === 'KeyR' && fresh) this.reload = true;
       if (e.code === 'Space' && !e.repeat) this.jump = true;
@@ -98,6 +108,7 @@ export class Input {
     this.knifePressed = this.throwPressed = this.grenadePickerPressed = false;
   }
   clear() {
+    this.hidePressed = false; this.hidePointers?.clear();
     this.combatBlockedKeys.clear();
     this.keys.clear(); this.pointers.clear(); this.fire = this.firePressed = this.jump = this.reload = this.zoom = false;
     this.knifePressed = this.throwPressed = this.grenadePickerPressed = false;
@@ -109,7 +120,8 @@ export class Input {
     let x = this.move.x + Number(this.keys.has('KeyD') || this.keys.has('ArrowRight')) - Number(this.keys.has('KeyA') || this.keys.has('ArrowLeft'));
     let y = this.move.y + Number(this.keys.has('KeyW') || this.keys.has('ArrowUp')) - Number(this.keys.has('KeyS') || this.keys.has('ArrowDown'));
     const length = Math.hypot(x, y); if (length > 1) { x /= length; y /= length; }
-    const result = { x, y, lookX: this.look.x, lookY: this.look.y, fire: this.fire || this.firePressed, firePressed: this.firePressed, jump: this.jump, reload: this.reload, zoom: this.zoom, knifePressed: this.knifePressed, throwPressed: this.throwPressed, grenadePickerPressed: this.grenadePickerPressed };
+    const result = { x, y, lookX: this.look.x, lookY: this.look.y, fire: this.fire || this.firePressed, firePressed: this.firePressed, jump: this.jump, reload: this.reload, zoom: this.zoom, knifePressed: this.knifePressed, throwPressed: this.throwPressed, grenadePickerPressed: this.grenadePickerPressed, hidePressed: this.hidePressed };
+    this.hidePressed = false;
     this.look.x = this.look.y = 0; this.jump = this.reload = this.firePressed = false;
     this.knifePressed = this.throwPressed = this.grenadePickerPressed = false;
     return result;
