@@ -1,6 +1,7 @@
 import { canOccupyBody, overlapsFootprint, supportBelow } from './spatial.js';
 
-export const MOVEMENT = Object.freeze({ jumpVelocity: 4.3, gravity: 13, maxFrame: .25, maxStep: 1 / 120 });
+import { MOVEMENT } from './movement-constants.js';
+export { MOVEMENT } from './movement-constants.js';
 const EPS = 1e-8;
 
 export function humanMoveSpeed(classId, zoom = false) {

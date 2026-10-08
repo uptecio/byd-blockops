@@ -10,7 +10,7 @@ import { RoomManager } from '../server/rooms.js';
 import { SKINS } from '../src/skins.js';
 import { emptyTally } from '../src/progression.js';
 
-const player = (id = 'p1') => ({ id, name: id, teamId: null, skinId: 'ranger', pendingSkinId: null, finishId: 'standard', pendingFinishId: null, lifeId: 1, heldItem: 'gun', flashRemaining: 0, x: 2, z: 3, y: 0, yaw: 0, pitch: 0, health: 100, armour: 0, kills: 0, deaths: 0, weaponId: 'm4a1', ammo: 30, reserve: 470, reloadRemaining: 0, respawnRemaining: 0, protectedRemaining: 2 });
+const player = (id = 'p1') => ({ id, name: id, teamId: null, skinId: 'ranger', pendingSkinId: null, finishId: 'standard', pendingFinishId: null, lifeId: 1, heldItem: 'gun', flashRemaining: 0, x: 2, z: 3, y: 0, grounded: true, supportId: 'ground', hiddenSpotId: null, yaw: 0, pitch: 0, health: 100, armour: 0, kills: 0, deaths: 0, weaponId: 'm4a1', ammo: 30, reserve: 470, reloadRemaining: 0, respawnRemaining: 0, protectedRemaining: 2 });
 function room() {
   const value = { code: 'ABC123', hostId: 'p1', phase: 'playing', roundId: 'round-1', mapId: 'courtyard', modeId: 'ffa', timeLeft: 180, winnerId: null, winnerName: null, winnerTeamId: null, teamScores: { red: 0, blue: 0 }, flags: null, players: [player(), player('p2')], events: [], gear: { loot: [], projectiles: [], smokes: [] } };
   Object.defineProperty(value, 'selfProgression', { enumerable: true, get() { return value.roundId === null ? null : {roundId:value.roundId,playerId:value.players[0].id,modeId:value.modeId,tally:emptyTally()}; } });
@@ -191,7 +191,7 @@ test('a server that never welcomes times out and closes its connection', async c
   } finally { globalThis.WebSocket = original; context.mock.timers.reset(); }
 });
 
-test('protocol 5 requests forward selected create options and only approved join fields', async () => {
+test('protocol 6 requests forward selected create options and only approved join fields', async () => {
   const original = globalThis.WebSocket; globalThis.WebSocket = Socket;
   try {
     for (const [request, expected] of [
@@ -229,7 +229,7 @@ test('old servers and version rejection require an update before any gameplay ca
   } finally { globalThis.WebSocket = original; }
 });
 
-test('invalid protocol 5 updates preserve the last valid room including objectives', async () => {
+test('invalid protocol 6 updates preserve the last valid room including objectives', async () => {
   const original = globalThis.WebSocket; globalThis.WebSocket = Socket;
   try {
     const errors = [];
@@ -243,6 +243,9 @@ test('invalid protocol 5 updates preserve the last valid room including objectiv
       snapshot => { snapshot.players[0].skinId = 'unknown'; }, snapshot => { snapshot.players[0].pendingSkinId = 'unknown'; },
       snapshot => { snapshot.players[0].teamId = 'green'; }, snapshot => { snapshot.players[0].teamId = null; },
       snapshot => { snapshot.players[0].x = NaN; }, snapshot => { snapshot.players[0].kills = NaN; },
+      snapshot => { snapshot.players[0].hiddenSpotId = 'missing'; }, snapshot => { snapshot.players[0].supportId = 'wrong'; },
+      snapshot => { snapshot.players[0].y = 100; }, snapshot => { snapshot.players[0].y = -1; },
+      snapshot => { snapshot.players[0].grounded = 'yes'; },
       snapshot => { snapshot.teamScores.red = NaN; }, snapshot => { snapshot.teamScores.blue = -1; },
       snapshot => { snapshot.timeLeft = Infinity; }, snapshot => { snapshot.winnerTeamId = 'green'; },
       snapshot => { snapshot.winnerName = 4; }, snapshot => { snapshot.winnerName = 'unearned'; },

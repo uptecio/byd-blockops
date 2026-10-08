@@ -88,6 +88,9 @@ export async function startServer({ port = 0, host = '127.0.0.1', distDir = 'dis
             if (!result.ok) send(socket, { type: 'error', message: result.reason });
             broadcast(manager.roomFor(id)); break;
           }
+          case 'hide-action': {
+            send(socket, manager.hideAction(id, packet)); broadcast(manager.roomFor(id)); break;
+          }
           case 'leave': broadcast(manager.leave(id)); break;
           case 'ping': send(socket, { type: 'pong', at: packet.at }); break;
           default: throw new Error('Unknown message type.');

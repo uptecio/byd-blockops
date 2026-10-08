@@ -1,4 +1,5 @@
 // Feet positions and solid heights use world units. Ground is the implicit Y=0 plane.
+import { MOVEMENT } from './movement-constants.js';
 const EPS = 1e-8;
 const finitePoint = point => point && [point.x, point.y, point.z].every(Number.isFinite);
 
@@ -22,7 +23,7 @@ export function createSpatialWorld(map) {
     ids.add(id);
     return { ...source, id, minY, maxY, height: maxY - minY };
   });
-  return { mapId: map.id, bounds, solids, maxFeetY: Math.max(0, ...solids.map(solid => solid.maxY)) + 4 };
+  return { mapId: map.id, bounds, solids, maxFeetY: Math.max(0, ...solids.map(solid => solid.maxY)) + MOVEMENT.jumpVelocity ** 2 / (2 * MOVEMENT.gravity) + .1 };
 }
 
 export function overlapsFootprint(position, radius, solid) {

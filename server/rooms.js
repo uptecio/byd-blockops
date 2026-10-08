@@ -16,6 +16,11 @@ import { validEquipmentAction } from '../src/gear-protocol.js';
 import { GEAR_BALANCE } from '../src/equipment-catalog.js';
 import { damageVitals } from '../src/vitals.js';
 import { startSupplyUse, cancelSupplyUse, advanceSupplyUse, isUsingSupply } from '../src/supplies.js';
+import { createHidingState, requestHide, exitHiding, releaseHiding, attackExit, hidingDropPosition } from '../src/hiding.js';
+import { spotDamageTargets, raySpotHit } from '../src/hiding-combat.js';
+import { validHideAction } from '../src/hiding-protocol.js';
+import { validProgressionId } from '../src/progression-protocol.js';
+import { PROTOCOL_VERSION } from '../src/protocol.js';
 
 const mapPhysics = new Map();
 function physicsFor(map) {
@@ -65,7 +70,7 @@ export class RoomManager {
     let code;
     do { code = Array.from({ length: 6 }, () => ALPHABET[randomInt(ALPHABET.length)]).join(''); } while (this.rooms.has(code));
     const room = { code, hostId: id, phase: 'lobby', roundId: null, timeLeft: 180, winnerId: null, winnerName: null, winnerTeamId: null, mapId, modeId, map, physics: physicsFor(map), players: new Map(), lifeCounters: new Map(), events: [], nextEventId: 1,
-      modeState: createModeState({ modeId, map, participants: [] }), lootState: createLootState({ mapId, seed: 0, startingGunIds: [weaponId] }), gearCombatState: createGearCombatState() };
+      modeState: createModeState({ modeId, map, participants: [] }), lootState: createLootState({ mapId, seed: 0, startingGunIds: [weaponId] }), gearCombatState: createGearCombatState(), hidingState: createHidingState() };
     this.addPlayer(room, id, name, weaponId, skinId, finishId);
     this.rooms.set(code, room);
     return room;
@@ -86,6 +91,7 @@ export class RoomManager {
   addPlayer(room, id, name, weaponId, skinId, finishId) {
     const teamId = addParticipant(room.modeState, { id });
     const player = { id, name: sanitizeName(name), weaponId, loadoutId: weaponId, startingGunId: weaponId, teamId, skinId, pendingSkinId: null, finishId, pendingFinishId: null, progression: emptyTally(), kills: 0, deaths: 0, inventory: new Map(), lastActionSeq: this.actionSequences.get(id) ?? 0, input: emptyInput(), inputAt: -Infinity };
+    player.lastHideSeq = 0; player.lastHideResult = null; player.lastHideAction = null;
     room.players.set(id, player);
     this.sessions.set(id, room);
     this.spawn(room, player);
@@ -93,6 +99,7 @@ export class RoomManager {
   }
 
   spawn(room, player) {
+    releaseHiding(room.hidingState, player.id, player.lifeId); player.hiddenSpotId = null; player.lastHideResult = null;
     const spawns = player.teamId ? room.map.teamSpawns[player.teamId] : [room.map.playerSpawn, ...room.map.spawns];
     const others = [...room.players.values()].filter(other => other !== player && other.health > 0);
     let spawn = spawns[0];
@@ -124,6 +131,7 @@ export class RoomManager {
     for (const player of room.players.values()) Object.assign(player, { health: 0, teamId: assignments[player.id], kills: 0, deaths: 0, startingGunId: player.loadoutId, progression: emptyTally() });
     room.lootState = createLootState({ mapId: map.id, seed: randomInt(4294967296), startingGunIds: [...room.players.values()].map(p => p.startingGunId) });
     room.gearCombatState = createGearCombatState();
+    room.hidingState = createHidingState();
     for (const player of room.players.values()) this.spawn(room, player);
   }
 
@@ -172,6 +180,7 @@ export class RoomManager {
     let x = Math.max(-1, Math.min(1, packet.x));
     let y = Math.max(-1, Math.min(1, packet.y));
     const length = Math.hypot(x, y); if (length > 1) { x /= length; y /= length; }
+    if (room.phase === 'playing' && player.health > 0 && packet.lifeId === player.lifeId) this.exposeAttack(room, player, packet);
     const combatAllowed = room.phase === 'playing' && player.health > 0 && packet.lifeId === player.lifeId && !isUsingSupply(player.equipment);
     player.input = {
       x, y, yaw: packet.yaw % (Math.PI * 2), pitch: Math.max(-1.25, Math.min(1.25, packet.pitch)),
@@ -193,8 +202,46 @@ export class RoomManager {
 
   syncEquipment(player) { player.weaponId = player.equipment.activeGunId; player.inventory = player.equipment.owned; }
 
+  actor(player) {
+    return { id: player.id, lifeId: player.lifeId, teamId: player.teamId, x: player.x, y: player.y, z: player.z, yaw: player.yaw, pitch: player.pitch,
+      health: player.health, armour: player.armour, alive: player.health > 0, grounded: player.grounded, supportId: player.supportId,
+      hiddenSpotId: player.hiddenSpotId, protectedRemaining: player.protectedRemaining, flashRemaining: player.flashRemaining, equipment: player.equipment };
+  }
+  hidingOptions(room) { return { map: room.map, world: room.physics.spatial, active: room.phase === 'playing' }; }
+  applyHideTransition(room, player, transition) {
+    if (!transition?.ok || !transition.changed) return;
+    Object.assign(player, createBody(transition.position, room.physics.spatial), { hiddenSpotId: transition.hiddenSpotId });
+    if (player.hiddenSpotId) {
+      const spot = room.map.hideSpots.find(s => s.id === player.hiddenSpotId);
+      player.yaw = Math.atan2(spot.view.x - spot.entry.x, spot.view.z - spot.entry.z); player.pitch = 0;
+      player.input.yaw = player.yaw; player.input.pitch = player.pitch;
+    }
+  }
+  exposeAttack(room, player, intent) {
+    const transition = attackExit(room.hidingState, this.actor(player), intent, this.hidingOptions(room));
+    this.applyHideTransition(room, player, transition);
+    return transition;
+  }
+  hideAction(id, packet) {
+    const { room, player } = this.requirePlayer(id);
+    const reply = (ok, reason) => ({ type: 'hide-result', protocol: PROTOCOL_VERSION,
+      seq: Number.isSafeInteger(packet?.seq) && packet.seq > 0 ? packet.seq : 1,
+      roundId: validProgressionId(packet?.roundId) ? packet.roundId : room.roundId ?? 'inactive',
+      lifeId: Number.isSafeInteger(packet?.lifeId) && packet.lifeId >= 0 ? packet.lifeId : player.lifeId,
+      ok, reason, hiddenSpotId: player.hiddenSpotId });
+    if (!validHideAction(packet, room.map)) return reply(false, 'Invalid hiding action');
+    if (room.phase !== 'playing' || player.health <= 0 || packet.lifeId !== player.lifeId || packet.roundId !== room.roundId) return reply(false, 'Stale or inactive hiding action');
+    if (packet.seq === player.lastHideSeq && player.lastHideResult && player.lastHideAction.kind === packet.kind && player.lastHideAction.spotId === packet.spotId) return { ...player.lastHideResult };
+    if (packet.seq <= player.lastHideSeq) return reply(false, 'Repeated hiding action');
+    player.lastHideSeq = packet.seq; player.lastHideAction = { kind: packet.kind, spotId: packet.spotId };
+    const transition = requestHide(room.hidingState, this.actor(player), packet, this.hidingOptions(room));
+    this.applyHideTransition(room, player, transition);
+    player.lastHideResult = reply(transition.ok, transition.reason);
+    return { ...player.lastHideResult };
+  }
+
   actors(room) {
-    return [...room.players.values()].map(p => ({ id: p.id, lifeId: p.lifeId, teamId: p.teamId, x: p.x, y: p.y, z: p.z, yaw: p.yaw, pitch: p.pitch, health: p.health, armour: p.armour, alive: p.health > 0, protectedRemaining: p.protectedRemaining, flashRemaining: p.flashRemaining, equipment: p.equipment }));
+    return [...room.players.values()].map(p => this.actor(p));
   }
 
   equipmentAction(id, packet) {
@@ -212,8 +259,9 @@ export class RoomManager {
     else if (packet.kind === 'use-supply') result = startSupplyUse(player.equipment, player, packet.supplyType, { active: true, alive: true });
     else if (packet.kind === 'cancel-supply') result = cancelSupplyUse(player.equipment);
     else {
+      this.exposeAttack(room, player, packet);
       if (isUsingSupply(player.equipment)) return denied('Finish or cancel supply use first');
-      const actor = this.actors(room).find(actor => actor.id === id);
+      const actor = this.actor(player);
       if (player.input.lifeId === player.lifeId && this.now - player.inputAt <= .3 + 1e-9) {
         actor.yaw = player.input.yaw; actor.pitch = player.input.pitch;
       }
@@ -234,14 +282,15 @@ export class RoomManager {
     return room.roundId === null ? null : { roundId: room.roundId, playerId: id, modeId: room.modeId, tally: { ...player.progression } };
   }
 
-  eliminate(room, killerId, target) {
+  eliminate(room, killerId, target, position = hidingDropPosition(room.hidingState, target, room.map)) {
     if (room.phase !== 'playing' || target.health <= 0) return false;
     const items = deathItems(target.equipment);
+    this.applyHideTransition(room, target, exitHiding(room.hidingState, target, this.hidingOptions(room)));
     target.health = 0; target.armour = 0; target.respawnRemaining = 2.5; target.input = emptyInput(); target.inputAt = -Infinity;
     clearEquipment(target.equipment);
-    addDeathDrops(room.lootState, { actorId: target.id, lifeId: target.lifeId, position: target, items, solids: room.physics.solids, world: room.physics.spatial });
+    addDeathDrops(room.lootState, { actorId: target.id, lifeId: target.lifeId, position, items, solids: room.physics.solids, world: room.physics.spatial });
     const previousKills = room.modeState.stats[killerId]?.kills;
-    const events = recordElimination(room.modeState, { killerId, victimId: target.id, position: target, lifeId: target.lifeId });
+    const events = recordElimination(room.modeState, { killerId, victimId: target.id, position, lifeId: target.lifeId });
     const killer = room.players.get(killerId);
     if (killer && room.modeState.stats[killerId].kills > previousKills)
       killer.progression = awardTally(killer.progression, room.modeId, 'eliminations');
@@ -255,11 +304,13 @@ export class RoomManager {
     if (room.phase !== 'playing' || !target || target.health <= 0 || target.protectedRemaining > 0 || !areEnemies(room.modeState, sourceId, target.id)) return;
     const next = { health: target.health, armour: target.armour };
     const result = damageVitals(next, amount);
-    if (!result.ok) return;
+    if (!result.ok || result.healthDamage + result.armourDamage <= 0) return;
+    const position = hidingDropPosition(room.hidingState, target, room.map);
+    this.applyHideTransition(room, target, exitHiding(room.hidingState, target, this.hidingOptions(room)));
     this.event(room, { type: 'hit', playerId: sourceId, targetId: target.id });
     target.armour = next.armour;
     // eliminate owns the alive-to-dead transition, scoring and one-life drops.
-    if (result.killed) this.eliminate(room, sourceId, target);
+    if (result.killed) this.eliminate(room, sourceId, target, position);
     else target.health = next.health;
   }
 
@@ -269,7 +320,9 @@ export class RoomManager {
     if (!room) return null;
     cancelSupplyUse(room.players.get(id).equipment);
     for (const projectile of room.gearCombatState.projectiles) if (projectile.ownerId === id) projectile.visualOnly = true;
-    for (const event of removeParticipant(room.modeState, id, room.players.get(id))) this.event(room, event);
+    const departing = room.players.get(id), position = hidingDropPosition(room.hidingState, departing, room.map);
+    releaseHiding(room.hidingState, id, departing.lifeId); departing.hiddenSpotId = null;
+    for (const event of removeParticipant(room.modeState, id, position)) this.event(room, event);
     room.players.delete(id); this.sessions.delete(id);
     if (!room.players.size) this.rooms.delete(room.code);
     else if (room.hostId === id) room.hostId = room.players.keys().next().value;
@@ -285,6 +338,7 @@ export class RoomManager {
   }
 
   shoot(room, shooter, weapon) {
+    this.exposeAttack(room, shooter, { fire: true });
     if (isUsingSupply(shooter.equipment)) return;
     const origin = new THREE.Vector3(shooter.x, shooter.y + 1.65, shooter.z);
     const facing = new THREE.Vector3(-Math.sin(shooter.yaw) * Math.cos(shooter.pitch), Math.sin(shooter.pitch), -Math.cos(shooter.yaw) * Math.cos(shooter.pitch));
@@ -298,20 +352,24 @@ export class RoomManager {
       const ray = new THREE.Ray(origin, direction);
       const point = new THREE.Vector3();
       let distance = weapon.range;
-      let target = null, hitY = 0;
+      let target = null, hitY = 0, proxyHit = false;
       for (const box of room.physics.wallBoxes) {
         if (ray.intersectBox(box, point)) distance = Math.min(distance, origin.distanceTo(point));
       }
       for (const player of room.players.values()) {
-        if (player.health <= 0 || !areEnemies(room.modeState, shooter.id, player.id)) continue;
+        if (player.hiddenSpotId || player.health <= 0 || !areEnemies(room.modeState, shooter.id, player.id)) continue;
         const bounds = new THREE.Box3(new THREE.Vector3(player.x - 0.32, player.y, player.z - 0.32), new THREE.Vector3(player.x + 0.32, player.y + 1.84, player.z + 0.32));
         if (ray.intersectBox(bounds, point)) {
           const hitDistance = origin.distanceTo(point);
           if (hitDistance < distance) { distance = hitDistance; target = player; hitY = point.y; }
         }
       }
+      const candidates = this.actors(room).filter(p => p.protectedRemaining <= 0 && areEnemies(room.modeState, shooter.id, p.id));
+      const proxy = raySpotHit(origin, direction, weapon.range, spotDamageTargets(room.hidingState, candidates, room.map), room.physics.spatial);
+      // A proxy tests its own occluders; its own shell must not remain a global nearest-wall blocker.
+      if (proxy && proxy.distance < (target ? distance : weapon.range)) { target = room.players.get(proxy.actorId); distance = proxy.distance; proxyHit = true; }
       if (pellet === 0) shotEnd = origin.clone().addScaledVector(direction, distance);
-      if (target && target.protectedRemaining <= 0) damage.set(target, (damage.get(target) || 0) + gunHitDamage(weapon.damage, hitY, target.y));
+      if (target && target.protectedRemaining <= 0) damage.set(target, (damage.get(target) || 0) + (proxyHit ? weapon.damage : gunHitDamage(weapon.damage, hitY, target.y)));
     }
     this.event(room, { type: 'shot', playerId: shooter.id, from: { x: origin.x, y: origin.y, z: origin.z }, to: { x: shotEnd.x, y: shotEnd.y, z: shotEnd.z } });
     for (const [target, amount] of damage) {
@@ -350,15 +408,19 @@ export class RoomManager {
       const state = player.inventory.get(player.weaponId);
       if (this.now - player.inputAt <= 0.3 + 1e-9) { player.yaw = input.yaw; player.pitch = input.pitch; }
       const speed = humanMoveSpeed(weapon.classId, input.zoom);
-      const movement = moveCharacter(player, { vx: (Math.cos(player.yaw) * input.x - Math.sin(player.yaw) * input.y) * speed,
-        vz: (-Math.sin(player.yaw) * input.x - Math.cos(player.yaw) * input.y) * speed, jump: input.jump }, dt, { world: room.physics.spatial });
-      Object.assign(player, movement.body);
+      const wasHidden = !!player.hiddenSpotId;
+      if (input.lifeId === player.lifeId) this.exposeAttack(room, player, input);
+      if (!wasHidden && !player.hiddenSpotId) {
+        const movement = moveCharacter(player, { vx: (Math.cos(player.yaw) * input.x - Math.sin(player.yaw) * input.y) * speed,
+          vz: (-Math.sin(player.yaw) * input.x - Math.cos(player.yaw) * input.y) * speed, jump: input.jump }, dt, { world: room.physics.spatial });
+        Object.assign(player, movement.body);
+      }
       if (!isUsingSupply(player.equipment) && input.lifeId === player.lifeId && input.reload && player.equipment.heldItem === 'gun') startReload(state);
       if (!isUsingSupply(player.equipment) && input.lifeId === player.lifeId && player.equipment.attackLockRemaining === 0) {
         if (player.equipment.heldItem === 'knife') {
           if ((input.fire || input.firePressed) && beginMelee(player.equipment).ok) {
             this.event(room, { type: 'melee', playerId: player.id });
-            const targetId = meleeTarget(this.actors(room).find(a => a.id === player.id), this.actors(room), { solids: room.physics.solids, isEnemy: (a, b) => areEnemies(room.modeState, a, b) });
+            const targetId = meleeTarget(this.actor(player), this.actors(room), { solids: room.physics.solids, isEnemy: (a, b) => areEnemies(room.modeState, a, b), hiding: { state: room.hidingState, map: room.map, world: room.physics.spatial } });
             if (targetId) this.damage(room, player.id, room.players.get(targetId), GEAR_BALANCE.knife.damage);
           }
         } else {
@@ -368,7 +430,7 @@ export class RoomManager {
       input.firePressed = false; input.jump = false; input.reload = false;
     }
     if (room.phase !== 'playing') return;
-    const effects = stepGearCombat(room.gearCombatState, this.actors(room), dt, { solids: room.physics.solids, isEnemy: (a, b) => areEnemies(room.modeState, a, b) });
+    const effects = stepGearCombat(room.gearCombatState, this.actors(room), dt, { solids: room.physics.solids, isEnemy: (a, b) => areEnemies(room.modeState, a, b), hiding: { state: room.hidingState, map: room.map, world: room.physics.spatial } });
     for (const event of effects.events) this.event(room, event);
     for (const intent of effects.damage) {
       this.damage(room, intent.sourceId, room.players.get(intent.targetId), intent.amount);
@@ -414,8 +476,8 @@ export class RoomManager {
     return { code: room.code, hostId: room.hostId, phase: room.phase, roundId: room.roundId, timeLeft: room.timeLeft, winnerId: room.winnerId, winnerName: room.winnerName, mapId, modeId, teamScores, winnerTeamId, flags, events, gear: { loot: lootDTO(room.lootState), ...gearCombatDTO(room.gearCombatState) },
       players: [...room.players.values()].map(player => {
         const state = player.inventory.get(player.weaponId);
-        const { id, name, x, z, y, yaw, pitch, health, armour, kills, deaths, weaponId, respawnRemaining, protectedRemaining, teamId, skinId, pendingSkinId, finishId, pendingFinishId, lifeId, flashRemaining } = player;
-        return { id, name, x, z, y, yaw, pitch, health, armour, kills, deaths, weaponId, teamId, skinId, pendingSkinId, finishId, pendingFinishId, lifeId, flashRemaining, heldItem: player.equipment.heldItem, ammo: state?.ammo ?? 0, reserve: state?.reserve ?? 0, reloadRemaining: state?.reloadRemaining ?? 0, respawnRemaining, protectedRemaining };
+        const { id, name, x, z, y, yaw, pitch, health, armour, kills, deaths, weaponId, respawnRemaining, protectedRemaining, teamId, skinId, pendingSkinId, finishId, pendingFinishId, lifeId, flashRemaining, grounded, supportId, hiddenSpotId } = player;
+        return { id, name, x, z, y, yaw, pitch, health, armour, kills, deaths, weaponId, teamId, skinId, pendingSkinId, finishId, pendingFinishId, lifeId, flashRemaining, grounded, supportId, hiddenSpotId, heldItem: player.equipment.heldItem, ammo: state?.ammo ?? 0, reserve: state?.reserve ?? 0, reloadRemaining: state?.reloadRemaining ?? 0, respawnRemaining, protectedRemaining };
       }),
     };
   }

@@ -5,6 +5,8 @@ import { equipmentDTO, equipmentFromDTO } from './equipment.js';
 import { getWeapon } from './weapons.js';
 import { lootItemLabel } from './loot-labels.js';
 import { isUsingSupply, cancelSupplyUse } from './supplies.js';
+import { createHidingState, hidingContext } from './hiding.js';
+import { validHideResult } from './hiding-protocol.js';
 
 const neutral = (yaw, pitch, lifeId) => ({ type: 'input', lifeId, x: 0, y: 0, yaw, pitch, fire: false, firePressed: false, jump: false, reload: false, zoom: false });
 const emptyPending = () => ({ firePressed: false, jump: false, reload: false });
@@ -29,6 +31,7 @@ export class OnlineArena {
     this.game = game; this.client = client; this.onEnd = onEnd; this.onToast = onToast;
     this.remotes = new Map(); this.running = false; this.suspended = true;
     this.pending = emptyPending();
+    this.pendingHide = null; this.hidingReason = null;
     this.sendTimer = 0; this.hudTimer = 0; this.lastEvent = -1; this.endReported = false;
   }
   start(room, id, settings) {
@@ -48,9 +51,11 @@ export class OnlineArena {
     if (!this.running) return;
     const game = this.game, own = room.players.find(player => player.id === this.id);
     if (!own) return;
+    if (!initial && own.lifeId < game.player.lifeId) return;
     const equipment = equipmentFromDTO(room.selfEquipment.equipment);
     const previousEquipment = game.player.equipment, previousUse = previousEquipment?.supplyUse;
     const lifeChanged = game.player.lifeId !== own.lifeId;
+    const hideChanged = (game.player.hiddenSpotId ?? null) !== own.hiddenSpotId;
     const roundChanged = this.room && (this.room.roundId !== room.roundId || this.room.phase !== room.phase || this.room.mapId !== room.mapId || this.room.modeId !== room.modeId);
     const useChanged = previousUse?.type !== equipment.supplyUse?.type
       || (previousUse && equipment.supplyUse && equipment.supplyUse.remaining > previousUse.remaining + 1e-8);
@@ -59,7 +64,7 @@ export class OnlineArena {
       && previousUse && !equipment.supplyUse
       && equipment.supplies[previousUse.type] === previousEquipment.supplies[previousUse.type] - 1
       && own[previousUse.type] > game.player[previousUse.type]) game.audio.supplyComplete?.(previousUse.type);
-    if (lifeChanged || roundChanged || own.health <= 0) { game.input.clear(); this.pending = emptyPending(); }
+    if (lifeChanged || roundChanged || own.health <= 0) { game.input.clear(); this.pending = emptyPending(); this.pendingHide = null; }
     if (game.world.definition.id !== room.mapId) {
       for (const remote of this.remotes.values()) disposeModel(remote.model);
       this.remotes.clear(); game.loadMap(room.mapId); initial = true;
@@ -68,7 +73,7 @@ export class OnlineArena {
     this.room = room;
     this.target = { x: own.x, z: own.z, y: own.y };
     const respawned = this.previousRespawn > 0 && own.respawnRemaining === 0;
-    if (initial || respawned || lifeChanged) {
+    if (initial || respawned || lifeChanged || hideChanged) {
       Object.assign(game.player, { x: own.x, z: own.z, y: own.y, jump: own.y, velocityY: 0 });
       game.yaw = own.yaw; game.pitch = own.pitch; game.recoil = 0; game.input.clear();
     }
@@ -76,6 +81,8 @@ export class OnlineArena {
     if (own.respawnRemaining > 0 && this.previousRespawn <= 0) { game.input.clear(); this.pending = emptyPending(); this.onToast('ELIMINATED · RESPAWNING'); }
     this.previousRespawn = own.respawnRemaining;
     Object.assign(game.player, { id: own.id, lifeId: own.lifeId, name: own.name, teamId: own.teamId, skinId: own.skinId, pendingSkinId: own.pendingSkinId, finishId: own.finishId, pendingFinishId: own.pendingFinishId, health: own.health, armour: own.armour, dead: own.respawnRemaining, protected: own.protectedRemaining, flashRemaining: own.flashRemaining, equipment });
+    Object.assign(game.player, { hiddenSpotId: own.hiddenSpotId, grounded: own.grounded, supportId: own.supportId });
+    if (initial || lifeChanged || hideChanged) game.placeCamera();
     game.matchView = {
       mapId: room.mapId, modeId: room.modeId, timeLeft: room.timeLeft, ended: room.phase === 'ended',
       winnerId: room.winnerId, winnerName: room.winnerName, winnerTeamId: room.winnerTeamId,
@@ -85,6 +92,7 @@ export class OnlineArena {
     game.match = { ...game.matchView, kills: own.kills, deaths: own.deaths };
     if (own.reloadRemaining > 0 && game.weaponState.reloadRemaining === 0 && !this.suspended) game.audio.reload();
     game.syncPlayerEquipment();
+    if (own.hiddenSpotId) { game.weaponModel.visible = false; game.muzzle.visible = false; }
     // Always reconcile complete public arrays, including removals during menus.
     // RoomClient validated these plain DTOs; only loot items have nested records.
     game.gearWorld = {
@@ -105,7 +113,8 @@ export class OnlineArena {
         model.position.set(player.x, player.y, player.z);
         remote = { model, player, name: player.name }; this.remotes.set(player.id, remote);
       }
-      remote.player = player; remote.model.visible = player.respawnRemaining <= 0;
+      if (remote.player.lifeId !== player.lifeId || remote.player.hiddenSpotId !== player.hiddenSpotId) remote.model.position.set(player.x, player.y, player.z);
+      remote.player = player; remote.model.visible = player.respawnRemaining <= 0 && !player.hiddenSpotId;
       remote.model.rotation.y = player.yaw + Math.PI;
     }
     for (const [id, remote] of this.remotes) if (!present.has(id)) { disposeModel(remote.model); this.remotes.delete(id); }
@@ -141,9 +150,9 @@ export class OnlineArena {
   }
   updateObjectives(actorVisibility) {
     const game = this.game;
-    const actors = this.room.phase === 'ended' ? [] : [
-      { id: this.id, x: game.player.x, y: game.player.jump, z: game.player.z },
-      ...[...this.remotes].map(([id, remote]) => ({ id, x: remote.model.position.x, y: remote.model.position.y, z: remote.model.position.z })),
+    const actors = [
+      { id: this.id, x: game.player.x, y: game.player.jump, z: game.player.z, hiddenSpotId: game.player.hiddenSpotId },
+      ...[...this.remotes].map(([id, remote]) => ({ id, x: remote.model.position.x, y: remote.model.position.y, z: remote.model.position.z, hiddenSpotId: remote.player.hiddenSpotId })),
     ];
     game.objectives.update({ flags: game.matchView.flags, actors, viewerId: this.id, actorVisibility });
   }
@@ -156,13 +165,39 @@ export class OnlineArena {
     this.updateObjectives(actorVisibility);
   }
   getEquipmentView() { return equipmentDTO(this.game.player.equipment); }
+  getHidingView() {
+    const state = createHidingState(), map = this.game.world.definition;
+    const own = this.room?.players.find(p => p.id === this.id);
+    for (const player of this.room?.players ?? []) if (player.hiddenSpotId) {
+      state.occupants.set(player.hiddenSpotId, { actorId: player.id, lifeId: player.lifeId });
+      state.actors.set(player.id, { spotId: player.hiddenSpotId, lifeId: player.lifeId });
+    }
+    const context = own ? hidingContext(state, { ...own, alive: own.health > 0 && own.respawnRemaining <= 0 }, { map, world: this.game.world.spatial,
+      active: this.running && !this.suspended && this.room.phase === 'playing' }) : { label: null, enabled: false, spotId: null };
+    return { ...context, enabled: context.enabled && !this.pendingHide, hidden: !!own?.hiddenSpotId, pending: !!this.pendingHide, reason: this.hidingReason };
+  }
+  requestHide(action) {
+    if (!this.running || this.suspended || this.room.phase !== 'playing' || this.game.player.health <= 0 || this.pendingHide) return { ok: false, reason: 'Cannot hide now' };
+    const seq = this.client.sendHideAction(action);
+    if (!seq) return { ok: false, reason: 'Unable to send hiding request' };
+    this.pendingHide = { seq, socket: this.client.socket, roundId: this.room.roundId, lifeId: this.game.player.lifeId, remaining: 2 };
+    this.hidingReason = null; return { ok: true };
+  }
+  receiveHideResult(packet) {
+    const pending = this.pendingHide;
+    if (!pending || !validHideResult(packet, this.game.world.definition) || pending.socket !== this.client.socket
+      || packet.seq !== pending.seq || packet.roundId !== pending.roundId || packet.lifeId !== pending.lifeId
+      || packet.roundId !== this.room?.roundId || packet.lifeId !== this.game.player.lifeId) return;
+    this.pendingHide = null; this.hidingReason = packet.reason;
+    if (!packet.ok) this.onToast(packet.reason);
+  }
   requestEquipment(action) {
     let reason;
     if (!this.running || this.room.phase !== 'playing' || this.game.player.health <= 0 || this.game.player.dead > 0)
       reason = 'Cannot change equipment while inactive';
     else if (action?.kind === 'throw' && this.suspended) reason = 'Cannot throw while paused';
     else if (action?.kind === 'use-supply' && this.suspended) reason = 'Cannot use supplies while paused';
-    else if (action?.kind === 'throw' && isUsingSupply(this.game.player.equipment)) reason = 'Finish or cancel supply use first';
+    else if (action?.kind === 'throw' && isUsingSupply(this.game.player.equipment) && !this.game.player.hiddenSpotId && !this.pendingHide) reason = 'Finish or cancel supply use first';
     else if (!this.client.sendEquipmentAction(action)) reason = 'Unable to send equipment action';
     if (reason) { this.onToast(reason); return { ok: false, reason }; }
     return { ok: true };
@@ -171,18 +206,25 @@ export class OnlineArena {
     if (!this.running || !Number.isFinite(dt) || dt <= 0) return;
     const game = this.game;
     game.time += dt;
+    if (this.pendingHide && ((this.pendingHide.remaining -= dt) <= 0 || this.pendingHide.socket !== this.client.socket)) {
+      this.pendingHide = null; this.hidingReason = 'Hiding request timed out. Try again.'; this.onToast(this.hidingReason);
+    }
     let input = null;
     if (!this.suspended && this.room.phase === 'playing' && game.player.dead <= 0 && game.player.health > 0) {
       input = game.input.read();
       if (input.grenadePickerPressed) { game.events.onEquipmentPicker?.(); if (this.suspended) input = null; }
+      if (input?.hidePressed) {
+        const view = this.getHidingView();
+        if (view.enabled) this.requestHide({ kind: view.hidden ? 'exit' : 'enter', spotId: view.spotId });
+      }
       if (input?.knifePressed) {
         this.requestEquipment({ kind: 'held-item', heldItem: game.player.equipment.heldItem === 'knife' ? 'gun' : 'knife' });
         game.input.zoom = false;
       }
       if (input && game.player.equipment.heldItem === 'knife') input.zoom = input.reload = false;
       if (input && isUsingSupply(game.player.equipment)) {
-        input.fire = input.firePressed = input.reload = input.throwPressed = false;
-        this.pending.firePressed = this.pending.reload = false;
+        input.reload = false; this.pending.reload = false;
+        if (!game.player.hiddenSpotId && !this.pendingHide) { input.fire = input.firePressed = input.throwPressed = false; this.pending.firePressed = false; }
       }
     }
     if (input) {
@@ -191,7 +233,8 @@ export class OnlineArena {
       for (const key of ['firePressed', 'jump', 'reload']) this.pending[key] = this.pending[key] || !!input[key];
     }
     this.sendTimer -= dt;
-    if (this.sendTimer <= 0 || input?.throwPressed) {
+    if (this.sendTimer <= 0 || input?.throwPressed ||
+        ((game.player.hiddenSpotId || this.pendingHide) && input?.firePressed)) {
       const packet = neutral(game.yaw, game.pitch, game.player.lifeId);
       if (input) {
         const length = Math.max(1, Math.hypot(input.x, input.y));
@@ -224,7 +267,7 @@ export class OnlineArena {
     const zoom = !!(input && input.zoom);
     const fov = zoom ? 75 / game.weapon.zoom : 75;
     game.camera.fov += (fov - game.camera.fov) * Math.min(1, dt * 14); game.camera.updateProjectionMatrix();
-    game.weaponModel.visible = game.player.dead <= 0 && !(game.heldItem === 'gun' && zoom && game.weapon.classId === 'sniper');
+    game.weaponModel.visible = !game.player.hiddenSpotId && game.player.dead <= 0 && !(game.heldItem === 'gun' && zoom && game.weapon.classId === 'sniper');
     const reload = game.heldItem === 'gun' && game.weaponState.reloadRemaining > 0;
     game.weaponModel.position.set(zoom ? .08 : .28, -.27 - (isUsingSupply(game.player.equipment) ? .24 : reload ? .17 : 0), -.5 + game.recoil * .7);
     game.weaponModel.rotation.z = reload ? Math.sin(game.time * 6) * .15 - .3 : 0;
@@ -258,5 +301,6 @@ export class OnlineArena {
     this.game.gearView?.clear();
     if (this.running) { this.game.objectives?.dispose(); this.game.objectives = null; }
     this.running = false; this.suspended = true; this.room = null; this.target = null;
+    this.pendingHide = null; this.hidingReason = null; this.game.player.hiddenSpotId = null;
   }
 }

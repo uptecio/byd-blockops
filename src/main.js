@@ -339,6 +339,7 @@ try {
     onProgressionStop: () => progression.stop(),
     onResults: () => progressionUI?.renderResults(progressionSession.summary(), profileStore.view()),
   });
+  multiplayer.client.onHideResult = result => multiplayer.arena?.receiveHideResult(result);
   equipmentUI = new EquipmentUI({ getView: equipmentView,
     canSelectInventory: () => mode === 'playing' && input.enabled && !backgroundSuspended && !document.hidden,
     onAction: action => multiplayer?.isActive() ? action.kind === 'equip-gun' && mode === 'armory'

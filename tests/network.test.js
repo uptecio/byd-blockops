@@ -63,10 +63,10 @@ test('server closes oversized messages and connections exceeding 100 packets a s
   assert.equal(await limited,1008);
 });
 
-test('initial protocol must be exactly version 5 and rejected settings leave the connection unjoined', async t => {
+test('initial protocol must be exactly version 6 and rejected settings leave the connection unjoined', async t => {
   const server = await startServer({ port: 0 }); t.after(() => server.close());
   const client = await connect(server.port); t.after(() => client.socket.terminate());
-  for (const protocol of [undefined, 1, 2, 3, 4, 6, '5', null]) {
+  for (const protocol of [undefined, 1, 2, 3, 4, 5, 7, '6', null]) {
     client.send({ type: 'create', protocol, name: 'A', weaponId: 'g17' });
     assert.equal((await client.next(p => p.type === 'error')).message, 'Update required: install the latest Block Ops APK or reload the game.');
   }

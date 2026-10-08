@@ -7,6 +7,7 @@ import { validEquipmentAction, validEquipmentSnapshot, validGearEvent, validGear
 import { hasOwn } from './has-own.js';
 import { GUN_FINISHES } from './cosmetics.js';
 import { validProgressionId, validProgressionReceipt } from './progression-protocol.js';
+import { validHideAction, validHideResult, validPlayerSpatial, protocolWorld } from './hiding-protocol.js';
 
 const weaponIds = new Set(WEAPONS.map(weapon => weapon.id));
 const mapIds = new Set(MAPS.map(map => map.id));
@@ -41,8 +42,9 @@ function validRoom(room) {
   if (room.phase !== 'ended' && (room.winnerId !== null || room.winnerTeamId !== null)) return false;
   if (room.modeId === 'ffa' ? room.winnerTeamId !== null : room.winnerId !== null) return false;
   const ids = new Set();
+  const map = MAPS.find(map => map.id === room.mapId), spatial = protocolWorld(map);
   for (const player of room.players) {
-    if (!exactKeys(player, ['id', 'name', 'x', 'z', 'y', 'yaw', 'pitch', 'health', 'armour', 'kills', 'deaths', 'weaponId', 'teamId', 'skinId', 'pendingSkinId', 'finishId', 'pendingFinishId', 'lifeId', 'flashRemaining', 'heldItem', 'ammo', 'reserve', 'reloadRemaining', 'respawnRemaining', 'protectedRemaining'])
+    if (!exactKeys(player, ['id', 'name', 'x', 'z', 'y', 'yaw', 'pitch', 'health', 'armour', 'kills', 'deaths', 'weaponId', 'teamId', 'skinId', 'pendingSkinId', 'finishId', 'pendingFinishId', 'lifeId', 'flashRemaining', 'heldItem', 'ammo', 'reserve', 'reloadRemaining', 'respawnRemaining', 'protectedRemaining', 'grounded', 'supportId', 'hiddenSpotId'])
       || !count(player.lifeId) || player.lifeId === 0 || !['gun', 'knife'].includes(player.heldItem)
       || !Number.isFinite(player.flashRemaining) || player.flashRemaining < 0 || player.flashRemaining > 3) return false;
     if (!player || !validId(player.id) || ids.has(player.id) || typeof player.name !== 'string' || !weaponIds.has(player.weaponId) || !skinIds.has(player.skinId) || (player.pendingSkinId !== null && !skinIds.has(player.pendingSkinId))) return false;
@@ -55,6 +57,7 @@ function validRoom(room) {
     const gun = WEAPONS.find(gun => gun.id === player.weaponId);
     if (player.ammo > gun.magazine || player.ammo + player.reserve > TOTAL_AMMO || player.reloadRemaining > gun.reloadTime || player.health > 100 || player.armour > 100) return false;
     if (player.health === 0 && (player.armour !== 0 || player.ammo !== 0 || player.reserve !== 0 || player.reloadRemaining !== 0 || player.heldItem !== 'gun')) return false;
+    if (!validPlayerSpatial(player, map)) return false;
   }
   if (!ids.has(room.hostId)) return false;
   if (room.modeId !== 'ctf') { if (room.flags !== null) return false; }
@@ -64,6 +67,7 @@ function validRoom(room) {
     for (const team of teams) {
       const flag = room.flags[team];
       if (!exactKeys(flag, ['teamId', 'status', 'x', 'y', 'z', 'carrierId', 'returnRemaining']) || flag.teamId !== team || !['home', 'carried', 'dropped'].includes(flag.status) || !Number.isFinite(flag.x) || !Number.isFinite(flag.y) || flag.y < 0 || !Number.isFinite(flag.z) || !Number.isFinite(flag.returnRemaining) || flag.returnRemaining < 0 || flag.returnRemaining > 15) return false;
+      if (flag.y > spatial.maxFeetY || flag.x < spatial.bounds.min || flag.x > spatial.bounds.max || flag.z < spatial.bounds.min || flag.z > spatial.bounds.max) return false;
       if (flag.status === 'carried') {
         if (!validId(flag.carrierId) || carriers.has(flag.carrierId) || flag.returnRemaining !== 0 || room.phase === 'lobby') return false;
         carriers.add(flag.carrierId);
@@ -84,17 +88,17 @@ function validRoom(room) {
 
 export class RoomClient {
   get serverOrigin() { return connectionOrigins.get(this) ?? null; }
-  constructor({ onRoom = () => {}, onError = () => {}, onDisconnect = () => {} } = {}) {
+  constructor({ onRoom = () => {}, onError = () => {}, onDisconnect = () => {}, onHideResult = () => {} } = {}) {
     this.onRoom = onRoom; this.onError = onError; this.onDisconnect = onDisconnect;
     this.id = null; this.room = null; this.connected = false; this.socket = null; this.cancelPending = null;
-    this.actionSeq = 0;
+    this.actionSeq = 0; this.hideSeq = 0; this.onHideResult = onHideResult;
   }
   async connect(serverBase, request) {
     const base = normaliseServerUrl(serverBase);
     if (!request || !['create', 'join'].includes(request.type)) throw new Error('Choose Create room or Join room.');
     this.close();
     connectionOrigins.set(this, base);
-    this.actionSeq = 0;
+    this.actionSeq = 0; this.hideSeq = 0;
     return new Promise((resolve, reject) => {
       let socket;
       try { socket = new WebSocket(base.replace(/^http/, 'ws') + '/ws'); } catch { reject(new Error('Unable to open a connection to this server.')); return; }
@@ -126,6 +130,14 @@ export class RoomClient {
         if (packet.type === 'error') {
           const message = typeof packet.message === 'string' ? packet.message : 'The room request was rejected.';
           if (!welcomed) fail(message); else this.onError(message);
+          return;
+        }
+        if (packet.type === 'hide-result' && welcomed) {
+          if (packet.protocol !== PROTOCOL_VERSION) { this.onError(updateRequired); return; }
+          const map = MAPS.find(map => map.id === this.room.mapId);
+          if (!validHideResult(packet, map)) { this.onError('The server sent an invalid hiding result.'); return; }
+          const own = this.room.players.find(player => player.id === this.id);
+          if (packet.roundId === this.room.roundId && packet.lifeId === own?.lifeId) this.onHideResult(packet);
           return;
         }
         if (packet.type === 'welcome' || packet.type === 'state') {
@@ -184,6 +196,13 @@ export class RoomClient {
     if (!this.send(packet)) return false;
     this.actionSeq = packet.seq;
     return true;
+  }
+  sendHideAction(action) {
+    const own = this.room?.players.find(player => player.id === this.id);
+    if (!own || !exactKeys(action, ['kind', 'spotId']) || this.hideSeq >= Number.MAX_SAFE_INTEGER) return false;
+    const packet = { type: 'hide-action', seq: this.hideSeq + 1, roundId: this.room.roundId, lifeId: own.lifeId, ...action };
+    if (!validHideAction(packet, MAPS.find(map => map.id === this.room.mapId)) || !this.send(packet)) return false;
+    this.hideSeq = packet.seq; return packet.seq;
   }
   close() {
     if (this.suppressDisconnect) this.suppressDisconnect();
