@@ -1,12 +1,11 @@
-import { hasLineOfSight } from './collision.js';
 import { areEnemies } from './modes.js';
-import { smokeBlocksSight } from './gear-combat.js';
 import { getWeapon } from './weapons.js';
 import { hasOwn } from './has-own.js';
 import { isUsingSupply } from './supplies.js';
+import { canPerceive } from './actor-perception.js';
 
-const point = ({ x, z }) => ({ x, z });
-const distance = (a, b) => Math.hypot(a.x - b.x, a.z - b.z);
+const point = ({ x, y = 0, z }) => ({ x, y, z });
+const distance = (a, b) => Math.hypot(a.x - b.x, (a.y ?? 0) - (b.y ?? 0), a.z - b.z);
 const validPoint = actor => actor && Number.isFinite(actor.x) && Number.isFinite(actor.z);
 const stableNearest = (origin, actors) => actors.slice().sort((a, b) => distance(origin, a) - distance(origin, b)
   || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))[0];
@@ -19,12 +18,12 @@ export function chooseBotIntent(actor, { actors, state, map, role, smokes = [], 
     && a.teamId === state.stats[a.id].teamId);
   const enemies = living.filter(enemy => areEnemies(state, actor.id, enemy.id));
   // Ground-level actor Y becomes a chest-height shooting ray, including jumps.
-  const eye = a => ({ x: a.x, y: (a.y ?? 0) + 1.35, z: a.z });
-  const concealed = enemy => actor.flashRemaining > 0 || smokeBlocksSight(eye(actor), eye(enemy), smokes);
+  const concealed = enemy => !canPerceive(actor, enemy, { world: map, smokes });
   const target = stableNearest(actor, enemies.filter(enemy => enemy.protectedRemaining <= 0
-    && !concealed(enemy) && hasLineOfSight(eye(actor), eye(enemy), map.solids)));
+    && !concealed(enemy)));
   const targetId = target?.id ?? null;
   const knownEnemies = enemies.flatMap(enemy => {
+    if (enemy.hiddenSpotId) return [];
     if (!concealed(enemy)) return [enemy];
     const known = lastKnownTargets.get(enemy.id);
     return validPoint(known) && known.lifeId === enemy.lifeId ? [{ ...point(known), id: enemy.id }] : [];
@@ -66,8 +65,7 @@ export function chooseBotEquipment(actor, { actors, intent, smokes = [], solids,
   if (!actor.alive || !equipment?.owned.has(equipment.activeGunId) || actor.flashRemaining > 0 || isUsingSupply(equipment)) return null;
   const target = actors.find(other => other.id === intent?.targetId && other.alive && other.protectedRemaining <= 0
     && other.id !== actor.id && (actor.teamId === null || other.teamId !== actor.teamId));
-  const eye = a => ({ x: a.x, y: (a.y ?? 0) + 1.35, z: a.z });
-  const visible = target && hasLineOfSight(eye(actor), eye(target), solids) && !smokeBlocksSight(eye(actor), eye(target), smokes);
+  const visible = target && canPerceive(actor, target, { world: { solids }, smokes });
   const range = visible ? distance(actor, target) : Infinity;
   if (now - (actor.lastGrenadeAttempt ?? -Infinity) >= 6 && equipment.throwRemaining <= 0) {
     if (equipment.grenades.smoke > 0 && (actor.health <= 35 || actor.carryingFlag)) return { kind: 'throw', grenadeType: 'smoke' };

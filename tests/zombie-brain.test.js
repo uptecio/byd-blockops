@@ -4,35 +4,36 @@ import { createZombieBrain, selectZombieSpawn, stepZombieBrain } from '../src/zo
 import { MAPS } from '../src/maps.js';
 import { createNavigation } from '../src/navigation.js';
 import { canOccupy } from '../src/collision.js';
+import { createSpatialWorld } from '../src/spatial.js';
 
 const actor = (extra = {}) => ({ id:'zombie-1', kind:'walker', x:0, y:0, z:0, yaw:0, pitch:0,
   alive:true, health:100, lifeId:1, teamId:null, equipment:null, protectedRemaining:0, flashRemaining:0, ...extra });
 const player = extra => actor({ id:'local', x:0, z:-10, ...extra });
-const map = (extra = {}) => ({ bounds:{ min:-22, max:22 }, solids:[], spawns:[{ x:0, z:-10 }, { x:0, z:10 }],
-  playerSpawn:{ x:0, z:0 }, teamSpawns:{ red:[], blue:[] }, ...extra });
+const map = (extra = {}) => ({ bounds:{ min:-22, max:22 }, solids:[], spawns:[{ x: 0, y: 0, z: -10 }, { x: 0, y: 0, z: 10 }],
+  playerSpawn:{ x: 0, y: 0, z: 0 }, teamSpawns:{ red:[], blue:[] }, ...extra });
 function context(extra = {}) {
   return { actor:actor(), player:player(), zombies:[], navigation:createNavigation(map(), { radius:.4 }),
-    solids:[], smokes:[], dt:.05, ...extra };
+    solids:[], smokes:[], dt:.05, ...extra, world: createSpatialWorld(map({ solids: extra.solids ?? [] })) };
 }
 
 test('spawn prefers outside view, deduplicates authored locations and obeys distances', () => {
   const arena = map(), navigation = createNavigation(arena, { radius:.4 });
   const args = { map:arena, navigation, player:player({ z:0 }), zombies:[], fovRadians:Math.PI/2 };
-  assert.deepEqual(selectZombieSpawn(args), { x:0, z:10 });
-  assert.deepEqual(selectZombieSpawn({ ...args, zombies:[actor({ z:10 })] }), { x:0, z:-10 });
-  assert.deepEqual(selectZombieSpawn({ ...args, zombies:[actor({ z:10, alive:false })] }), { x:0, z:10 });
+  assert.deepEqual(selectZombieSpawn(args), { x: 0, y: 0, z: 10 });
+  assert.deepEqual(selectZombieSpawn({ ...args, zombies:[actor({ z:10 })] }), { x: 0, y: 0, z: -10 });
+  assert.deepEqual(selectZombieSpawn({ ...args, zombies:[actor({ z:10, alive:false })] }), { x: 0, y: 0, z: 10 });
   assert.equal(selectZombieSpawn({ ...args, zombies:[actor({ z:10 }), actor({ z:-10 })] }), null);
-  const invalid = map({ spawns:[{ x:0, z:7.99 }, { x:22, z:0 }, { x:NaN, z:10 }], playerSpawn:{ x:0, z:0 } });
+  const invalid = map({ spawns:[{ x: 0, y: 0, z: 7.99 }, { x: 22, y: 0, z: 0 }, { x:NaN, z:10 }], playerSpawn:{ x: 0, y: 0, z: 0 } });
   assert.equal(selectZombieSpawn({ ...args, map:invalid }), null);
-  const blocked = map({ solids:[{ x:0,z:10,w:2,d:2,height:3 }], spawns:[{ x:0,z:10 }] });
+  const blocked = map({ solids:[{ x:0,z:10,w:2,d:2,height:3 }], spawns:[{ x: 0, y: 0, z: 10 }] });
   assert.equal(selectZombieSpawn({ ...args, map:blocked, navigation:createNavigation(blocked) }), null);
 });
 
 test('team spawn and player spawn participate even when the ordinary pool is empty', () => {
-  const arena = map({ spawns:[], playerSpawn:{ x:0,z:10 }, teamSpawns:{ red:[{ x:0,z:-10 }], blue:[] } });
+  const arena = map({ spawns:[], playerSpawn:{ x: 0, y: 0, z: 10 }, teamSpawns:{ red:[{ x: 0, y: 0, z: -10 }], blue:[] } });
   const args = { map:arena, navigation:createNavigation(arena), player:player({ z:0 }), zombies:[], fovRadians:1 };
-  assert.deepEqual(selectZombieSpawn(args), { x:0,z:10 });
-  assert.deepEqual(selectZombieSpawn({ ...args, zombies:[actor({ z:10 })] }), { x:0,z:-10 });
+  assert.deepEqual(selectZombieSpawn(args), { x: 0, y: 0, z: 10 });
+  assert.deepEqual(selectZombieSpawn({ ...args, zombies:[actor({ z:10 })] }), { x: 0, y: 0, z: -10 });
 });
 
 for (const arena of MAPS) test(`${arena.id}: spawns can approach authored and legal wall-contact player positions`, () => {
@@ -68,19 +69,19 @@ test('smoke preserves remembered goal while human moves; no memory means no purs
   const brain = createZombieBrain('walker'), ctx = context();
   stepZombieBrain(brain,ctx);
   const remembered = { ...brain.goal };
-  const hidden = { ...ctx, player:player({ x:4,z:0 }), smokes:[{ x:2,y:1.6,z:0,radius:3,remaining:3 }] };
+  const hidden = { ...ctx, player:player({ x: 4, y: 0, z: 0 }), smokes:[{ x:2,y:1.6,z:0,radius:3,remaining:3 }] };
   const result = stepZombieBrain(brain,hidden);
   assert.deepEqual(brain.goal,remembered);
   assert.equal(result.yaw,0);
   assert.equal(result.attack,false);
   const fresh = stepZombieBrain(createZombieBrain('walker'),hidden);
-  assert.deepEqual(fresh,{ x:0,z:0,yaw:0,attack:false });
+  assert.deepEqual(fresh,{ x:0,y:0,z:0,yaw:0,attack:false,body:{x:0,y:0,z:0,velocityY:0,grounded:true,supportId:'ground'} });
 });
 
 test('flash freezes movement and attacks; invalid delta does not mutate brain', () => {
   const brain = createZombieBrain('walker'); brain.attackRemaining=0;
   const ctx = context({ actor:actor({ flashRemaining:1 }), player:player({ z:-1 }), zombies:[actor({ id:'other',x:.1 })] });
-  assert.deepEqual(stepZombieBrain(brain,ctx),{ x:0,z:0,yaw:0,attack:false });
+  assert.deepEqual(stepZombieBrain(brain,ctx),{ x:0,y:0,z:0,yaw:0,attack:false,body:{x:0,y:0,z:0,velocityY:0,grounded:true,supportId:'ground'} });
   for (const dt of [0,-1,NaN,Infinity]) {
     const before = JSON.stringify(brain);
     assert.equal(stepZombieBrain(brain,{ ...ctx,dt }).attack,false);
@@ -112,7 +113,7 @@ test('null navigation paths retry at .15 seconds, not every frame', () => {
 test('separation cannot cross a thin wall and never mutates input actors', () => {
   const solids=[{ x:0,z:0,w:.01,d:10,height:3 }], arena=map({ solids });
   const a=actor({ x:-.41 }), other=actor({ id:'other',x:-.6 });
-  const ctx=context({ actor:a,player:player({ x:-.41,z:0 }),zombies:[a,other],solids,navigation:createNavigation(arena,{ radius:.4 }) });
+  const ctx=context({ actor:a,player:player({ x: -.41, y: 0, z: 0 }),zombies:[a,other],solids,navigation:createNavigation(arena,{ radius:.4 }) });
   const before=JSON.stringify([a,other,ctx.player]);
   for (let i=0;i<10;i++) {
     const next=stepZombieBrain(createZombieBrain('walker'),ctx);
@@ -122,10 +123,11 @@ test('separation cannot cross a thin wall and never mutates input actors', () =>
   assert.equal(JSON.stringify([a,other,ctx.player]),before);
 });
 
-test('nearby player behind a thin wall still causes a detour rather than a contact-distance stall', () => {
+test('a previously seen player behind a thin wall causes a detour rather than a contact-distance stall', () => {
   const solids=[{ x:0,z:0,w:.01,d:3,height:3 }], arena=map({ solids });
-  const ctx=context({ actor:actor({ x:-.41 }),player:player({ x:.4,z:0 }),solids,navigation:createNavigation(arena,{ radius:.4 }) });
-  const result=stepZombieBrain(createZombieBrain('walker'),ctx);
+  const ctx=context({ actor:actor({ x:-.41 }),player:player({ x: .4, y: 0, z: 0 }),solids,navigation:createNavigation(arena,{ radius:.4 }) });
+  const brain = createZombieBrain('walker'); brain.goal = { x: .4, y: 0, z: 0 }; brain.targetId = 'local';
+  const result=stepZombieBrain(brain,ctx);
   assert.ok(Math.hypot(result.x-ctx.actor.x,result.z-ctx.actor.z)>0);
   assert.equal(result.attack,false);
   assert.ok(canOccupy(result.x,result.z,.4,solids));

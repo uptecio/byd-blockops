@@ -130,9 +130,9 @@ for (const impairment of ['smoke', 'flash']) test(`bots recheck ${impairment} be
   if (impairment === 'smoke') game.gearCombatState.smokes.push({ x: 0, y: 1.35, z: 5, radius: 4, remaining: 8 });
   else bot.flashRemaining = 2;
   game.player.x = 2; bot.cooldown = 0; game.updateBots(.1);
-  assert.equal(game.player.health, 92); assert.deepEqual(bot.intent.goal, { x: 0, z: 10 });
+  assert.equal(game.player.health, 92); assert.deepEqual(bot.intent.goal, { x: 0, y: 0, z: 10 });
   game.player.x = 4; bot.intentTimer = 0; game.updateBots(.1);
-  assert.equal(game.player.health, 92); assert.deepEqual(bot.intent.goal, { x: 0, z: 10 });
+  assert.equal(game.player.health, 92); assert.deepEqual(bot.intent.goal, { x: 0, y: 0, z: 10 });
 });
 
 test('bots spend collected grenades at most once per six seconds and spare teammates', context => {

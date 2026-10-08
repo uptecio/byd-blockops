@@ -11,7 +11,8 @@ import { getSkin, SKINS, DEFAULT_SKIN_ID } from './skins.js';
 import { getGunFinish } from './cosmetics.js';
 import { createSoloProgression, newSoloRunId } from './solo-progression.js';
 import { createAvatarModel } from './avatar.js';
-import { createNavigation } from './navigation.js';
+import { createNavigation, navigationIntent } from './navigation.js';
+import { canPerceive, forgetTarget } from './actor-perception.js';
 import { chooseBotIntent, chooseBotEquipment } from './bot-brain.js';
 import { ObjectiveView } from './objectives.js';
 import { createEquipment, equipGun, setHeldItem, selectGrenade, tickEquipment, beginMelee,
@@ -214,9 +215,11 @@ export class ArenaGame {
   setPendingSkin(skinId) { this.setPendingAppearance({ skinId, finishId: this.player.pendingFinishId ?? this.player.finishId ?? 'standard' }); }
   getActors() {
     return [{ id: this.player.id, name: this.player.name, teamId: this.player.teamId, x: this.player.x, y: this.player.jump, z: this.player.z,
+      grounded: this.player.grounded, supportId: this.player.supportId, velocityY: this.player.velocityY, hiddenSpotId: this.player.hiddenSpotId ?? null,
       alive: this.player.health > 0 && this.player.dead <= 0, protectedRemaining: this.player.protected, lifeId: this.player.lifeId, skinId: this.player.skinId,
       yaw: this.yaw, pitch: this.pitch, flashRemaining: this.player.flashRemaining ?? 0, equipment: this.player.equipment, health: this.player.health, armour: this.player.armour },
     ...(this.zombieRuntime ? this.zombieRuntime.actors() : this.bots.map(bot => ({ id: bot.id, name: bot.name, teamId: bot.teamId, x: bot.body.x, y: bot.body.y, z: bot.body.z,
+      grounded: bot.body.grounded, supportId: bot.body.supportId, velocityY: bot.body.velocityY, hiddenSpotId: null,
       alive: bot.health > 0 && bot.respawn <= 0, protectedRemaining: bot.protected, lifeId: bot.lifeId, skinId: bot.skinId,
       yaw: bot.yaw, pitch: 0, flashRemaining: bot.flashRemaining, equipment: bot.equipment, health: bot.health, armour: bot.armour,
       lastGrenadeAttempt: bot.lastGrenadeAttempt, carryingFlag: Object.values(this.modeState.flags ?? {}).some(flag => flag.carrierId === bot.id) })))];
@@ -433,9 +436,8 @@ export class ArenaGame {
     if (this.modeState.ended || (this.zombieRuntime && !this.zombieRuntime.canAttack()) || !actor.alive || (actor.id !== 'local' && actor.flashRemaining > 0)
       || isUsingSupply(actor.equipment) || !beginMelee(actor.equipment).ok) return;
     this.gearCombatState.events.push({ type: 'melee', playerId: actor.id });
-    const eye = other => ({ x: other.x, y: other.y + 1.35, z: other.z });
     const candidates = actor.id === 'local' ? actors
-      : actors.filter(other => !smokeBlocksSight(eye(actor), eye(other), this.gearCombatState.smokes));
+      : actors.filter(other => canPerceive(actor, other, { world: this.world.spatial, smokes: this.gearCombatState.smokes }));
     const targetId = meleeTarget(actor, candidates, { solids: this.world.solids,
       isEnemy: (sourceId, victimId) => this.isEnemy(sourceId, victimId) });
     if (targetId) {
@@ -474,11 +476,11 @@ export class ArenaGame {
       if (supply) this.applyEquipmentAction(actor, { kind: 'use-supply', supplyType: supply });
       const eye = other => ({ x: other.x, y: other.y + 1.35, z: other.z });
       for (const enemy of actors.filter(other => areEnemies(this.modeState, bot.id, other.id))) {
+        if (enemy.hiddenSpotId) { forgetTarget(bot, enemy.id); continue; }
         const remembered = bot.lastKnownTargets.get(enemy.id);
         if (!enemy.alive || (remembered && remembered.lifeId !== enemy.lifeId)) bot.lastKnownTargets.delete(enemy.id);
-        if (enemy.alive && bot.flashRemaining <= 0 && hasLineOfSight(eye(actor), eye(enemy), this.world.solids)
-          && !smokeBlocksSight(eye(actor), eye(enemy), this.gearCombatState.smokes))
-          bot.lastKnownTargets.set(enemy.id, { x: enemy.x, z: enemy.z, lifeId: enemy.lifeId });
+        if (canPerceive(actor, enemy, { world: this.world.spatial, smokes: this.gearCombatState.smokes }))
+          bot.lastKnownTargets.set(enemy.id, { x: enemy.x, y: enemy.y, z: enemy.z, lifeId: enemy.lifeId });
       }
       const oldTarget = actors.find(other => other.id === bot.intent?.targetId);
       const concealed = bot.flashRemaining > 0 || (oldTarget && smokeBlocksSight(eye(actor), eye(oldTarget), this.gearCombatState.smokes));
@@ -487,10 +489,17 @@ export class ArenaGame {
           smokes: this.gearCombatState.smokes, lastKnownTargets: bot.lastKnownTargets });
         bot.intentTimer = .25; bot.pathTimer = 0;
       }
+      if (!bot.intent.goal) {
+        if (!bot.patrolGoal || Math.hypot(actor.x - bot.patrolGoal.x, actor.z - bot.patrolGoal.z) < .25) {
+          bot.patrolGoal = this.navigation.patrolPoint(bot.id, actor, bot.patrolSequence ?? 0);
+          bot.patrolSequence = (bot.patrolSequence ?? 0) + 1;
+        }
+        bot.intent.goal = bot.patrolGoal;
+      }
       if (bot.pathTimer <= 0 || (bot.waypoint && Math.hypot(bot.waypoint.x - actor.x, bot.waypoint.z - actor.z) < .06)) {
         const goal = bot.intent.goal;
         const human = actors[0];
-        const humanConcealed = bot.flashRemaining > 0 || smokeBlocksSight(eye(actor), eye(human), this.gearCombatState.smokes);
+        const humanConcealed = !canPerceive(actor, human, { world: this.world.spatial, smokes: this.gearCombatState.smokes });
         // The approach radius belongs to a route's remembered goal; never substitute a hidden live position.
         const pursuingHuman = goal && (bot.intent.targetId === 'local'
           || (!humanConcealed && human.alive && human.x === goal.x && human.z === goal.z) || [...bot.lastKnownTargets.entries()]
@@ -501,22 +510,23 @@ export class ArenaGame {
         bot.pathTimer = .15;
       }
       const position = bot.body;
-      let vx = 0, vz = 0;
+      let movement = { vx: 0, vz: 0, jump: false };
       if (bot.waypoint) {
         const dx = bot.waypoint.x - position.x, dz = bot.waypoint.z - position.z, length = Math.hypot(dx, dz);
         const step = Math.min(length, this.botTuning.speed * dt);
         if (length > .001) {
-          vx = dx / length * step / dt; vz = dz / length * step / dt;
+          movement = navigationIntent(position, bot.waypoint, step / dt, this.world.spatial);
           bot.model.rotation.y = Math.atan2(dx, dz);
         }
       }
-      Object.assign(position, moveCharacter(position, { vx, vz, jump: false }, dt, { world: this.world.spatial, radius: BOT_RADIUS }).body);
+      Object.assign(position, moveCharacter(position, movement, dt, { world: this.world.spatial, radius: BOT_RADIUS }).body);
       bot.model.position.set(position.x, position.y, position.z);
       bot.bar.rotation.y = this.yaw - bot.model.rotation.y;
-      Object.assign(actor, { x: position.x, y: position.y, z: position.z });
+      Object.assign(actor, position);
       const target = actors.find(actor => actor.id === bot.intent.targetId);
-      if (target && bot.flashRemaining <= 0 && !smokeBlocksSight(eye(actor), eye(target), this.gearCombatState.smokes)) {
+      if (target && canPerceive(actor, target, { world: this.world.spatial, smokes: this.gearCombatState.smokes })) {
         bot.yaw = Math.atan2(actor.x - target.x, actor.z - target.z); actor.yaw = bot.yaw;
+        actor.pitch = Math.atan2(target.y - actor.y, Math.hypot(actor.x - target.x, actor.z - target.z));
       }
       if (isUsingSupply(bot.equipment)) continue;
       const equipmentAction = chooseBotEquipment(actor, { actors, intent: bot.intent, smokes: this.gearCombatState.smokes,
@@ -527,11 +537,11 @@ export class ArenaGame {
         bot.weaponState = bot.equipment.owned.get(bot.equipment.activeGunId);
       }
       if (!target || !target.alive || target.protectedRemaining > 0 || !areEnemies(this.modeState, bot.id, target.id)) continue;
-      if (bot.flashRemaining > 0 || smokeBlocksSight(eye(actor), eye(target), this.gearCombatState.smokes)) continue;
+      if (!canPerceive(actor, target, { world: this.world.spatial, smokes: this.gearCombatState.smokes })) continue;
       if (bot.equipment.heldItem === 'knife') { this.slash(actor, actors); continue; }
       const from = { x: position.x, y: position.y + 1.35, z: position.z };
       const to = { x: target.x, y: target.y + 1.35, z: target.z };
-      if (Math.hypot(target.x - position.x, target.z - position.z) >= getWeapon(bot.equipment.activeGunId).range
+      if (Math.hypot(target.x - position.x, target.y - position.y, target.z - position.z) >= getWeapon(bot.equipment.activeGunId).range
         || !hasLineOfSight(from, to, this.world.solids) || bot.cooldown > 0 || bot.equipment.attackLockRemaining > 0) continue;
       if (bot.weaponState.ammo === 0) { startReload(bot.weaponState); continue; }
       if (!tryFire(bot.weaponState)) continue;

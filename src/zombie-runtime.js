@@ -7,6 +7,7 @@ import { ZOMBIE_BALANCE, createSurvival, tickSurvival, nextZombieSpawn, resolveZ
 import { createZombieBrain, selectZombieSpawn, stepZombieBrain } from './zombie-brain.js';
 import { createZombieModel, animateZombieModel } from './zombie-avatar.js';
 import { cancelSupplyUse } from './supplies.js';
+import { createBody } from './character-movement.js';
 
 export class ZombieRuntime {
   constructor(game) { this.game = game; this.disposed = false; }
@@ -28,7 +29,7 @@ export class ZombieRuntime {
   }
   actors() {
     return this.game.bots.map(z => ({ id:z.id, name:z.model.name, kind:z.kind, lifeId:z.lifeId,
-      teamId:null, skinId:null, equipment:null, x:z.model.position.x,y:0,z:z.model.position.z,
+      teamId:null, skinId:null, equipment:null, ...z.body, hiddenSpotId:null,
       yaw:z.yaw,pitch:0,health:z.health,armour:0,alive:z.health>0,protectedRemaining:0,flashRemaining:z.flashRemaining }));
   }
   record() {
@@ -50,9 +51,10 @@ export class ZombieRuntime {
     if (!point) { resolveZombieSpawn(this.state,candidate.id,false); return; }
     const model = createZombieModel(THREE,candidate.kind);
     if (!resolveZombieSpawn(this.state,candidate.id,true)) { disposeModel(model); return; }
-    model.position.set(point.x,0,point.z); game.world.botGroup.add(model);
+    const body = createBody(point, game.world.spatial);
+    model.position.set(body.x,body.y,body.z); game.world.botGroup.add(model);
     game.bots.push({ ...candidate,lifeId:1,model,bar:model.getObjectByName('health-bar'),health:100,
-      respawn:0,protected:0,flashRemaining:0,slashRemaining:0,brain:createZombieBrain(candidate.kind),yaw:0 });
+      respawn:0,protected:0,flashRemaining:0,slashRemaining:0,brain:createZombieBrain(candidate.kind),yaw:0,body });
   }
   updateEnemies(dt, actors) {
     if (!this.canAttack()) return;
@@ -65,10 +67,11 @@ export class ZombieRuntime {
       zombie.slashRemaining = Math.max(0,zombie.slashRemaining-dt);
       actor.flashRemaining = zombie.flashRemaining;
       const next = stepZombieBrain(zombie.brain,{ actor,player,zombies:actors.slice(1),navigation:game.navigation,
-        solids:game.world.solids,smokes:game.gearCombatState.smokes,dt });
+        solids:game.world.solids,world:game.world.spatial,smokes:game.gearCombatState.smokes,dt });
       const moving = Math.hypot(next.x-actor.x,next.z-actor.z)>1e-8;
-      zombie.model.position.set(next.x,0,next.z); zombie.yaw=next.yaw; zombie.model.rotation.y=next.yaw+Math.PI;
-      Object.assign(actor,{ x:next.x,z:next.z,yaw:next.yaw });
+      zombie.body=next.body;
+      zombie.model.position.set(next.x,next.y,next.z); zombie.yaw=next.yaw; zombie.model.rotation.y=next.yaw+Math.PI;
+      Object.assign(actor,next.body,{ yaw:next.yaw });
       zombie.bar.rotation.y=game.yaw-zombie.model.rotation.y;
       if (next.attack) {
         zombie.slashRemaining=.2;

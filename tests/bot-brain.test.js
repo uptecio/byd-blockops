@@ -9,7 +9,7 @@ import * as brain from '../src/bot-brain.js';
 import { createEquipment, pickupEquipment } from '../src/equipment.js';
 
 const arena = (solids = [], bounds = { min: -12, max: 12 }) => ({
-  id: 'fixture', bounds, solids, bases: { red: { x: -8, z: 0 }, blue: { x: 8, z: 0 } },
+  id: 'fixture', bounds, solids, bases: { red: { x: -8, y: 0, z: 0 }, blue: { x: 8, y: 0, z: 0 } },
 });
 const actor = (id, teamId, x, z = 0, extra = {}) => ({
   id, teamId, x, y: 0, z, alive: true, protectedRemaining: 0, lifeId: 0, ...extra,
@@ -61,7 +61,7 @@ test('all spawns can navigate to both flag bases on all eight maps', () => {
 
 test('routes avoid walls and corners with fractional endpoints and actor radius', () => {
   const map = arena([{ x: 0, z: 0, w: .08, d: 5, height: 3 }], { min: -5, max: 5 });
-  const from = { x: -2.17, z: -.17 }, goal = { x: 2.12, z: .14 };
+  const from = { x: -2.17, y: 0, z: -.17 }, goal = { x: 2.12, y: 0, z: .14 };
   const nav = createNavigation(map, { radius: .7 });
   assert.equal(nav.reachable(from, goal), true);
   follow(nav, from, goal, map, .7);
@@ -69,7 +69,7 @@ test('routes avoid walls and corners with fractional endpoints and actor radius'
 
 test('a circle-clear endpoint beside a convex corner can still leave toward open ground', () => {
   const map = arena([{ x: 0, z: 0, w: 2, d: 2, height: 3 }]);
-  const from = { x: 1.3, z: 1.3 }, goal = { x: 3, z: 3 };
+  const from = { x: 1.3, y: 0, z: 1.3 }, goal = { x: 3, y: 0, z: 3 };
   assert.equal(canOccupy(from.x, from.z, .42, map.solids), true);
   const nav = createNavigation(map);
   assert.equal(nav.reachable(from, goal), true);
@@ -79,23 +79,23 @@ test('a circle-clear endpoint beside a convex corner can still leave toward open
 test('a thin wall between adjacent grid cells cannot be crossed', () => {
   const map = arena([{ x: -.25, z: 0, w: .01, d: 8, height: 3 }], { min: -4, max: 4 });
   const nav = createNavigation(map, { radius: .1 });
-  assert.equal(nav.reachable({ x: -.5, z: 0 }, { x: 0, z: 0 }), false);
-  assert.equal(nav.nextWaypoint({ x: -.5, z: 0 }, { x: 0, z: 0 }), null);
+  assert.equal(nav.reachable({ x: -.5, y: 0, z: 0 }, { x: 0, y: 0, z: 0 }), false);
+  assert.equal(nav.nextWaypoint({ x: -.5, y: 0, z: 0 }, { x: 0, y: 0, z: 0 }), null);
 });
 
 test('smaller-actor approach stays on the target side of thin walls and rejects invalid footprints', () => {
   const map = arena([{ x: 0, z: 0, w: .01, d: 8, height: 3 }], { min: -4, max: 4 });
   const nav = createNavigation(map, { radius: .4 });
-  const goal = { x: .35, z: 0 };
+  const goal = { x: .35, y: 0, z: 0 };
   assert.equal(canOccupy(goal.x, goal.z, .34, map.solids), true);
-  assert.equal(nav.nextWaypoint({ x: 2, z: 0 }, goal), null, 'strict API still rejects bot-blocked target');
-  assert.equal(nav.reachable({ x: 2, z: 0 }, goal), false);
-  assert.ok(nav.nextApproachWaypoint({ x: 2, z: 0 }, goal, .34));
-  assert.equal(nav.nextApproachWaypoint({ x: -2, z: 0 }, goal, .34), null, 'cannot project target through a thin dividing wall');
-  for (const invalid of [{ x: .2, z: 0 }, { x: 4, z: 0 }, { x: NaN, z: 0 }]) {
-    assert.equal(nav.nextApproachWaypoint({ x: 2, z: 0 }, invalid, .34), null);
+  assert.equal(nav.nextWaypoint({ x: 2, y: 0, z: 0 }, goal), null, 'strict API still rejects bot-blocked target');
+  assert.equal(nav.reachable({ x: 2, y: 0, z: 0 }, goal), false);
+  assert.ok(nav.nextApproachWaypoint({ x: 2, y: 0, z: 0 }, goal, .34));
+  assert.equal(nav.nextApproachWaypoint({ x: -2, y: 0, z: 0 }, goal, .34), null, 'cannot project target through a thin dividing wall');
+  for (const invalid of [{ x: .2, y: 0, z: 0 }, { x: 4, y: 0, z: 0 }, { x: NaN, z: 0 }]) {
+    assert.equal(nav.nextApproachWaypoint({ x: 2, y: 0, z: 0 }, invalid, .34), null);
   }
-  for (const radius of [0, -.1, NaN, .5]) assert.equal(nav.nextApproachWaypoint({ x: 2, z: 0 }, goal, radius), null);
+  for (const radius of [0, -.1, NaN, .5]) assert.equal(nav.nextApproachWaypoint({ x: 2, y: 0, z: 0 }, goal, radius), null);
 });
 
 test('diagonally touching chambers cannot cut through their shared corner', () => {
@@ -104,19 +104,19 @@ test('diagonally touching chambers cannot cut through their shared corner', () =
     { x: 1, z: -1, w: 2, d: 2, height: 3 },
   ], { min: -2, max: 2 });
   const nav = createNavigation(map);
-  assert.equal(nav.reachable({ x: -1, z: -1 }, { x: 1, z: 1 }), false);
-  assert.equal(nav.nextWaypoint({ x: -1, z: -1 }, { x: 1, z: 1 }), null);
+  assert.equal(nav.reachable({ x: -1, y: 0, z: -1 }, { x: 1, y: 0, z: 1 }), false);
+  assert.equal(nav.nextWaypoint({ x: -1, y: 0, z: -1 }, { x: 1, y: 0, z: 1 }), null);
 });
 
 test('grid coordinates derive from shifted map bounds', () => {
   const map = arena([], { min: 30, max: 36 });
   const nav = createNavigation(map);
-  follow(nav, { x: 31.12, z: 31.17 }, { x: 34.87, z: 34.92 }, map);
+  follow(nav, { x: 31.12, y: 0, z: 31.17 }, { x: 34.87, y: 0, z: 34.92 }, map);
 });
 
 test('a moving actor between grid centers keeps advancing toward the goal', () => {
   const nav = createNavigation(arena());
-  const from = { x: -7.9, z: 0 }, goal = { x: 8, z: 0 };
+  const from = { x: -7.9, y: 0, z: 0 }, goal = { x: 8, y: 0, z: 0 };
   assert.ok(nav.nextWaypoint(from, goal).x > from.x);
 });
 
@@ -149,8 +149,8 @@ test('jump height never allows navigation through a wall', () => {
 
 test('invalid, blocked and out-of-bounds endpoints have no route', () => {
   const nav = createNavigation(arena([{ x: 0, z: 0, w: 2, d: 2, height: 3 }]));
-  const from = { x: -8, z: 0 };
-  for (const goal of [null, {}, { x: NaN, z: 2 }, { x: Infinity, z: 0 }, { x: 0, z: 0 }, { x: 12, z: 0 }]) {
+  const from = { x: -8, y: 0, z: 0 };
+  for (const goal of [null, {}, { x: NaN, z: 2 }, { x: Infinity, z: 0 }, { x: 0, y: 0, z: 0 }, { x: 12, y: 0, z: 0 }]) {
     assert.equal(nav.reachable(from, goal), false);
     assert.equal(nav.nextWaypoint(from, goal), null);
     assert.equal(nav.nextWaypoint(goal, from), null);
@@ -160,7 +160,7 @@ test('invalid, blocked and out-of-bounds endpoints have no route', () => {
 test('separate map caches cannot leak reachability through matching goal cells', () => {
   const open = arena(), closed = arena([{ x: 0, z: 0, w: 1, d: 24, height: 3 }]);
   const a = createNavigation(open), b = createNavigation(closed);
-  const from = { x: -8, z: 0 }, goal = { x: 8, z: 0 };
+  const from = { x: -8, y: 0, z: 0 }, goal = { x: 8, y: 0, z: 0 };
   assert.equal(a.reachable(from, goal), true);
   assert.equal(b.reachable(from, goal), false);
   a.clearCache(); b.clearCache();
@@ -169,35 +169,37 @@ test('separate map caches cannot leak reachability through matching goal cells',
 });
 
 test('changing among more than 32 goals and clearing fields preserves current routes', () => {
-  const map = arena(), nav = createNavigation(map), from = { x: -8, z: 0 };
+  const map = arena(), nav = createNavigation(map), from = { x: -8, y: 0, z: 0 };
   for (let x = -10; x <= 10; x += .5) follow(nav, from, { x, z: 7 }, map);
   nav.clearCache();
-  follow(nav, from, { x: 8, z: -7 }, map);
+  follow(nav, from, { x: 8, y: 0, z: -7 }, map);
 });
 
 test('FFA pursues the nearest other living actor and breaks equal distances by stable ID', () => {
   const context = setup('ffa', arena(), [actor('bot-0', null, 0), actor('z', null, 2), actor('a', null, -2), actor('dead', null, .1, 0, { alive: false })]);
-  assert.deepEqual(decide(context), { goal: { x: -2, z: 0 }, targetId: 'a' });
+  assert.deepEqual(decide(context), { goal: { x: -2, y: 0, z: 0 }, targetId: 'a' });
   context.actors.reverse();
-  assert.deepEqual(chooseBotIntent(context.actors.at(-1), context), { goal: { x: -2, z: 0 }, targetId: 'a' });
+  assert.deepEqual(chooseBotIntent(context.actors.at(-1), context), { goal: { x: -2, y: 0, z: 0 }, targetId: 'a' });
 });
 
 test('TDM excludes teammates and unregistered actors from movement and shooting', () => {
   const context = setup('tdm');
   context.actors.push(actor('outsider', 'blue', -7));
-  assert.deepEqual(decide(context), { goal: { x: 8, z: 0 }, targetId: 'bot-1' });
+  assert.deepEqual(decide(context), { goal: { x: 8, y: 0, z: 0 }, targetId: 'bot-1' });
 });
 
-test('an occluded enemy still provides a pursuit goal but no shooting target', () => {
+test('a previously seen occluded enemy provides a pursuit goal but no shooting target', () => {
   const context = setup('tdm', arena([{ x: 0, z: 0, w: 1, d: 6, height: 3 }]));
-  assert.deepEqual(decide(context), { goal: { x: 8, z: 0 }, targetId: null });
+  context.lastKnownTargets = new Map([['bot-1', { ...context.actors[1] }]]);
+  assert.deepEqual(decide(context), { goal: { x: 8, y: 0, z: 0 }, targetId: null });
 });
 
 test('shooting chooses the nearest visible enemy independently of the pursuit goal', () => {
   const context = setup('tdm', arena([{ x: 0, z: 0, w: 1, d: 3, height: 3 }]), [
     actor('bot-0', 'red', -2), actor('hidden', 'blue', 2), actor('visible', 'blue', -2, 5),
   ]);
-  assert.deepEqual(decide(context), { goal: { x: 2, z: 0 }, targetId: 'visible' });
+  context.lastKnownTargets = new Map([['hidden', { ...context.actors[1] }]]);
+  assert.deepEqual(decide(context), { goal: { x: 2, y: 0, z: 0 }, targetId: 'visible' });
 });
 
 test('cover height is measured at actor shooting height including jumps', () => {
@@ -211,72 +213,72 @@ test('cover height is measured at actor shooting height including jumps', () => 
 
 test('protected enemies can be pursued but are not selected for damage', () => {
   const context = setup('tdm'); context.actors[1].protectedRemaining = 2;
-  assert.deepEqual(decide(context), { goal: { x: 8, z: 0 }, targetId: null });
+  assert.deepEqual(decide(context), { goal: { x: 8, y: 0, z: 0 }, targetId: null });
 });
 
 test('CTF attackers of either team seek the enemy base without a visible target', () => {
   const context = setup('ctf', arena([{ x: 0, z: 0, w: 1, d: 6, height: 3 }]));
-  assert.deepEqual(decide(context), { goal: { x: 8, z: 0 }, targetId: null });
-  assert.deepEqual(chooseBotIntent(context.actors[1], context), { goal: { x: -8, z: 0 }, targetId: null });
+  assert.deepEqual(decide(context), { goal: { x: 8, y: 0, z: 0 }, targetId: null });
+  assert.deepEqual(chooseBotIntent(context.actors[1], context), { goal: { x: -8, y: 0, z: 0 }, targetId: null });
 });
 
 test('attackers immediately redirect to the enemy flag after a real pickup and drop', () => {
   const context = setup(); const nav = createNavigation(context.map);
-  assert.deepEqual(decide(context).goal, { x: 8, z: 0 });
+  assert.deepEqual(decide(context).goal, { x: 8, y: 0, z: 0 });
   nav.nextWaypoint(context.actors[0], decide(context).goal);
   tickMode(context.state, .1, [{ ...context.actors[2], x: 8, z: 0 }]);
-  recordElimination(context.state, { killerId: 'bot-1', victimId: 'bot-2', position: { x: 4, z: 3 }, lifeId: 0 });
-  assert.deepEqual(decide(context).goal, { x: 4, z: 3 });
+  recordElimination(context.state, { killerId: 'bot-1', victimId: 'bot-2', position: { x: 4, y: 0, z: 3 }, lifeId: 0 });
+  assert.deepEqual(decide(context).goal, { x: 4, y: 0, z: 3 });
   follow(nav, context.actors[0], decide(context).goal, context.map);
 });
 
 test('defenders recover their own dropped flag while still targeting a visible enemy', () => {
   const context = setup();
   tickMode(context.state, .1, [{ ...context.actors[1], x: -8 }]);
-  recordElimination(context.state, { killerId: 'bot-2', victimId: 'bot-1', position: { x: -3, z: 2 }, lifeId: 0 });
-  assert.deepEqual(decide(context, 'defend'), { goal: { x: -3, z: 2 }, targetId: 'bot-1' });
+  recordElimination(context.state, { killerId: 'bot-2', victimId: 'bot-1', position: { x: -3, y: 0, z: 2 }, lifeId: 0 });
+  assert.deepEqual(decide(context, 'defend'), { goal: { x: -3, y: 0, z: 2 }, targetId: 'bot-1' });
 });
 
 test('defenders intercept their nearby flag carrier using its current actor position', () => {
   const context = setup();
   tickMode(context.state, .1, [{ ...context.actors[1], x: -8 }]);
   context.actors[1].x = -4; context.actors[1].z = 2;
-  assert.deepEqual(decide(context, 'defend'), { goal: { x: -4, z: 2 }, targetId: 'bot-1' });
+  assert.deepEqual(decide(context, 'defend'), { goal: { x: -4, y: 0, z: 2 }, targetId: 'bot-1' });
 });
 
 test('defenders guard home and intercept enemies approaching the home base', () => {
   const context = setup();
-  assert.deepEqual(decide(context, 'defend').goal, { x: -8, z: 0 });
+  assert.deepEqual(decide(context, 'defend').goal, { x: -8, y: 0, z: 0 });
   context.actors[1].x = -5;
-  assert.deepEqual(decide(context, 'defend').goal, { x: -5, z: 0 });
+  assert.deepEqual(decide(context, 'defend').goal, { x: -5, y: 0, z: 0 });
 });
 
 test('carriers return home while continuing to fight rather than chasing a target', () => {
   const context = setup();
   tickMode(context.state, .1, [{ ...context.actors[0], x: 8 }]);
   context.actors[0].x = 3;
-  assert.deepEqual(decide(context), { goal: { x: -8, z: 0 }, targetId: 'bot-1' });
+  assert.deepEqual(decide(context), { goal: { x: -8, y: 0, z: 0 }, targetId: 'bot-1' });
 });
 
 test('carriers seek their own missing flag before returning home', () => {
   const context = setup();
   tickMode(context.state, .1, [{ ...context.actors[0], x: 8 }, { ...context.actors[1], x: -8 }]);
   context.actors[1].x = -3; context.actors[1].z = 4;
-  assert.deepEqual(decide(context).goal, { x: -3, z: 4 });
-  recordElimination(context.state, { killerId: 'bot-2', victimId: 'bot-1', position: { x: -1, z: 3 }, lifeId: 0 });
-  assert.deepEqual(decide(context).goal, { x: -1, z: 3 });
+  assert.deepEqual(decide(context).goal, { x: -3, y: 0, z: 4 });
+  recordElimination(context.state, { killerId: 'bot-2', victimId: 'bot-1', position: { x: -1, y: 0, z: 3 }, lifeId: 0 });
+  assert.deepEqual(decide(context).goal, { x: -1, y: 0, z: 3 });
 });
 
 test('an attacker supports the teammate carrying the enemy flag', () => {
   const context = setup();
   tickMode(context.state, .1, [{ ...context.actors[2], x: 8, z: 0 }]);
   context.actors[2].x = 3; context.actors[2].z = 2;
-  assert.deepEqual(decide(context).goal, { x: 3, z: 2 });
+  assert.deepEqual(decide(context).goal, { x: 3, y: 0, z: 2 });
 });
 
 test('a single bot on a team attacks even if asked to defend alongside a human', () => {
   const context = setup('ctf', arena(), [actor('bot-0', 'red', -8), actor('bot-1', 'blue', 8), actor('local', 'red', -9, 2)]);
-  assert.deepEqual(decide(context, 'defend').goal, { x: 8, z: 0 });
+  assert.deepEqual(decide(context, 'defend').goal, { x: 8, y: 0, z: 0 });
 });
 
 test('dead actors, ended rounds and a lone FFA actor have no intent', () => {
@@ -293,7 +295,7 @@ test('decisions are pure and returned goals do not alias actor, map or flag obje
   const before = structuredClone(context);
   const intent = decide(context); intent.goal.x = 999;
   assert.deepEqual(context, before);
-  assert.deepEqual(decide(context).goal, { x: 8, z: 0 });
+  assert.deepEqual(decide(context).goal, { x: 8, y: 0, z: 0 });
 });
 
 for (const impairment of ['smoke', 'flash']) test(`${impairment} concealment denies targets and pursuit of current enemy coordinates`, () => {
@@ -302,20 +304,20 @@ for (const impairment of ['smoke', 'flash']) test(`${impairment} concealment den
   context.smokes = impairment === 'smoke' ? [{ x: 0, y: 1.35, z: 0, radius: 4, remaining: 8 }] : [];
   bot.flashRemaining = impairment === 'flash' ? 1 : 0;
   context.lastKnownTargets = new Map([[enemy.id, { x: 5, z: 2, lifeId: enemy.lifeId }]]);
-  assert.deepEqual(decide(context), { goal: { x: 5, z: 2 }, targetId: null });
+  assert.deepEqual(decide(context), { goal: { x: 5, y: 0, z: 2 }, targetId: null });
   enemy.x = 10; enemy.z = 3;
-  assert.deepEqual(decide(context), { goal: { x: 5, z: 2 }, targetId: null });
+  assert.deepEqual(decide(context), { goal: { x: 5, y: 0, z: 2 }, targetId: null });
   context.lastKnownTargets.clear(); assert.deepEqual(decide(context), { goal: null, targetId: null });
 });
 
 test('blinded CTF bots keep objective routes without tracking concealed carriers or intruders', () => {
   const context = setup(); context.actors[0].flashRemaining = 2;
-  assert.deepEqual(decide(context), { goal: { x: 8, z: 0 }, targetId: null });
+  assert.deepEqual(decide(context), { goal: { x: 8, y: 0, z: 0 }, targetId: null });
   tickMode(context.state, .01, [{ ...context.actors[1], x: -8 }]);
   context.actors[1].x = -3; context.actors[1].z = 4;
-  assert.deepEqual(decide(context, 'defend'), { goal: { x: -8, z: 0 }, targetId: null });
+  assert.deepEqual(decide(context, 'defend'), { goal: { x: -8, y: 0, z: 0 }, targetId: null });
   context.lastKnownTargets = new Map([['bot-1', { x: -5, z: 1, lifeId: 0 }]]);
-  assert.deepEqual(decide(context, 'defend'), { goal: { x: -5, z: 1 }, targetId: null });
+  assert.deepEqual(decide(context, 'defend'), { goal: { x: -5, y: 0, z: 1 }, targetId: null });
 });
 
 test('equipment decisions use owned guns and knife range without creating inventory', () => {

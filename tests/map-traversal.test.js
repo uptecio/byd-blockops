@@ -45,8 +45,7 @@ for (const map of MAPS) {
   });
 
   test(`${map.id}: new routes retain all spawn base loot and doorway ground access`, () => {
-    const groundMap = { ...map, solids: map.solids.filter(solid => solid.minY < 1.84) };
-    const navigation = createNavigation(groundMap);
+    const navigation = createNavigation(map);
     const starts = map.traversal.links.filter(link => link.from.y === 0).map(link => link.from);
     for (const team of ['red', 'blue']) assert.ok(starts.some(point => navigation.reachable(map.teamSpawns[team][0], point)));
     for (const point of [map.playerSpawn, ...map.spawns, ...map.teamSpawns.red, ...map.teamSpawns.blue,

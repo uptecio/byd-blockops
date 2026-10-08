@@ -112,7 +112,7 @@ for (const teamId of ['red', 'blue']) test(`${teamId} carrier recovers its missi
   try {
     for (let i = 0; i < 1700 && game.modeState.teamScores[teamId] === 0; i++) {
       game.update(.1);
-      if (i === 0) assert.deepEqual(carrier.intent.goal, { x: 0, z: 0 });
+      if (i === 0) assert.deepEqual(carrier.intent.goal, { x: 0, y: 0, z: 0 });
       if (!ownReturned && game.modeState.flags[teamId].status === 'home') { ownReturned = true; returnTime = (i + 1) * .1; }
     }
     assert.ok(ownReturned); assert.ok(returnTime < 15, `touch returned the flag after ${returnTime}s, before auto-return`);
@@ -136,6 +136,8 @@ test('unreachable goals throttle navigation retries instead of recalculating eac
   const game = createHeadlessGame(); game.start('m4a1', { bots: 1, modeId: 'ffa' });
   // Player is inside an existing courtyard building; genuine navigation rejects it.
   game.player.x = 15; game.player.z = 14;
+  // This tests retrying a remembered unreachable sighting, not wall-vision.
+  game.bots[0].lastKnownTargets.set(game.player.id, { x: 15, y: 0, z: 14, lifeId: game.player.lifeId });
   let recalculations = 0;
   const nextApproachWaypoint = game.navigation.nextApproachWaypoint.bind(game.navigation);
   context.mock.method(game.navigation, 'nextApproachWaypoint', (...args) => { recalculations++; return nextApproachWaypoint(...args); });
@@ -179,12 +181,13 @@ test('bots pursue a human at legal bot-radius wall contact through production up
     assert.ok(canOccupy(game.player.x, game.player.z, .4, game.world.solids));
     assert.equal(canOccupy(game.player.x, game.player.z, .42, game.world.solids), false);
     const bot = game.bots[0]; positionBot(bot, -10, 0, 0);
+    bot.lastKnownTargets.set(game.player.id, { x: game.player.x, y: 0, z: game.player.z, lifeId: game.player.lifeId });
     for (let i = 0; i < 40; i++) {
       game.update(.05);
       assert.ok(canOccupy(bot.model.position.x, bot.model.position.z, .4, game.world.solids));
     }
     assert.ok(Math.hypot(bot.model.position.x + 10, bot.model.position.z) > 1, 'bot follows its real pursuit route around cover');
-    assert.deepEqual(bot.intent.goal, { x: game.player.x, z: game.player.z });
+    assert.deepEqual(bot.intent.goal, { x: game.player.x, y: 0, z: game.player.z });
   } finally { cleanupGame(game); }
 });
 
