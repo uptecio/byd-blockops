@@ -5,7 +5,7 @@ import { GearView, createKnifeModel } from '../src/gear-view.js';
 import { createLootState, lootDTO } from '../src/loot.js';
 import { GameAudio } from '../src/audio.js';
 import { disposeModel } from '../src/game.js';
-import { createHeadlessGame, cleanupGame } from './helpers/game-fixture.js';
+import {createHeadlessGame, cleanupGame, positionBot, setWorldSolids } from './helpers/game-fixture.js';
 import { recordElimination } from '../src/modes.js';
 import { OnlineArena } from '../src/online-game.js';
 import { RoomManager } from '../server/rooms.js';
@@ -126,9 +126,9 @@ test('authoritative bursts are deduplicated, bounded and fade without replaying 
 });
 
 test('solo held knife renders without granting guns and smoke-hidden bots still receive gunfire', t => {
-  const game = createHeadlessGame(); t.after(() => cleanupGame(game)); game.start('ak47', { bots: 1 }); game.world.solids = [];
+  const game = createHeadlessGame(); t.after(() => cleanupGame(game)); game.start('ak47', { bots: 1 }); setWorldSolids(game, []);
   Object.assign(game.player, { x: 0, z: 8, protected: 0 });
-  const bot = game.bots[0]; bot.model.position.set(0, 0, 0); bot.protected = 0; bot.cooldown = 100;
+  const bot = game.bots[0]; positionBot(bot, 0, 0, 0); bot.protected = 0; bot.cooldown = 100;
   game.botTuning.speed = 0; game.botTuning.accuracy = 0;
   game.player.equipment.knife = true; game.requestEquipment({ kind: 'held-item', heldItem: 'knife' });
   assert.equal(game.weaponModel.name, 'Knife'); assert.equal(game.inventory.size, 1);
@@ -251,10 +251,10 @@ test('supply pose clears on death round end or quit even if no further live fram
 });
 
 test('winning solo knife swing drains presentation once without advancing pending grenade damage', t => {
-  const game = createHeadlessGame(); t.after(() => cleanupGame(game)); game.start('ak47', { bots: 2 }); game.world.solids = [];
+  const game = createHeadlessGame(); t.after(() => cleanupGame(game)); game.start('ak47', { bots: 2 }); setWorldSolids(game, []);
   game.botTuning.speed = 0; game.botTuning.accuracy = 0;
   Object.assign(game.player, { x: 0, z: 1, protected: 0 });
-  game.bots.forEach((bot, i) => { bot.model.position.set(i * 3, 0, 0); bot.health = 50; bot.protected = 0; bot.cooldown = 100; });
+  game.bots.forEach((bot, i) => { positionBot(bot, i * 3, 0, 0); bot.health = 50; bot.protected = 0; bot.cooldown = 100; });
   for (let i = 0; i < 14; i++) recordElimination(game.modeState, { killerId: 'local', victimId: 'bot-0', position: { x: 0, z: 0 }, lifeId: 100 + i });
   game.player.equipment.knife = true; game.requestEquipment({ kind: 'held-item', heldItem: 'knife' });
   game.player.equipment.grenades.frag = 1; game.requestEquipment({ kind: 'throw', grenadeType: 'frag' });

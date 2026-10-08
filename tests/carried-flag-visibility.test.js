@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { createHeadlessGame, cleanupGame } from './helpers/game-fixture.js';
+import {createHeadlessGame, cleanupGame, positionBot } from './helpers/game-fixture.js';
 import { OnlineArena } from '../src/online-game.js';
 import { RoomManager } from '../server/rooms.js';
 
@@ -11,14 +11,14 @@ function solo(t) {
   game.start('m4a1', { bots: 2, modeId: 'ctf' }); game.pause();
   Object.assign(game.player, { x: 0, z: 0 }); game.placeCamera();
   const enemy = game.bots[0], friend = game.bots[1];
-  enemy.model.position.set(0, 0, -8); friend.model.position.set(8, 0, -8);
+  positionBot(enemy, 0, 0, -8); positionBot(friend, 8, 0, -8);
   const flag = game.modeState.flags.red;
   Object.assign(flag, { status: 'carried', carrierId: enemy.id });
   return { game, enemy, friend, flag, viewerId: 'local',
     conceal(type) { game.player.flashRemaining = type === 'flash' ? 3 : 0;
       game.gearCombatState.smokes = type === 'smoke' ? [{ id: 'smoke', x: 0, y: 1.6, z: -4, radius: 2, remaining: 8 }] : []; },
     render() { game.refreshMatchView(); game.update(.01); },
-    placeFriend() { friend.model.position.set(0, 0, -8); },
+    placeFriend() { positionBot(friend, 0, 0, -8); },
     reset() { game.start('m4a1', { bots: 2, modeId: 'ctf' }); },
     end() { game.modeState.ended = true; },
   };
@@ -41,7 +41,7 @@ function online(t) {
     conceal(type) { room.players.get('self').flashRemaining = type === 'flash' ? 3 : 0;
       room.gearCombatState.smokes = type === 'smoke' ? [{ id: 'smoke', x: 0, y: 1.6, z: -4, radius: 2, remaining: 8 }] : []; },
     render() { arena.sync(snapshot()); arena.update(.01); },
-    placeFriend() { Object.assign(room.players.get('friend'), { x: 0, z: -8 }); friend.model.position.set(0, 0, -8); },
+    placeFriend() { Object.assign(room.players.get('friend'), { x: 0, z: -8 }); positionBot(friend, 0, 0, -8); },
     reset() { arena.stop(); game.start('m4a1', { bots: 0, modeId: 'ctf' }); },
     end() { room.phase = 'ended'; room.modeState.ended = true; },
   };

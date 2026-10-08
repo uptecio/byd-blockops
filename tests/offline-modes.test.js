@@ -5,7 +5,7 @@ import { MAPS } from '../src/maps.js';
 import { canOccupy, moveCircle } from '../src/collision.js';
 import { ObjectiveView } from '../src/objectives.js';
 import { tickMode } from '../src/modes.js';
-import { createHeadlessGame, cleanupGame } from './helpers/game-fixture.js';
+import {createHeadlessGame, cleanupGame, positionBot } from './helpers/game-fixture.js';
 
 test('all 24 combinations start cleanly on one reused production game', () => {
   const game = createHeadlessGame();
@@ -102,10 +102,10 @@ for (const teamId of ['red', 'blue']) test(`${teamId} carrier recovers its missi
   const carrier = game.bots.find(bot => bot.teamId === teamId), thief = game.bots.find(bot => bot.teamId !== teamId);
   const ownBase = game.world.definition.bases[teamId], otherBase = game.world.definition.bases[thief.teamId];
   // Arrange a legitimate double steal followed by a combat drop before the run.
-  carrier.model.position.set(otherBase.x, 0, otherBase.z); thief.model.position.set(ownBase.x, 0, ownBase.z);
+  positionBot(carrier, otherBase.x, 0, otherBase.z); positionBot(thief, ownBase.x, 0, ownBase.z);
   carrier.protected = thief.protected = 0; game.player.dead = 200; game.player.health = 0;
   tickMode(game.modeState, .01, game.getActors());
-  thief.model.position.set(0, 0, 0);
+  positionBot(thief, 0, 0, 0);
   game.damageActor(carrier.id, thief, 100); thief.respawn = 200;
   assert.equal(game.modeState.flags[teamId].status, 'dropped');
   let ownReturned = false, returnTime = null;
@@ -178,7 +178,7 @@ test('bots pursue a human at legal bot-radius wall contact through production up
     assert.ok(Math.abs(game.player.x + 6.5) < 1e-8, 'collision movement reaches central wall');
     assert.ok(canOccupy(game.player.x, game.player.z, .4, game.world.solids));
     assert.equal(canOccupy(game.player.x, game.player.z, .42, game.world.solids), false);
-    const bot = game.bots[0]; bot.model.position.set(-10, 0, 0);
+    const bot = game.bots[0]; positionBot(bot, -10, 0, 0);
     for (let i = 0; i < 40; i++) {
       game.update(.05);
       assert.ok(canOccupy(bot.model.position.x, bot.model.position.z, .4, game.world.solids));
@@ -216,7 +216,7 @@ test('bots pursue actual human-radius wall contact reached by live player contro
     game.input.clear();
     assert.ok(canOccupy(game.player.x, game.player.z, .34, game.world.solids));
     assert.equal(canOccupy(game.player.x, game.player.z, .4, game.world.solids), false);
-    const bot = game.bots[0]; bot.respawn = 0; bot.model.position.set(-10, 0, 0);
+    const bot = game.bots[0]; bot.respawn = 0; positionBot(bot, -10, 0, 0);
     game.botTuning = { ...game.botTuning, accuracy: 0 };
     for (let i = 0; i < 240; i++) {
       game.update(.05);

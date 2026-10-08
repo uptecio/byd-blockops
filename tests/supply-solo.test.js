@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { createHeadlessGame, cleanupGame } from './helpers/game-fixture.js';
+import {createHeadlessGame, cleanupGame, positionBot, setWorldSolids } from './helpers/game-fixture.js';
 import { pickupEquipment } from '../src/equipment.js';
 
 function arena(t, settings = {}) {
@@ -24,8 +24,8 @@ test('moving supply use keeps the starter and completes after five seconds', t =
 
 test('all attacks blocked during use including direct slash shoot throw and reload', t => {
   const game = arena(t, { bots: 1 }); game.botTuning.speed = 0; game.botTuning.accuracy = 0;
-  game.world.solids = []; Object.assign(game.player, { x: 0, z: 1, health: 20, protected: 0 });
-  const bot = game.bots[0]; bot.model.position.set(0, 0, 0); bot.protected = 0; bot.cooldown = 100;
+  setWorldSolids(game, []); Object.assign(game.player, { x: 0, z: 1, health: 20, protected: 0 });
+  const bot = game.bots[0]; positionBot(bot, 0, 0, 0); bot.protected = 0; bot.cooldown = 100;
   const e = game.player.equipment; pickupEquipment(e, { kind: 'knife' }); e.grenades.frag = 1;
   for (const heldItem of ['gun', 'knife']) {
     game.requestEquipment({ kind: 'held-item', heldItem }); pack(game);
@@ -82,7 +82,7 @@ test('bot start does not count prior slice time and bot use does not self-cancel
 test('bots collect along their route and flash blocks new starts but not pending use', t => {
   const game = arena(t, { bots: 1 }); game.botTuning.speed = 0; game.botTuning.accuracy = 0;
   const bot = game.bots[0], slot = game.lootState.slots.find(s => s.item.supplyType === 'armour');
-  bot.model.position.set(slot.x, 0, slot.z); bot.flashRemaining = 2;
+  positionBot(bot, slot.x, 0, slot.z); bot.flashRemaining = 2;
   game.update(.05); assert.equal(bot.equipment.supplies.armour, 1); assert.equal(bot.equipment.supplyUse, null);
   bot.flashRemaining = 0; game.update(.05); assert.equal(bot.equipment.supplyUse.type, 'armour');
   bot.flashRemaining = 10; game.update(5);
@@ -119,9 +119,9 @@ test('ordinary protected and friendly hits preserve armour while enemy damage us
 
 test('real knife frag and headshot route through armour without changing damage', t => {
   t.mock.method(Math, 'random', () => .5);
-  const game = arena(t, { bots: 1 }); game.world.solids = []; game.botTuning.speed = 0; game.botTuning.accuracy = 0;
+  const game = arena(t, { bots: 1 }); setWorldSolids(game, []); game.botTuning.speed = 0; game.botTuning.accuracy = 0;
   Object.assign(game.player, { x: 0, z: 1.2, protected: 0 }); game.yaw = 0; game.pitch = 0;
-  const bot = game.bots[0]; bot.model.position.set(0,0,0); bot.protected = 0; bot.armour = 100; bot.cooldown = 100;
+  const bot = game.bots[0]; positionBot(bot, 0,0,0); bot.protected = 0; bot.armour = 100; bot.cooldown = 100;
   pickupEquipment(game.player.equipment, { kind: 'knife' }); game.requestEquipment({ kind: 'held-item', heldItem: 'knife' });
   game.slash(game.getActors()[0]); assert.equal(bot.armour, 50); assert.equal(bot.health, 100);
   game.player.equipment.grenades.frag = 1; game.requestEquipment({ kind: 'throw', grenadeType: 'frag' });
@@ -152,7 +152,7 @@ function lastZombie(game) {
 
 test('last-zombie recovery preserves due pack and ammo recovery remains 500', t => {
   const game = arena(t, { modeId: 'zombies' }), z = lastZombie(game);
-  game.world.solids = []; z.model.position.set(0,0,0); z.health = 10; z.flashRemaining = 10;
+  setWorldSolids(game, []); positionBot(z, 0,0,0); z.health = 10; z.flashRemaining = 10;
   Object.assign(game.player, { x: 0, z: 10, health: 10 });
   game.player.equipment.grenades.frag = 1;
   assert.equal(game.requestEquipment({ kind: 'throw', grenadeType: 'frag' }).ok, true);
@@ -168,7 +168,7 @@ test('last-zombie recovery preserves due pack and ammo recovery remains 500', t 
 
 test('fatal damage wins same-step completion in zombies', t => {
   const game = arena(t, { modeId: 'zombies' }); game.update(.05);
-  const z = game.bots[0]; game.world.solids = []; z.model.position.set(0,0,8.9); z.brain.attackRemaining = 0;
+  const z = game.bots[0]; setWorldSolids(game, []); positionBot(z, 0,0,8.9); z.brain.attackRemaining = 0;
   Object.assign(game.player, { x: 0, z: 10, health: 10, protected: 0 }); pack(game); assert.equal(use(game).ok, true);
   game.player.equipment.supplyUse.remaining = .01; game.update(.01);
   assert.equal(game.player.health, 0); assert.equal(game.modeState.ended, true); assert.equal(game.player.equipment.supplyUse, null);
@@ -192,10 +192,10 @@ test('armour use survives recovery and a new zombie run is fresh', t => {
 test('wave-19 hit consumes full armour and zombies never collect packs', t => {
   const game = arena(t, { modeId: 'zombies' }); game.update(.05);
   const z = game.bots[0], slot = game.lootState.slots.find(s => s.item.supplyType === 'health');
-  z.model.position.set(slot.x,0,slot.z); z.flashRemaining = 1; game.update(.05);
+  positionBot(z, slot.x,0,slot.z); z.flashRemaining = 1; game.update(.05);
   assert.equal(slot.present, true); assert.equal(z.equipment, undefined);
-  game.world.solids = []; Object.assign(game.player, { x:0,z:10,armour:100,protected:0 });
-  z.model.position.set(0,0,8.9); z.flashRemaining = 0; z.brain.attackRemaining = 0;
+  setWorldSolids(game, []); Object.assign(game.player, { x:0,z:10,armour:100,protected:0 });
+  positionBot(z, 0,0,8.9); z.flashRemaining = 0; z.brain.attackRemaining = 0;
   game.modeState.wave = 19; game.update(.01);
   assert.equal(game.player.armour, 0); assert.equal(game.player.health, 100); assert.equal(game.modeState.ended, false);
 });

@@ -3,16 +3,16 @@ import assert from 'node:assert/strict';
 import { pickupEquipment } from '../src/equipment.js';
 import { lootDTO } from '../src/loot.js';
 import { tickMode, recordElimination } from '../src/modes.js';
-import { createHeadlessGame, cleanupGame } from './helpers/game-fixture.js';
+import {createHeadlessGame, cleanupGame, positionBot, setWorldSolids } from './helpers/game-fixture.js';
 import * as THREE from 'three';
 import { AVATAR_HITBOX } from '../src/avatar.js';
 
 function arena(t, { modeId = 'ffa', bots = 2, gun = 'ak47' } = {}) {
   const game = createHeadlessGame(); t.after(() => cleanupGame(game));
-  game.start(gun, { bots, modeId }); game.world.solids = [];
+  game.start(gun, { bots, modeId }); setWorldSolids(game, []);
   Object.assign(game.player, { x: 0, z: 10, protected: 0 });
   game.botTuning = { speed: 0, interval: 1, accuracy: 0, damage: 8 };
-  game.bots.forEach((bot, i) => { bot.model.position.set(i * 2, 0, 0); bot.protected = 0; bot.cooldown = 100; });
+  game.bots.forEach((bot, i) => { positionBot(bot, i * 2, 0, 0); bot.protected = 0; bot.cooldown = 100; });
   return game;
 }
 
@@ -180,7 +180,7 @@ test('winning explosive hit stops later damage and duplicate death drops', t => 
 
 test('CTF carrier elimination drops its flag and equipment exactly once', t => {
   const game = arena(t, { modeId: 'ctf', bots: 1 }), victim = game.bots[0], base = game.world.definition.bases.red;
-  victim.model.position.set(base.x, 0, base.z); tickMode(game.modeState, .01, game.getActors());
+  positionBot(victim, base.x, 0, base.z); tickMode(game.modeState, .01, game.getActors());
   assert.equal(game.modeState.flags.red.carrierId, victim.id);
   game.damageActor('local', victim, 100); const flag = structuredClone(game.modeState.flags.red);
   game.damageActor('local', victim, 100);
@@ -232,7 +232,7 @@ test('death invalidates remembered enemy goals and its drops receive their full 
 test('bot respawn does not bypass the six second grenade attempt interval', t => {
   const game = arena(t, { bots: 1 }), bot = game.bots[0];
   bot.lastGrenadeAttempt = 0; game.spawnBot(bot); bot.equipment.grenades.frag = 1; bot.protected = 0;
-  bot.model.position.set(0, 0, 0); game.updateBots(.1);
+  positionBot(bot, 0, 0, 0); game.updateBots(.1);
   assert.equal(bot.equipment.grenades.frag, 1); assert.equal(game.gearCombatState.projectiles.length, 0);
 });
 

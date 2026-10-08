@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { createHeadlessGame, cleanupGame } from './helpers/game-fixture.js';
+import {createHeadlessGame, cleanupGame, positionBot, setWorldSolids } from './helpers/game-fixture.js';
 import { pickupEquipment, equipmentDTO } from '../src/equipment.js';
 import { OnlineArena } from '../src/online-game.js';
 import { RoomManager } from '../server/rooms.js';
@@ -21,7 +21,7 @@ function clearWave(game) {
 }
 function target(game) {
   game.update(.05); const z=game.bots[0];
-  game.world.solids=[]; z.model.position.set(0,0,0);
+  setWorldSolids(game, []); positionBot(z, 0,0,0);
   Object.assign(game.player,{ x:0,z:10,protected:0 }); game.yaw=0; game.pitch=0; game.placeCamera();
   return z;
 }
@@ -70,7 +70,7 @@ for (const kind of ['walker','runner']) {
       const game=arena(t),z=target(game);
       game.modeState.wave=wave;
       z.kind=kind; z.brain=createZombieBrain(kind); z.brain.attackRemaining=0;
-      z.model.position.set(0,0,8.9); game.player.health=100; game.player.armour=0;
+      positionBot(z, 0,0,8.9); game.player.health=100; game.player.armour=0;
       const amounts=[],damage=game.damageActor.bind(game);
       game.damageActor=(...args)=>{ amounts.push(args[2]); return damage(...args); };
       game.update(.01);
@@ -91,11 +91,11 @@ test('zombie damage follows the next wave after recovery and resets on replay', 
   clearWave(game); game.update(10);
   assert.equal(game.modeState.wave,2);
   let z=target(game);
-  z.model.position.set(0,0,8.9); z.brain.attackRemaining=0;
+  positionBot(z, 0,0,8.9); z.brain.attackRemaining=0;
   game.update(.01); assert.equal(game.player.health,85);
   game.start('m4a1',{modeId:'zombies',mapId:'courtyard',skinId:'shadow-ninja'});
   z=target(game);
-  z.model.position.set(0,0,8.9); z.brain.attackRemaining=0;
+  positionBot(z, 0,0,8.9); z.brain.attackRemaining=0;
   game.update(.01); assert.equal(game.player.health,90);
   assert.equal(game.modeState.wave,1);
 });
@@ -106,7 +106,7 @@ test('frag uses existing falloff and cap, smoke/flash affect only pursuit and sl
   assert.equal(game.requestEquipment({ kind:'throw',grenadeType:'frag' }).ok,true);
   Object.assign(game.gearCombatState.projectiles[0],{ x:0,y:.12,z:0,vx:0,vy:0,vz:0,fuseRemaining:.01 });
   game.update(.02); assert.ok(z.health>=10 && z.health<100);
-  z.model.position.set(0,0,8.9); z.brain.attackRemaining=0; z.flashRemaining=1;
+  positionBot(z, 0,0,8.9); z.brain.attackRemaining=0; z.flashRemaining=1;
   const health=game.player.health; game.update(.05);
   assert.equal(game.player.health,health); assert.equal(z.model.position.z,8.9);
   z.flashRemaining=0;
@@ -205,7 +205,7 @@ test('dead-player terminal state takes priority over the last zombie death befor
 test('failed occupied spawn retries, enemies never collect loot, and actor positions follow movement', t=>{
   const game=arena(t); game.update(.05);
   const z=game.bots[0],slot=game.lootState.slots.find(s=>s.item.kind==='knife');
-  z.model.position.set(slot.x,0,slot.z); z.flashRemaining=5; game.update(.05);
+  positionBot(z, slot.x,0,slot.z); z.flashRemaining=5; game.update(.05);
   assert.equal(slot.present,true); assert.equal(z.equipment,undefined);
   const before=game.getActors().find(a=>a.id===z.id); z.flashRemaining=0; game.update(.05);
   const after=game.getActors().find(a=>a.id===z.id);

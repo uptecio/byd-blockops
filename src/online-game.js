@@ -41,7 +41,7 @@ export class OnlineArena {
     this.game.start(own.weaponId, { ...settings, mapId: room.mapId, modeId: room.modeId, skinId: own.skinId, finishId: own.finishId, bots: 0, progressionSource: 'online' }); this.game.active = false;
     this.game.lootState = null;
     this.game.yaw = own.yaw; this.game.pitch = own.pitch;
-    Object.assign(this.game.player, { x: own.x, z: own.z, jump: own.y });
+    Object.assign(this.game.player, { x: own.x, z: own.z, y: own.y, jump: own.y });
     this.sync(room, true); this.game.input.setEnabled(room.phase === 'playing' && !this.suspended); this.game.placeCamera();
   }
   sync(room, initial = false) {
@@ -69,7 +69,7 @@ export class OnlineArena {
     this.target = { x: own.x, z: own.z, y: own.y };
     const respawned = this.previousRespawn > 0 && own.respawnRemaining === 0;
     if (initial || respawned || lifeChanged) {
-      Object.assign(game.player, { x: own.x, z: own.z, jump: own.y });
+      Object.assign(game.player, { x: own.x, z: own.z, y: own.y, jump: own.y, velocityY: 0 });
       game.yaw = own.yaw; game.pitch = own.pitch; game.recoil = 0; game.input.clear();
     }
     if (own.health < game.player.health || own.armour < game.player.armour) game.damageFlash = .3;
@@ -212,6 +212,7 @@ export class OnlineArena {
     game.player.x += (this.target.x - game.player.x) * smoothing;
     game.player.z += (this.target.z - game.player.z) * smoothing;
     game.player.jump += (this.target.y - game.player.jump) * smoothing;
+    game.player.y = game.player.jump;
     for (const remote of this.remotes.values()) {
       const target = remote.player;
       remote.model.position.lerp(new THREE.Vector3(target.x, target.y, target.z), smoothing);

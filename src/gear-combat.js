@@ -2,6 +2,7 @@ import { GEAR_BALANCE, GRENADE_TYPES } from './equipment-catalog.js';
 import { consumeGrenade } from './equipment.js';
 import { hasLineOfSight } from './collision.js';
 import { AVATAR_HITBOX } from './avatar-hitbox.js';
+import { solidBounds } from './spatial.js';
 
 const physics = GEAR_BALANCE.grenadePhysics;
 const axes = ['x', 'y', 'z'];
@@ -64,10 +65,8 @@ export function meleeTarget(actor, actors, { solids, isEnemy }) {
 }
 
 function bounds(solid) {
-  const r = physics.radius;
-  return { x: [solid.x - solid.w / 2 - r, solid.x + solid.w / 2 + r],
-    y: [-r, (solid.height ?? Infinity) + r],
-    z: [solid.z - solid.d / 2 - r, solid.z + solid.d / 2 + r] };
+  const r = physics.radius, box = solidBounds(solid);
+  return { x: [box.min.x - r, box.max.x + r], y: [box.min.y - r, box.max.y + r], z: [box.min.z - r, box.max.z + r] };
 }
 
 // Sweeping the centre against radius-expanded AABBs conservatively protects corners.

@@ -1,6 +1,8 @@
 import * as THREE from 'three';
 import { createWorld, createWeaponModel } from './world.js';
-import { moveCircle, hasLineOfSight } from './collision.js';
+import { hasLineOfSight } from './collision.js';
+import { solidBounds } from './spatial.js';
+import { createBody, moveCharacter, humanMoveSpeed } from './character-movement.js';
 import { getWeapon, createWeaponState, tryFire, startReload } from './weapons.js';
 import { gunHitDamage } from './gun-damage.js';
 import { assignTeams, createModeState, tickMode, recordElimination, getModeSnapshot, areEnemies } from './modes.js';
@@ -53,7 +55,7 @@ export class ArenaGame {
     this.camera = new THREE.PerspectiveCamera(75, 1, .05, 180);
     this.camera.rotation.order = 'YXZ'; this.scene.add(this.camera);
     this.world = createWorld(THREE, this.scene);
-    this.player = { ...this.world.playerSpawn, id: 'local', name: 'You', lifeId: 0, skinId: DEFAULT_SKIN_ID, pendingSkinId: DEFAULT_SKIN_ID, health: 100, armour: 0, jump: 0, velocity: 0, dead: 0, protected: 2 };
+    this.player = { ...createBody(this.world.playerSpawn, this.world.spatial, { radius: PLAYER_RADIUS }), id: 'local', name: 'You', lifeId: 0, skinId: DEFAULT_SKIN_ID, pendingSkinId: DEFAULT_SKIN_ID, health: 100, armour: 0, jump: 0, dead: 0, protected: 2 };
     this.yaw = 0; this.pitch = 0; this.time = 0; this.recoil = 0;
     this.active = false; this.hasRound = false; this.bots = []; this.effects = [];
     this.inventory = new Map(); this.weapon = getWeapon('m4a1');
@@ -160,7 +162,7 @@ export class ArenaGame {
     const teams = assignTeams(ids, this.settings.modeId);
     this.modeState = createModeState({ modeId: this.settings.modeId, map: getMap(this.settings.mapId), participants: ids.map(id => ({ id, teamId: teams[id] })) });
     this.loadMap(this.settings.mapId); this.player.equipment = createEquipment(getWeapon(id).id);
-    this.botTuning = DIFFICULTY[this.settings.difficulty] || DIFFICULTY.normal;
+    this.botTuning = { ...(DIFFICULTY[this.settings.difficulty] || DIFFICULTY.normal) };
     Object.assign(this.player, { id: 'local', name: 'You', teamId: teams.local, lifeId: 0, pendingSkinId: this.settings.skinId, pendingFinishId: this.settings.finishId });
     this.hasRound = true; this.endReported = false;
     this.resetPlayer(true);
@@ -198,6 +200,7 @@ export class ArenaGame {
     bot.bar = new THREE.Mesh(new THREE.PlaneGeometry(.9, .09), new THREE.MeshBasicMaterial({ color: '#f45b4f', side: THREE.DoubleSide }));
     bot.bar.position.y = 2.13; bot.model.add(bot.bar); this.world.botGroup.add(bot.model);
     bot.model.position.set(spawn.x, 0, spawn.z);
+    bot.body = createBody(spawn, this.world.spatial, { radius: BOT_RADIUS });
     bot.equipment ??= createEquipment('m4a1'); resetEquipment(bot.equipment);
     Object.assign(bot, { health: 100, armour: 0, respawn: 0, protected: 2.5, flashRemaining: 0, cooldown: 1.5,
       intentTimer: 0, pathTimer: 0, waypoint: null, intent: null, yaw: Math.PI, lastKnownTargets: new Map(),
@@ -213,7 +216,7 @@ export class ArenaGame {
     return [{ id: this.player.id, name: this.player.name, teamId: this.player.teamId, x: this.player.x, y: this.player.jump, z: this.player.z,
       alive: this.player.health > 0 && this.player.dead <= 0, protectedRemaining: this.player.protected, lifeId: this.player.lifeId, skinId: this.player.skinId,
       yaw: this.yaw, pitch: this.pitch, flashRemaining: this.player.flashRemaining ?? 0, equipment: this.player.equipment, health: this.player.health, armour: this.player.armour },
-    ...(this.zombieRuntime ? this.zombieRuntime.actors() : this.bots.map(bot => ({ id: bot.id, name: bot.name, teamId: bot.teamId, x: bot.model.position.x, y: bot.model.position.y, z: bot.model.position.z,
+    ...(this.zombieRuntime ? this.zombieRuntime.actors() : this.bots.map(bot => ({ id: bot.id, name: bot.name, teamId: bot.teamId, x: bot.body.x, y: bot.body.y, z: bot.body.z,
       alive: bot.health > 0 && bot.respawn <= 0, protectedRemaining: bot.protected, lifeId: bot.lifeId, skinId: bot.skinId,
       yaw: bot.yaw, pitch: 0, flashRemaining: bot.flashRemaining, equipment: bot.equipment, health: bot.health, armour: bot.armour,
       lastGrenadeAttempt: bot.lastGrenadeAttempt, carryingFlag: Object.values(this.modeState.flags ?? {}).some(flag => flag.carrierId === bot.id) })))];
@@ -242,7 +245,7 @@ export class ArenaGame {
         return distance > best.distance ? { ...point, distance } : best;
       }, { ...spawn, distance: -1 });
     }
-    Object.assign(this.player, { x: spawn.x, z: spawn.z, health: 100, armour: 0, dead: 0, jump: 0, velocity: 0, protected: 2.5, flashRemaining: 0, skinId: this.player.pendingSkinId, finishId: this.player.pendingFinishId ?? this.player.finishId ?? 'standard' });
+    Object.assign(this.player, createBody(spawn, this.world.spatial, { radius: PLAYER_RADIUS }), { health: 100, armour: 0, dead: 0, jump: spawn.y ?? 0, protected: 2.5, flashRemaining: 0, skinId: this.player.pendingSkinId, finishId: this.player.pendingFinishId ?? this.player.finishId ?? 'standard' });
     this.player.lifeId++;
     this.yaw = initial ? 0 : Math.atan2(spawn.x, spawn.z); this.pitch = 0; this.recoil = 0;
     resetEquipment(this.player.equipment); this.syncPlayerEquipment(); this.input.clear(); this.placeCamera();
@@ -317,15 +320,12 @@ export class ArenaGame {
       const sensitivity = .0026 * this.settings.sensitivity / (zoom ? Math.sqrt(this.weapon.zoom) : 1);
       this.yaw -= input.lookX * sensitivity;
       this.pitch = THREE.MathUtils.clamp(this.pitch - input.lookY * sensitivity, -1.25, 1.25);
-      const speed = (this.weapon.classId === 'lmg' ? 4.4 : this.weapon.classId === 'sidearm' || this.weapon.classId === 'smg' ? 6 : 5.3) * (zoom ? .65 : 1);
-      const dx = (Math.cos(this.yaw) * input.x - Math.sin(this.yaw) * input.y) * speed * dt;
-      const dz = (-Math.sin(this.yaw) * input.x - Math.cos(this.yaw) * input.y) * speed * dt;
-      const moved = moveCircle(this.player, dx, dz, PLAYER_RADIUS, this.world.solids);
-      this.player.x = moved.x; this.player.z = moved.z;
-      if (input.jump && this.player.jump === 0) this.player.velocity = 4.3;
-      this.player.velocity -= 13 * dt;
-      this.player.jump = Math.max(0, this.player.jump + this.player.velocity * dt);
-      if (this.player.jump === 0) this.player.velocity = 0;
+      const speed = humanMoveSpeed(this.weapon.classId, zoom);
+      const vx = (Math.cos(this.yaw) * input.x - Math.sin(this.yaw) * input.y) * speed;
+      const vz = (-Math.sin(this.yaw) * input.x - Math.cos(this.yaw) * input.y) * speed;
+      const moved = moveCharacter({ x: this.player.x, y: this.player.jump, z: this.player.z, velocityY: this.player.velocityY,
+        grounded: this.player.grounded, supportId: this.player.supportId }, { vx, vz, jump: input.jump }, dt, { world: this.world.spatial, radius: PLAYER_RADIUS });
+      Object.assign(this.player, moved.body, { jump: moved.body.y });
       Object.assign(playerActor, { x: this.player.x, y: this.player.jump, z: this.player.z, yaw: this.yaw, pitch: this.pitch });
       if (input.throwPressed) {
         const result = this.requestEquipment({ kind: 'throw', grenadeType: this.player.equipment.selectedGrenade });
@@ -500,17 +500,18 @@ export class ArenaGame {
           : this.navigation.nextWaypoint(actor, goal);
         bot.pathTimer = .15;
       }
-      const position = bot.model.position;
+      const position = bot.body;
+      let vx = 0, vz = 0;
       if (bot.waypoint) {
         const dx = bot.waypoint.x - position.x, dz = bot.waypoint.z - position.z, length = Math.hypot(dx, dz);
         const step = Math.min(length, this.botTuning.speed * dt);
         if (length > .001) {
-          const moved = moveCircle(position, dx / length * step, dz / length * step, BOT_RADIUS, this.world.solids);
-          position.x = moved.x; position.z = moved.z;
+          vx = dx / length * step / dt; vz = dz / length * step / dt;
           bot.model.rotation.y = Math.atan2(dx, dz);
-          position.y = Math.sin(this.time * 8 + bot.phase) * .025;
         }
       }
+      Object.assign(position, moveCharacter(position, { vx, vz, jump: false }, dt, { world: this.world.spatial, radius: BOT_RADIUS }).body);
+      bot.model.position.set(position.x, position.y, position.z);
       bot.bar.rotation.y = this.yaw - bot.model.rotation.y;
       Object.assign(actor, { x: position.x, y: position.y, z: position.z });
       const target = actors.find(actor => actor.id === bot.intent.targetId);
@@ -593,7 +594,7 @@ export class ArenaGame {
       let closest = this.weapon.range, victim = null, hitPoint = null;
       for (const bot of this.bots) {
         if (bot.health <= 0 || bot.respawn > 0 || bot.protected > 0 || !this.isEnemy('local', bot.id)) continue;
-        const p = bot.model.position;
+        const p = bot.body ?? bot.model.position;
         const box = new THREE.Box3(new THREE.Vector3(p.x - .32, p.y + .05, p.z - .32), new THREE.Vector3(p.x + .32, p.y + 1.84, p.z + .32));
         const hit = ray.intersectBox(box, new THREE.Vector3());
         if (!hit) continue;
@@ -602,7 +603,7 @@ export class ArenaGame {
       }
       if (victim) {
         const falloff = this.weapon.classId === 'shotgun' || this.weapon.classId === 'smg' ? Math.max(.35, 1 - closest / this.weapon.range * .6) : 1;
-        landed = this.damageActor('local', victim, gunHitDamage(this.weapon.damage * falloff, hitPoint.y, victim.model.position.y), actors) || landed;
+        landed = this.damageActor('local', victim, gunHitDamage(this.weapon.damage * falloff, hitPoint.y, (victim.body ?? victim.model.position).y), actors) || landed;
         if (victim.health <= 0) { killed = true; this.events.onToast(`+1 ELIMINATION · ${this.match.kills}`); }
       }
       if (pellet === 0) {
@@ -610,7 +611,8 @@ export class ArenaGame {
         // Visual tracers terminate at solid cover as well as the damage ray.
         let nearestWall = origin.distanceTo(end);
         for (const solid of this.world.solids) {
-          const wall = new THREE.Box3(new THREE.Vector3(solid.x - solid.w / 2, 0, solid.z - solid.d / 2), new THREE.Vector3(solid.x + solid.w / 2, solid.height, solid.z + solid.d / 2));
+          const bounds = solidBounds(solid);
+          const wall = new THREE.Box3(new THREE.Vector3(bounds.min.x, bounds.min.y, bounds.min.z), new THREE.Vector3(bounds.max.x, bounds.max.y, bounds.max.z));
           const hit = ray.intersectBox(wall, new THREE.Vector3());
           if (hit && origin.distanceTo(hit) < nearestWall) { nearestWall = origin.distanceTo(hit); end.copy(hit); }
         }

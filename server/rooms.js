@@ -5,7 +5,8 @@ import { getSkin } from '../src/skins.js';
 import { getGunFinish } from '../src/cosmetics.js';
 import { emptyTally, awardTally, finishTally } from '../src/progression.js';
 import { getMode, assignTeams, createModeState, addParticipant, areEnemies, recordElimination, tickMode, removeParticipant, getModeSnapshot } from '../src/modes.js';
-import { moveCircle } from '../src/collision.js';
+import { createSpatialWorld, solidBounds } from '../src/spatial.js';
+import { createBody, moveCharacter, humanMoveSpeed } from '../src/character-movement.js';
 import { WEAPONS, getWeapon, tryFire, startReload } from '../src/weapons.js';
 import { gunHitDamage } from '../src/gun-damage.js';
 import { createEquipment, equipGun, setHeldItem, selectGrenade, tickEquipment, beginMelee, deathItems, clearEquipment, equipmentDTO } from '../src/equipment.js';
@@ -19,11 +20,12 @@ import { startSupplyUse, cancelSupplyUse, advanceSupplyUse, isUsingSupply } from
 const mapPhysics = new Map();
 function physicsFor(map) {
   if (!mapPhysics.has(map.id)) {
-    const wallBoxes = Object.freeze(map.solids.map(s => Object.freeze(new THREE.Box3(
-      Object.freeze(new THREE.Vector3(s.x - s.w / 2, 0, s.z - s.d / 2)),
-      Object.freeze(new THREE.Vector3(s.x + s.w / 2, s.height, s.z + s.d / 2)),
-    ))));
-    mapPhysics.set(map.id, Object.freeze({ solids: map.solids, wallBoxes }));
+    const spatial = createSpatialWorld(map);
+    const wallBoxes = Object.freeze(spatial.solids.map(solid => {
+      const b = solidBounds(solid);
+      return Object.freeze(new THREE.Box3(Object.freeze(new THREE.Vector3(b.min.x, b.min.y, b.min.z)), Object.freeze(new THREE.Vector3(b.max.x, b.max.y, b.max.z))));
+    }));
+    mapPhysics.set(map.id, Object.freeze({ spatial, solids: spatial.solids, wallBoxes }));
   }
   return mapPhysics.get(map.id);
 }
@@ -99,7 +101,7 @@ export class RoomManager {
       const distance = others.length ? Math.min(...others.map(other => Math.hypot(candidate.x - other.x, candidate.z - other.z))) : Infinity;
       if (distance > bestDistance) { bestDistance = distance; spawn = candidate; }
     }
-    Object.assign(player, spawn, { y: 0, velocityY: 0, yaw: Math.atan2(spawn.x, spawn.z), pitch: 0, health: 100, armour: 0, respawnRemaining: 0, protectedRemaining: 2, flashRemaining: 0, input: emptyInput(), inputAt: -Infinity });
+    Object.assign(player, createBody(spawn, room.physics.spatial), { yaw: Math.atan2(spawn.x, spawn.z), pitch: 0, health: 100, armour: 0, respawnRemaining: 0, protectedRemaining: 2, flashRemaining: 0, input: emptyInput(), inputAt: -Infinity });
     player.lifeId = (this.connectionLives.get(player.id) || 0) + 1;
     this.connectionLives.set(player.id, player.lifeId);
     room.lifeCounters.set(player.id, player.lifeId);
@@ -347,12 +349,10 @@ export class RoomManager {
       const weapon = getWeapon(player.weaponId);
       const state = player.inventory.get(player.weaponId);
       if (this.now - player.inputAt <= 0.3 + 1e-9) { player.yaw = input.yaw; player.pitch = input.pitch; }
-      const speed = (weapon.classId === 'lmg' ? 4.4 : /sidearm|smg/.test(weapon.classId) ? 6 : 5.3) * (input.zoom ? 0.65 : 1);
-      const moved = moveCircle(player, (Math.cos(player.yaw) * input.x - Math.sin(player.yaw) * input.y) * speed * dt, (-Math.sin(player.yaw) * input.x - Math.cos(player.yaw) * input.y) * speed * dt, 0.4, room.physics.solids);
-      player.x = moved.x; player.z = moved.z;
-      if (input.jump && player.y === 0) player.velocityY = 4.3;
-      player.velocityY -= 12 * dt; player.y = Math.max(0, player.y + player.velocityY * dt);
-      if (player.y === 0) player.velocityY = 0;
+      const speed = humanMoveSpeed(weapon.classId, input.zoom);
+      const movement = moveCharacter(player, { vx: (Math.cos(player.yaw) * input.x - Math.sin(player.yaw) * input.y) * speed,
+        vz: (-Math.sin(player.yaw) * input.x - Math.cos(player.yaw) * input.y) * speed, jump: input.jump }, dt, { world: room.physics.spatial });
+      Object.assign(player, movement.body);
       if (!isUsingSupply(player.equipment) && input.lifeId === player.lifeId && input.reload && player.equipment.heldItem === 'gun') startReload(state);
       if (!isUsingSupply(player.equipment) && input.lifeId === player.lifeId && player.equipment.attackLockRemaining === 0) {
         if (player.equipment.heldItem === 'knife') {

@@ -4,6 +4,7 @@ import * as THREE from 'three';
 import { MAPS, DEFAULT_MAP_ID, getMap } from '../src/maps.js';
 import { canOccupy, moveCircle } from '../src/collision.js';
 import { createWorld } from '../src/world.js';
+import { createSpatialWorld } from '../src/spatial.js';
 
 const ids = ['courtyard', 'dust-town', 'neon-city', 'snow-base', 'jungle-ruins', 'harbor', 'desert-fort', 'space-station'];
 const radius = 0.42;
@@ -118,7 +119,7 @@ for (const id of ids) {
     const map = getMap(id);
     assert.equal(world.mapId, id);
     assert.equal(world.definition, map);
-    assert.deepEqual(world.solids, map.solids);
+    assert.deepEqual(world.solids, createSpatialWorld(map).solids);
     assert.deepEqual(world.spawns, map.spawns);
     assert.deepEqual(world.playerSpawn, map.playerSpawn);
     const arena = scene.children.find(child => child !== world.botGroup);

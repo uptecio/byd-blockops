@@ -2,13 +2,13 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { WEAPONS, getWeapon } from '../src/weapons.js';
 import { RoomManager } from '../server/rooms.js';
-import { createHeadlessGame, cleanupGame } from './helpers/game-fixture.js';
+import {createHeadlessGame, cleanupGame, positionBot, setWorldSolids } from './helpers/game-fixture.js';
 
 function solo(t, weaponId = 'm4a1', modeId = 'ffa') {
   const game = createHeadlessGame(); t.after(() => cleanupGame(game));
-  game.start(weaponId, { bots: 1, modeId }); game.world.solids = [];
+  game.start(weaponId, { bots: 1, modeId }); setWorldSolids(game, []);
   Object.assign(game.player, { x: 0, z: 10, jump: 0, protected: 0 });
-  const target = game.bots[0]; target.model.position.set(0, 0, 0); target.protected = 0; target.cooldown = 100;
+  const target = game.bots[0]; positionBot(target, 0, 0, 0); target.protected = 0; target.cooldown = 100;
   game.botTuning = { speed: 0, interval: 1, accuracy: 0, damage: 8 };
   game.placeCamera();
   const amounts = [], damage = game.damageActor.bind(game);
@@ -66,7 +66,7 @@ for (const [weaponId, soloAmount, serverAmount] of bodyCases) test(`${weaponId} 
 
 for (const [feet, expected] of [[.17, 24], [.170000001, 24], [.169999999, 10000000000]]) test(`head threshold is strict at feet ${feet} in both real adapters`, t => {
   t.mock.method(Math, 'random', () => .5);
-  const { game, target, amounts } = solo(t); target.model.position.y = feet; game.shoot(false);
+  const { game, target, amounts } = solo(t); positionBot(target, target.body.x, feet, target.body.z); game.shoot(false);
   assert.deepEqual(amounts, [expected]);
   const { manager, room, a, target: remote, amounts: serverAmounts } = online(); remote.y = feet;
   manager.shoot(room, a, getWeapon('m4a1')); assert.deepEqual(serverAmounts, [expected]);
@@ -75,8 +75,8 @@ for (const [feet, expected] of [[.17, 24], [.170000001, 24], [.169999999, 100000
 for (const guard of ['range', 'cover', 'friendly', 'protected', 'ended']) test(`gun headshot still respects ${guard} in Solo and authoritative Online`, t => {
   t.mock.method(Math, 'random', () => .5);
   const { game, target, amounts } = solo(t, 'g17', guard === 'friendly' ? 'tdm' : 'ffa');
-  if (guard === 'range') target.model.position.z = -30.33;
-  if (guard === 'cover') game.world.solids.push({ x: 0, z: 5, w: 3, d: 1, height: 3 });
+  if (guard === 'range') positionBot(target, target.body.x, target.body.y, -30.33);
+  if (guard === 'cover') setWorldSolids(game, [...game.world.solids, { x: 0, z: 5, w: 3, d: 1, height: 3 }]);
   if (guard === 'friendly') { target.teamId = game.player.teamId; game.modeState.stats[target.id].teamId = game.player.teamId; }
   if (guard === 'protected') target.protected = 1;
   if (guard === 'ended') game.modeState.ended = true;

@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {createHeadlessGame,cleanupGame} from './helpers/game-fixture.js';
+import {createHeadlessGame,cleanupGame, positionBot, setWorldSolids } from './helpers/game-fixture.js';
 import {pickupEquipment,equipmentDTO} from '../src/equipment.js';
 import {OnlineArena} from '../src/online-game.js';
 import {RoomManager} from '../server/rooms.js';
@@ -9,9 +9,9 @@ function arena(t,settings={}) {
   const game=createHeadlessGame(),events=[]; t.after(()=>cleanupGame(game));
   game.events.onProgression=e=>events.push(e);
   game.start('m4a1',{bots:2,...settings});
-  game.world.solids=[]; game.botTuning={speed:0,interval:1,accuracy:0,damage:8};
+  setWorldSolids(game, []); game.botTuning={speed:0,interval:1,accuracy:0,damage:8};
   Object.assign(game.player,{x:0,z:10,protected:0});
-  game.bots.forEach((b,i)=>{b.model.position.set(i*2,0,0);b.protected=0;b.cooldown=100;});
+  game.bots.forEach((b,i)=>{positionBot(b, i*2,0,0);b.protected=0;b.cooldown=100;});
   return {game,events,last:()=>events.at(-1)?.tally};
 }
 function wave(game) {

@@ -1,5 +1,6 @@
 import { DEFAULT_MAP_ID, getMap } from './maps.js';
 import { getGunFinish } from './cosmetics.js';
+import { createSpatialWorld } from './spatial.js';
 
 // Procedural, texture-free meshes keep the complete arena available offline.
 function blocks(THREE, group) {
@@ -22,6 +23,7 @@ function blocks(THREE, group) {
 export function createWorld(THREE, scene, mapId = DEFAULT_MAP_ID) {
   // Validate before attaching anything, so an unsupported map cannot leak a world.
   const definition = getMap(mapId);
+  const spatial = createSpatialWorld(definition);
   const arena = new THREE.Group();
   arena.name = definition.name;
   const botGroup = new THREE.Group();
@@ -32,8 +34,8 @@ export function createWorld(THREE, scene, mapId = DEFAULT_MAP_ID) {
     box(block.x, block.y, block.z, block.w, block.h, block.d, block.colour);
   }
   return {
-    mapId: definition.id, definition,
-    solids: definition.solids, spawns: definition.spawns, playerSpawn: definition.playerSpawn, botGroup,
+    mapId: definition.id, definition, spatial,
+    solids: spatial.solids, spawns: definition.spawns, playerSpawn: definition.playerSpawn, botGroup,
     dispose() {
       scene.remove(arena, botGroup);
       geometry.dispose();
