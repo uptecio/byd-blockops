@@ -3,6 +3,7 @@ import { consumeGrenade } from './equipment.js';
 import { hasLineOfSight } from './collision.js';
 import { AVATAR_HITBOX } from './avatar-hitbox.js';
 import { solidBounds } from './spatial.js';
+import { spotDamageTargets, raySpotHit, spotBlastExposure } from './hiding-combat.js';
 
 const physics = GEAR_BALANCE.grenadePhysics;
 const axes = ['x', 'y', 'z'];
@@ -41,13 +42,27 @@ function bodyRayContact(origin, direction, target) {
 }
 
 // Selection alone does not spend a swing: adapters call beginMelee once, even on a miss.
-export function meleeTarget(actor, actors, { solids, isEnemy }) {
+export function meleeTarget(actor, actors, { solids, isEnemy, hiding }) {
   if (!finiteActor(actor) || !actor.alive) return null;
   const origin = eye(actor), direction = aim(actor);
   const candidates = [];
+  const proxies = hiding ? spotDamageTargets(hiding.state, actors, hiding.map) : [];
   for (const target of actors) {
     if (target.id === actor.id || !target.alive || target.protectedRemaining > 0
       || !isEnemy(actor.id, target.id)) continue;
+    if (target.hiddenSpotId) {
+      const proxy = proxies.find(p => p.actorId === target.id);
+      if (!proxy) continue;
+      const exposure = spotBlastExposure(origin, proxy, hiding.world);
+      const offset = difference(exposure.point, origin), distance = exposure.distance;
+      const inCone = distance <= epsilon || dot(direction, offset) / distance >= Math.cos(GEAR_BALANCE.knife.halfAngle) - epsilon;
+      if (distance <= GEAR_BALANCE.knife.reach + epsilon && inCone && exposure.visible) candidates.push({ id: target.id, distance });
+      else {
+        const hit = raySpotHit(origin, direction, GEAR_BALANCE.knife.reach, [proxy], hiding.world);
+        if (hit) candidates.push({ id: target.id, distance: hit.distance });
+      }
+      continue;
+    }
     const position = eye(target), offset = difference(position, origin), distance = length(offset);
     if (distance > GEAR_BALANCE.knife.reach + epsilon) continue;
     const inCone = distance <= epsilon || dot(direction, offset) / distance >= Math.cos(GEAR_BALANCE.knife.halfAngle) - epsilon;
@@ -180,12 +195,16 @@ function burst(state, projectile, actors, options, elapsedAfterBurst, result) {
   }
   // Death preserves eligibility; departure permanently disables existing throws.
   if (projectile.visualOnly || !actors.some(actor => actor.id === ownerId)) return;
+  const proxies = options.hiding ? spotDamageTargets(options.hiding.state, actors, options.hiding.map) : [];
   for (const target of [...actors].sort((a, b) => compareId(a.id, b.id))) {
     if (target.id === ownerId || !target.alive || target.protectedRemaining > 0
       || !options.isEnemy(ownerId, target.id)) continue;
-    const targetEye = eye(target), offset = difference(position, targetEye), distance = length(offset);
+    const proxy = target.hiddenSpotId && proxies.find(p => p.actorId === target.id);
+    if (target.hiddenSpotId && !proxy) continue;
+    const exposure = proxy ? spotBlastExposure(position, proxy, options.hiding.world) : null;
+    const targetEye = exposure?.point ?? eye(target), offset = difference(position, targetEye), distance = length(offset);
     const distanceFactor = Math.max(0, 1 - distance / balance.radius);
-    if (distanceFactor <= 0 || !hasLineOfSight(position, targetEye, options.solids)) continue;
+    if (distanceFactor <= 0 || !(exposure ? exposure.visible : hasLineOfSight(position, targetEye, options.solids))) continue;
     if (grenadeType === 'frag') result.damage.push({ sourceId: ownerId, sourceLifeId: projectile.ownerLifeId,
       targetId: target.id, amount: balance.maxDamage * distanceFactor });
     else {
