@@ -2,7 +2,7 @@
 
 Date: 2026-10-08
 
-Status: conversational design approved; this written specification awaits user review. No implementation plan, product changes, APK build or public deployment is authorised by this document alone.
+Status: written specification approved by the user on 2026-10-08, including its concrete defaults. The implementation plan must still be reviewed and an execution method selected before coding. Public deployment requires a separately coordinated window.
 
 Baseline: Block Ops 0.7.0 at source `28859c3`, Android version code 9, network protocol 5. Preserve unrelated working-tree changes, existing release artifacts and the running public game.
 
@@ -30,9 +30,9 @@ The approaches discussed were adding these areas to the existing maps or rebuild
 
 The game-design skill informs readable routes, touch-friendly landings, clear hiding feedback and playtesting. It does not override the user's preference for camping or for forgiving AI concealment.
 
-## Concrete defaults for written review
+## Defaults approved in written review
 
-The following fill in details not individually selected in chat. They are proposed as part of this written specification, not represented as previously approved answers:
+The following fill in details not individually selected in chat. They were accepted through approval of this written specification, not through separate earlier answers:
 
 - Each map gets at least two accessible elevated defensive positions, one reachable from each team's side, at least one walk-in sheltered room/alcove, and two special hiding spots. These may share structures; not every building becomes enterable or climbable.
 - At least one elevated defensive position per map has only one ground-to-position approach. Dropping off a roof is still allowed and is not a mandatory second entrance. No alternate normal-jump approach should accidentally defeat that position's single-entrance design.
@@ -170,4 +170,4 @@ No minimap, new map count, super-jump, mantling, ladders, fall damage, destructi
 
 This is one cohesive architectural feature: map geometry, shared movement, AI traversal and concealment must agree before it can ship. Implementation may be split into dependency-ordered tasks, but all eight maps and the approved mode coverage are the delivery scope, not an optional later phase.
 
-Next: the user reviews this written specification, especially the concrete defaults. Written-spec approval permits writing an implementation plan; coding begins only after that plan is reviewed and its execution method is selected.
+Next: prepare the implementation plan for user review. This written specification is approved; coding begins only after the plan is reviewed and its execution method is selected.
