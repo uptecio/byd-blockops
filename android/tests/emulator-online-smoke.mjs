@@ -179,7 +179,7 @@ try {
   const hostNativeId = latest.players.find(player => player.id !== peerId).id;
   verifyDeparture = () => until(() => latest, room => room?.code === lobby.code && !room.players.some(player => player.id === hostNativeId), 'Observer verifies owned native host departure before teardown');
   assert.equal(latest.mapId, mapId); assert.equal(latest.modeId, modeId);
-  assert.ok(nativePackets.some(packet => packet.type === 'welcome' && packet.protocol === PROTOCOL_VERSION), 'Real native client completes protocol-5 handshake');
+  assert.ok(nativePackets.some(packet => packet.type === 'welcome' && packet.protocol === PROTOCOL_VERSION), 'Real native client completes protocol-6 handshake');
   assert.equal(latest.players.find(player => player.id === peerId).skinId, 'robo-unit');
   assert.equal(latest.players.find(player => player.id !== peerId).skinId, 'space-guard');
   await until(state, current => current.players === 2, 'Native roster reflects peer');
@@ -297,7 +297,7 @@ try {
     await tap('knife-button'); await until(native, value => value.heldItem === 'knife', 'Independent peer sees native held knife');
     await tap('knife-button'); await until(native, value => value.heldItem === 'gun', 'Native returns to its gun');
     peer.removeEventListener('message', receive);
-    console.log('PASS native protocol-5 pickup, Throw/knife controls and independent authoritative pickup/projectile/held-item state.');
+    console.log('PASS native protocol-6 pickup, Throw/knife controls and independent authoritative pickup/projectile/held-item state.');
   }
   await key('keyDown', 'KeyW', 'w'); await delay(700); await key('keyUp', 'KeyW', 'w');
   await until(native, player => Math.hypot(player.x - before.x, player.z - before.z) > .4, 'Native input moves authoritative player');
@@ -448,4 +448,4 @@ try {
     originalError,
   });
 }
-console.log('Native online smoke passed: protocol 5 WSS, real pickups/equipment actions/shared peer state, all modes, teams/flags, create/join, authoritative input, Home cancel/leave, live lifecycle clock, incompatible client rejection and verified owned cleanup.');
+console.log('Native online smoke passed: protocol 6 WSS, real pickups/equipment actions/shared peer state, all modes, teams/flags, create/join, authoritative input, Home cancel/leave, live lifecycle clock, incompatible client rejection and verified owned cleanup.');

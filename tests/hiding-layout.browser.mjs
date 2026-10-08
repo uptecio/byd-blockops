@@ -33,7 +33,9 @@ for(const size of [{width:854,height:480},{width:1200,height:700},{width:1280,he
     const hide=await controls.point('#hide-button',53),fire=await controls.point('#fire-button',54);
     await controls.send('touchStart',[hide,fire]);await page.waitForTimeout(160);await controls.send('touchCancel');
     await until(async()=>(await observation.actor()).hiddenSpotId===null,'Hide/Fire exits, no stuck toggle');
-    const ammo=await page.locator('#ammo-count').textContent();await page.waitForTimeout(500);assert.equal(await page.locator('#ammo-count').textContent(),ammo,'cancel stops firing');
+    await until(async()=>(await observation.read()).input.fire===false,'cancel clears actual firing input');
+    const ammo=(await observation.read()).ammo;await page.waitForTimeout(500);assert.equal((await observation.read()).ammo,ammo,'cancel stops firing');
+    assert.equal(Number(await page.locator('#ammo-count').textContent()),ammo,'HUD catches up to actual stopped ammunition');
     await page.keyboard.down('KeyH');await page.waitForTimeout(200);await page.keyboard.down('KeyH');await page.waitForTimeout(250);
     assert.equal((await observation.actor()).hiddenSpotId,spot.id,'held H enters once');await page.keyboard.up('KeyH');
     // Genuine focus/visibility lifecycle, not a call into game state.

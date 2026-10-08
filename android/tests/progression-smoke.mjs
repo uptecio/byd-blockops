@@ -10,11 +10,11 @@ const f=await nativeProgressionFixture({artifactDir});
 try {
   let page=await f.attach();
   const beforeVersion=await f.version();
-  const resume=process.env.ANDROID_RESUME_CODE9==='1';
-  assert.equal(beforeVersion.code,resume?9:8,'Use code8 for migration, or explicitly resume real code9 earning');
+  const resume=process.env.ANDROID_RESUME_CODE10==='1';
+  assert.equal(beforeVersion.code,resume?10:9,'Use code9 for migration, or explicitly resume real code10 earning');
   await setupSolo(page);await page.locator('[data-skin="shadow-ninja"]').click();
   if(!resume&&!await page.evaluate(()=>localStorage.getItem('block-ops-zombies-v1'))) {
-    // The old disposable image may have no best yet. Earn one on actual v0.6,
+    // The old disposable image may have no best yet. Earn one on actual v0.7,
     // through its UI and normal death, before testing preservation on upgrade.
     await page.locator('[data-map="neon-city"]').click();await page.locator('[data-mode-id="zombies"]').click();await page.locator('#home-solo').click();
     await dragAim(page,Math.PI/.0026);let attempts=0,frames=0;const deadline=Date.now()+90000;
@@ -36,11 +36,12 @@ try {
   assert.ok(legacy.settings);assert.ok(legacy.zombies,'genuine pre-XP zombie records exist before migration');
   if(!resume){
     await writeFile(`${artifactDir}/before-upgrade.json`,JSON.stringify({beforeVersion,legacy},null,2));
-    await f.install(apk);page=await f.attach();assert.equal((await f.version()).code,9);
+    const beforeProfile=await readProfile(page);
+    await f.install(apk);page=await f.attach();assert.equal((await f.version()).code,10);
     assert.deepEqual(await page.evaluate(()=>({settings:localStorage.getItem('block-ops-v1'),zombies:localStorage.getItem('block-ops-zombies-v1')})),legacy);
-    assert.equal((await readProfile(page)).lifetimeXP,0);assert.equal((await readProfile(page)).skinId,'shadow-ninja');
+    assert.deepEqual(await readProfile(page),beforeProfile,'all earned XP/cosmetics survive9→10');
     await writeFile(`${artifactDir}/migration-passed.json`,JSON.stringify({from:beforeVersion,to:await f.version(),legacy},null,2));
-    console.log('PASS actual code8→9 migration: settings and genuine zombie best preserved; new XP starts at zero.');
+    console.log('PASS actual code9→10 migration: earned XP/cosmetics, settings and genuine zombie best preserved.');
   }
   const initialXP=(await readProfile(page)).lifetimeXP;
   await page.locator('#home-solo').click();await fightSolo(page,15,{artifactDir,label:'native-win'});
@@ -59,8 +60,8 @@ try {
   assert.equal(backgroundProfile.lifetimeXP,earned.lifetimeXP);
   assert.deepEqual(await readProfile(page),backgroundProfile,'background does not grant completion XP');
   page=await f.relaunch();assert.deepEqual(await readProfile(page),backgroundProfile);
-  await f.install(apk);page=await f.attach();assert.deepEqual(await readProfile(page),backgroundProfile,'signed code9 replacement retains earned profile');
-  assert.equal((await f.version()).code,9);await page.screenshot({path:`${artifactDir}/retained-after-install-r.png`});
-  await writeFile(`${artifactDir}/native-progression-evidence.json`,JSON.stringify({migration:resume?'separate prior 8→9 run':'8→9 legacy settings/zombie records',replacement:'9→9 same-signed install -r',initialXP,earnedXP:355,profile:earned,version:await f.version()},null,2));
+  await f.install(apk);page=await f.attach();assert.deepEqual(await readProfile(page),backgroundProfile,'signed code10 replacement retains earned profile');
+  assert.equal((await f.version()).code,10);await page.screenshot({path:`${artifactDir}/retained-after-install-r.png`});
+  await writeFile(`${artifactDir}/native-progression-evidence.json`,JSON.stringify({migration:resume?'separate prior9→10 run':'9→10 XP/cosmetics/settings/zombie records',replacement:'10→10 same-signed install -r',initialXP,earnedXP:355,profile:earned,version:await f.version()},null,2));
   f.clean();console.log('PASS native XP: 355 genuine new XP, Crimson Ninja/Crimson Red; force-stop/relaunch, real background/foreground and signed update-install retained.');
 } finally {await f.close();}

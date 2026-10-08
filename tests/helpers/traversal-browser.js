@@ -17,13 +17,13 @@ export async function observeGame(page) {
       functionDeclaration: `function(){return {
         active:this.active, modeId:this.settings.modeId, mapId:this.settings.mapId,
         player:{x:this.player.x,y:this.player.jump,z:this.player.z,yaw:this.yaw,pitch:this.pitch,
-          lifeId:this.player.lifeId,health:this.player.health,grounded:this.player.grounded,supportId:this.player.supportId,hiddenSpotId:this.player.hiddenSpotId},
+          lifeId:this.player.lifeId,health:this.player.health,armour:this.player.armour,grounded:this.player.grounded,supportId:this.player.supportId,hiddenSpotId:this.player.hiddenSpotId},
         camera:this.camera.position.toArray(),actors:this.getActors().map(a=>({id:a.id,kind:a.kind,alive:a.alive,x:a.x,y:a.y,z:a.z,health:a.health,enemy:this.isEnemy('local',a.id)})),
         bots:this.bots.map(b=>({id:b.id,targetId:b.brain?.targetId,visible:b.model.visible})),
         wave:this.zombieRuntime?.state.wave,queued:this.zombieRuntime?.state.queued,phase:this.zombieRuntime?.state.phase,
         activeIds:this.zombieRuntime?.state.activeIds.size,
         drawCalls:this.renderer.info.render.calls,triangles:this.renderer.info.render.triangles,
-        memory:{...this.renderer.info.memory},weaponVisible:this.weaponModel.visible,
+        memory:{...this.renderer.info.memory},weaponVisible:this.weaponModel.visible,ammo:this.weaponState.ammo,
         input:{move:{...this.input.move},fire:this.input.fire,hidePressed:this.input.hidePressed,keys:[...this.input.keys]},
         flags:this.objectives?.flags?Object.fromEntries(Object.entries(this.objectives.flags).map(([k,v])=>[k,v.visible])):null,
         models:this.world.botGroup.children.map(m=>({name:m.name,visible:m.visible,labelVisible:m.getObjectByName('name-label')?.visible,skinId:m.userData.skinId}))
@@ -91,7 +91,10 @@ export async function followRoute(page, readActor, route, { speed = 5.3, touch =
         const jumpingNow=actor.grounded && next.kind==='jump' && next.y>actor.y+.01 && length<=1.8;
         // A short landing approach is slow enough to settle inside authored
         // take-off tolerance; during a jump keep its normal travel speed.
-        const magnitude=Math.min(1,length/(speed*(online?.55:.18)));
+        // Subpixel joystick offsets can quantize to the centre, leaving a
+        // route stalled millimetres short of a corner/step. Keep a real touch
+        // displacement; destination/landing tolerances still stop the stick.
+        const magnitude=Math.min(1,Math.max(online?.025:.035,length/(speed*(online?.55:.18))));
         const x=(dx*Math.cos(actor.yaw)-dz*Math.sin(actor.yaw))/Math.max(.001,length)*magnitude;
         const y=(-dx*Math.sin(actor.yaw)-dz*Math.cos(actor.yaw))/Math.max(.001,length)*magnitude;
         const moved={...stick,x:stick.x+x*radius,y:stick.y-y*radius};
@@ -106,6 +109,11 @@ export async function followRoute(page, readActor, route, { speed = 5.3, touch =
         }
         if(!actor.grounded)jumping=false;
         await page.waitForTimeout(45);
+        if(online&&actor.grounded&&next.kind==='walk'&&length<.25) {
+          // Settle an authoritative snapshot between small corner/arrival
+          // corrections instead of continuously chasing delayed positions.
+          await controls.send('touchEnd');await page.waitForTimeout(150);await controls.send('touchStart',[stick]);
+        }
       }
       assert.ok(reached,`real controls landed at ${JSON.stringify(destination)}; last=${JSON.stringify(samples.at(-1))}; next=${JSON.stringify(navigation.nextWaypoint(samples.at(-1),destination))}`);
     }

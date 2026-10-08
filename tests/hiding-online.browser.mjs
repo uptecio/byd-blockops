@@ -100,4 +100,4 @@ try {
   }
   f.clean();
 }catch(error){evidence.errors.push(error.stack);evidence.lastPackets=f.packets.map(p=>p.at(-1));await f.pages[0].screenshot({path:`${dir}/failure.png`}).catch(()=>{});throw error;}
-finally {late.close();globalThis.WebSocket=previousWebSocket;for(const o of observations)await o.close().catch(()=>{});await writeFile(`${dir}/evidence.json`,JSON.stringify(evidence,null,2));await f.close();}
+finally {late.close();globalThis.WebSocket=previousWebSocket;for(const o of observations)await o.close().catch(()=>{});await writeFile(`${dir}/evidence.json`,JSON.stringify(evidence,null,2));await f.close();console.log('CLEANUP complete: owned browser and server closed');}

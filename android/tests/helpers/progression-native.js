@@ -35,6 +35,9 @@ export async function nativeProgressionFixture({artifactDir,serverOrigin}={}) {
   const viewport={width:1280,height:720};
   const visible=selector=>evaluate(selector=>{const e=document.querySelector(selector);return Boolean(e&&!e.hidden&&e.getBoundingClientRect().width&&e.getBoundingClientRect().height);},selector);
   const locate=selector=>({
+    async tap(){return this.click();},
+    async waitFor(){return until(()=>visible(selector),`visible ${selector}`);},
+    async boundingBox(){return evaluate(selector=>{const e=document.querySelector(selector);if(!e)return null;const r=e.getBoundingClientRect();return r.width&&r.height?{x:r.x,y:r.y,width:r.width,height:r.height}:null;},selector);},
     async click(){
       await until(()=>visible(selector),`visible touch target ${selector}`);
       const point=await evaluate(selector=>{const e=document.querySelector(selector);if(!e||e.disabled)throw Error(`Missing/disabled ${selector}`);e.scrollIntoView({block:'nearest',inline:'nearest'});const r=e.getBoundingClientRect();return {x:(r.x+r.width/2)*devicePixelRatio,y:(r.y+r.height/2)*devicePixelRatio};},selector);
@@ -47,11 +50,16 @@ export async function nativeProgressionFixture({artifactDir,serverOrigin}={}) {
     getAttribute:name=>evaluate(({selector,name})=>document.querySelector(selector).getAttribute(name),{selector,name}),
     textContent:()=>evaluate(selector=>document.querySelector(selector).textContent,selector),
     isVisible:()=>visible(selector),
+    isHidden:async()=>!await visible(selector),
+    isDisabled:()=>evaluate(selector=>document.querySelector(selector).disabled,selector),
     evaluate:(fn,arg)=>evaluate(({selector,source,arg})=>(0,eval)(`(${source})`)(document.querySelector(selector),arg),{selector,source:fn.toString(),arg}),
   });
   let mouse={x:0,y:0},dragStart;
   const key=(type,code)=>send('Input.dispatchKeyEvent',{type,code,key:code.startsWith('Key')?code.slice(3).toLowerCase():code,windowsVirtualKeyCode:code.startsWith('Key')?code.charCodeAt(3):0});
   const page={
+    // The shared traversal observer and real multitouch driver need raw CDP.
+    // This borrows the fixture's connection; it never owns/tears it down.
+    context:()=>({newCDPSession:async()=>({send,detach:async()=>{}})}),
     evaluate,locator:locate,viewportSize:()=>viewport,waitForTimeout:delay,
     waitForSelector:selector=>until(()=>visible(selector),selector),
     waitForFunction:(fn,arg,options={})=>until(()=>evaluate(fn,arg),'function predicate',options.timeout||15000),

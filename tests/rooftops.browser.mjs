@@ -15,7 +15,7 @@ try {
   assert.equal(await page.locator('#hide-button').count(),1,'candidate contains contextual Hide control (absent in frozen0.7 baseline)');
   await page.locator('#home-settings').tap();await page.locator('#bots').fill('1');await page.locator('#difficulty').selectOption('easy');
   await page.locator('#sound').uncheck();await page.locator('#settings-done').tap();
-  if(process.env.TRAVERSAL_PERFORMANCE_ONLY!=='1'&&process.env.TRAVERSAL_PERSISTENCE_ONLY!=='1')for(let cycle=0;cycle<2;cycle++) for(const [index,map] of MAPS.entries()) {
+  if(process.env.TRAVERSAL_PERFORMANCE_ONLY!=='1'&&process.env.TRAVERSAL_PERSISTENCE_ONLY!=='1'&&process.env.TRAVERSAL_RESOURCES_ONLY!=='1')for(let cycle=0;cycle<2;cycle++) for(const [index,map] of MAPS.entries()) {
     const modeId=cycle===1?'ffa':['ffa','tdm','ctf','zombies'][index%4];
     await page.locator(`[data-map="${map.id}"]`).tap();await page.locator(`[data-mode-id="${modeId}"]`).tap();await page.locator('#home-solo').tap();
     await page.waitForSelector('body[data-mode="playing"]'); observation=await observeGame(page);
@@ -41,8 +41,21 @@ try {
     await observation.close();observation=null;await goHome(page);
     console.log(`PASS ${map.id} ${modeId} cycle${cycle}: real climb, supported roof, room/hide, held H`);
   }
-  if(evidence.maps.length)for(const map of MAPS){const pair=evidence.maps.filter(e=>e.mapId===map.id);for(const kind of ['Buffer','Texture','Program'])
-    assert.ok((pair[1].resources.live[kind]||0)<=(pair[0].resources.live[kind]||0)+12,`${map.id}: bounded repeated-cycle ${kind}`);}
+  if(evidence.maps.length||process.env.TRAVERSAL_RESOURCES_ONLY==='1') {
+    // Active-mode resources legitimately differ (flags, avatars, zombie
+    // counts and random dropped loot). Compare equivalent fresh FFA states,
+    // while keeping the actual mixed-mode live/peak measurements above.
+    evidence.resourceCheckpoints=[];
+    for(let cycle=0;cycle<2;cycle++)for(const map of MAPS) {
+      await page.locator(`[data-map="${map.id}"]`).tap();await page.locator('[data-mode-id="ffa"]').tap();await page.locator('#home-solo').tap();
+      await page.waitForSelector('body[data-mode="playing"]');
+      await page.evaluate(()=>new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve))));
+      evidence.resourceCheckpoints.push({mapId:map.id,cycle,resources:await page.evaluate(()=>window.__lootObservation)});await goHome(page);
+    }
+    for(const map of MAPS){const pair=evidence.resourceCheckpoints.filter(e=>e.mapId===map.id);for(const kind of ['Buffer','Texture','Program'])
+      assert.ok((pair[1].resources.live[kind]||0)<=(pair[0].resources.live[kind]||0)+12,`${map.id}: bounded same-mode repeated-cycle ${kind}`);}
+    console.log('PASS matched all-map resource checkpoints: two full cycles, bounded buffers/textures/programs');
+  }
   if(process.env.TRAVERSAL_PERFORMANCE_ONLY==='1') {
     await page.locator('#home-settings').tap();await page.locator('#bots').fill('8');await page.locator('#settings-done').tap();
     evidence.botAttempts=[];

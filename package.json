@@ -1,6 +1,6 @@
 {
   "name": "block-ops-offline",
-  "version": "0.7.0",
+  "version": "0.8.0",
   "private": true,
   "type": "module",
   "scripts": {
@@ -25,6 +25,8 @@
     "test:rooftops": "node tests/rooftops.browser.mjs",
     "test:hiding:online": "node tests/hiding-online.browser.mjs",
     "test:hiding:layout": "node tests/hiding-layout.browser.mjs",
+    "test:rooftops:android": "node android/tests/rooftops-smoke.mjs",
+    "test:rooftops:android:online": "node android/tests/rooftops-online-smoke.mjs",
     "test:progression:android": "node android/tests/progression-smoke.mjs",
     "test:progression:android:online": "node android/tests/progression-online-smoke.mjs",
     "apk": "npm run build && bash scripts/build-apk.sh",

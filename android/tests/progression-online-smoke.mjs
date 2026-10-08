@@ -2,7 +2,8 @@ import assert from 'node:assert/strict';
 import {mkdir,writeFile} from 'node:fs/promises';
 import {chromium} from 'playwright';
 import {nativeProgressionFixture} from './helpers/progression-native.js';
-import {observer,moveTo,lookTo,lookAt,until} from '../../tests/helpers/loot-browser.js';
+import {cleanupOwnedOnlineSession} from './online-cleanup.mjs';
+import {observer,lookTo,lookAt,until} from '../../tests/helpers/loot-browser.js';
 import {readProfile} from '../../tests/helpers/progression-browser.js';
 
 const server=process.env.GAME_TEST_SERVER_URL;assert.ok(server,'Explicit owned TLS staging required');
@@ -35,7 +36,7 @@ async function moveNative(page, observed, x, z){
     assert.ok(Math.abs(target-observed.player[axis])<=.6,`Native walk settles at ${axis}=${target}: ${JSON.stringify(observed.player)}`);
   }
 }
-let page;
+let page,observingPeer,nativeId,originalError;
 try {
   page=await f.attach();await page.evaluate(observeModels);await peer.addInitScript(observeModels);
   const original=await readProfile(page);assert.ok(original.lifetimeXP>=350,'Run actual offline earning gate before online cosmetic gate');
@@ -53,9 +54,10 @@ try {
   await page.locator('#start-online').click();await peer.waitForSelector('body[data-mode="playing"]');
   const observations={packets:[f.packets,peerPackets]},a=observer(observations,0),b=observer(observations,1);
   await until(()=>a.player&&b.player,'real native/browser snapshots');
+  observingPeer=b;nativeId=a.id;
   await until(async()=>(await peer.evaluate(()=>window.__xpModelRead())).some(m=>m.skinId==='crimson-ninja'&&m.finishId==='crimson-red'&&m.colors.includes('8f2038')&&m.weaponColors.includes('ae2943')),'browser renders native earned skin palette and actual gun finish');
   await until(async()=>(await page.evaluate(()=>window.__xpModelRead())).some(m=>m.skinId==='robo-unit'&&m.colors.includes('7c94a6')),'native renders peer actual Robo palette');
-  await moveNative(page,a,0,10);await moveTo(peer,b,0,0);await lookAt(page,a,b);
+  await moveNative(page,a,0,10);await moveNative(peer,b,0,0);await lookAt(page,a,b);
   const victimLife=b.player.lifeId;await page.keyboard.press('KeyF');await until(()=>b.player.lifeId>victimLife,'real native shot eliminates and peer respawns');
   await until(async()=>(await readProfile(page)).lifetimeXP===original.lifetimeXP+10,'native receives and saves its private10XP');
   assert.equal((await readProfile(peer)).lifetimeXP,0);
@@ -63,7 +65,7 @@ try {
   await until(()=>a.player.pendingSkinId==='shadow-ninja'&&a.player.pendingFinishId==='standard','native menu sends pending choices');
   assert.equal(a.player.skinId,'crimson-ninja');assert.equal(a.player.finishId,'crimson-red');
   assert.match(await page.locator('#appearance-timing').textContent(),/Next respawn.*Shadow Ninja.*Wearing: Crimson Ninja/);
-  await moveTo(peer,b,0,0);await lookAt(peer,b,a);const oldLife=a.player.lifeId;
+  await moveNative(peer,b,0,0);await lookAt(peer,b,a);const oldLife=a.player.lifeId;
   await peer.keyboard.press('KeyF',{delay:80});await until(()=>a.player.lifeId>oldLife,'native respawn applies pending appearance while menu remains open');
   assert.equal(await page.locator('body').getAttribute('data-mode'),'armory');
   assert.equal(a.player.skinId,'shadow-ninja');assert.equal(a.player.finishId,'standard');
@@ -75,7 +77,12 @@ try {
   await writeFile(`${artifacts}/native-online-evidence.json`,JSON.stringify({server,beforeXP:original.lifetimeXP,afterXP:saved.lifetimeXP,appearance:saved},null,2));
   f.clean();assert.deepEqual(errors,[]);console.log('PASS native TLS online: actual private XP, both rendered peer palettes, pending skin/finish through open menu/respawn, force-stop retention');
 }catch(error){
+  originalError=error;
   await writeFile(`${artifacts}/failure-packets.json`,JSON.stringify({native:f.packets.slice(-80),peer:peerPackets.slice(-80)},null,2));
   if(page)await page.screenshot({path:`${artifacts}/failure-native.png`}).catch(()=>{});
   throw error;
-}finally{await browser.close();await f.close();}
+}finally{
+  await cleanupOwnedOnlineSession({originalError,stopApp:()=>f.close(),
+    verifyDeparture:async()=>{if(nativeId)await until(()=>!observingPeer.room.players.some(p=>p.id===nativeId),'XP peer verifies native departure');},
+    closePeers:()=>browser.close()});
+}
