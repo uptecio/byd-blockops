@@ -430,16 +430,24 @@ export class RoomManager {
       input.firePressed = false; input.jump = false; input.reload = false;
     }
     if (room.phase !== 'playing') return;
-    const effects = stepGearCombat(room.gearCombatState, this.actors(room), dt, { solids: room.physics.solids, isEnemy: (a, b) => areEnemies(room.modeState, a, b), hiding: { state: room.hidingState, map: room.map, world: room.physics.spatial } });
-    for (const event of effects.events) this.event(room, event);
-    for (const intent of effects.damage) {
-      this.damage(room, intent.sourceId, room.players.get(intent.targetId), intent.amount);
-      if (room.phase !== 'playing') return;
-    }
-    for (const intent of effects.flashes) {
-      const target = room.players.get(intent.targetId);
-      if (target?.health > 0 && target.protectedRemaining === 0) target.flashRemaining = Math.min(3, Math.max(target.flashRemaining, intent.duration));
-    }
+    for (const event of room.gearCombatState.events.splice(0)) this.event(room, event);
+    stepGearCombat(room.gearCombatState, this.actors(room), dt, {
+      solids: room.physics.solids, isEnemy: (a, b) => areEnemies(room.modeState, a, b),
+      hiding: { state: room.hidingState, map: room.map, world: room.physics.spatial },
+      resolveBurst: effects => {
+        for (const event of effects.events) this.event(room, event);
+        for (const intent of effects.damage) {
+          this.damage(room, intent.sourceId, room.players.get(intent.targetId), intent.amount);
+          if (room.phase !== 'playing') return null;
+        }
+        for (const intent of effects.flashes) {
+          const target = room.players.get(intent.targetId);
+          if (target?.health > 0 && target.protectedRemaining === 0) target.flashRemaining = Math.min(3, Math.max(target.flashRemaining, intent.duration));
+        }
+        return this.actors(room);
+      },
+    });
+    if (room.phase !== 'playing') return;
     const actors = this.actors(room);
     for (const event of collectLoot(room.lootState, actors, { solids: room.physics.solids, world: room.physics.spatial })) this.event(room, event);
     for (const event of tickMode(room.modeState, dt, actors)) this.event(room, event);

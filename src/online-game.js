@@ -52,6 +52,10 @@ export class OnlineArena {
     const game = this.game, own = room.players.find(player => player.id === this.id);
     if (!own) return;
     if (!initial && own.lifeId < game.player.lifeId) return;
+    // WebSocket messages are ordered: the first state after a successful
+    // acknowledgement reconciles that action (including a subsequent ejection).
+    // Until then, keep forwarding raw attacks without predicting actor state.
+    if (this.pendingHide?.acknowledged) this.pendingHide = null;
     const equipment = equipmentFromDTO(room.selfEquipment.equipment);
     const previousEquipment = game.player.equipment, previousUse = previousEquipment?.supplyUse;
     const lifeChanged = game.player.lifeId !== own.lifeId;
@@ -188,7 +192,9 @@ export class OnlineArena {
     if (!pending || !validHideResult(packet, this.game.world.definition) || pending.socket !== this.client.socket
       || packet.seq !== pending.seq || packet.roundId !== pending.roundId || packet.lifeId !== pending.lifeId
       || packet.roundId !== this.room?.roundId || packet.lifeId !== this.game.player.lifeId) return;
-    this.pendingHide = null; this.hidingReason = packet.reason;
+    if (packet.ok && this.game.player.hiddenSpotId !== packet.hiddenSpotId) pending.acknowledged = true;
+    else this.pendingHide = null;
+    this.hidingReason = packet.reason;
     if (!packet.ok) this.onToast(packet.reason);
   }
   requestEquipment(action) {

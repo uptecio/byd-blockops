@@ -215,7 +215,9 @@ function burst(state, projectile, actors, options, elapsedAfterBurst, result) {
   }
 }
 
-// Adapters apply ordered intents, stop on round end, and own actor/equipment timers.
+// Runtime adapters resolve each burst before the next one, returning refreshed
+// actors (or null on round end). Without a resolver this remains an intent-only
+// simulation. Returned arrays are a record, not additional effects to reapply.
 export function stepGearCombat(state, actors, dt, options) {
   const result = { damage: [], flashes: [], events: [] };
   if (!Number.isFinite(dt) || dt <= 0) return result;
@@ -234,7 +236,15 @@ export function stepGearCombat(state, actors, dt, options) {
   }
   state.projectiles = alive;
   bursts.sort((a, b) => a.time - b.time || compareId(a.projectile.id, b.projectile.id));
-  for (const { projectile, time } of bursts) burst(state, projectile, actors, options, dt - time, result);
+  for (const { projectile, time } of bursts) {
+    const batch = { damage: [], flashes: [], events: [] };
+    burst(state, projectile, actors, options, dt - time, batch);
+    result.damage.push(...batch.damage); result.flashes.push(...batch.flashes); result.events.push(...batch.events);
+    if (options.resolveBurst) {
+      actors = options.resolveBurst(batch);
+      if (!actors) break;
+    }
+  }
   return result;
 }
 

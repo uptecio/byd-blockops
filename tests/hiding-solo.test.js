@@ -11,6 +11,23 @@ function fixture(t, settings = {}) {
 }
 const enter = game => game.requestHide({ kind: 'enter', spotId: game.world.definition.hideSpots[0].id });
 
+test('solo consecutive grenade bursts use exposed geometry after the first impact', t => {
+  function run(steps) {
+    const { game, spot } = fixture(t, { bots: 1 }), enemy = game.bots[0];
+    enemy.cooldown = 100; game.player.armour = 100; enter(game);
+    for (const [index, fuseRemaining] of [0, .005].entries()) game.gearCombatState.projectiles.push({
+      id: `ordered-${index}`, grenadeType: 'frag', ownerId: enemy.id, ownerLifeId: enemy.lifeId,
+      x: spot.occupant.x, y: .12, z: spot.occupant.z, vx: 0, vy: 0, vz: 0, fuseRemaining,
+    });
+    for (const dt of steps) game.update(dt);
+    assert.equal(game.player.hiddenSpotId, null); assert.equal(game.player.x, spot.exit.x); assert.equal(game.player.z, spot.exit.z);
+    return { health: game.player.health, armour: game.player.armour };
+  }
+  const split = run([.001, .009]), combined = run([.01]);
+  assert.ok(split.health > 55 && split.health < 56);
+  assert.deepEqual(combined, split, 'same two explosions must not damage the old occupied proxy twice');
+});
+
 for (const map of MAPS) test(`${map.id}: real solo Hide freezes movement but allows look and empty Fire exits`, t => {
   const { game, spot } = fixture(t, { mapId: map.id }), before = structuredClone(game.player.equipment);
   assert.equal(enter(game).ok, true); assert.equal(game.getHidingView().label, 'Exit');

@@ -418,20 +418,24 @@ export class ArenaGame {
     if (this.zombieRuntime) this.zombieRuntime.updateEnemies(dt, actors);
     else this.updateBots(dt, actors);
     if (!this.modeState.ended) {
-      const result = stepGearCombat(this.gearCombatState, actors, dt, {
+      this.presentGearEvents(this.gearCombatState.events.splice(0));
+      stepGearCombat(this.gearCombatState, actors, dt, {
         solids: this.world.solids, isEnemy: (sourceId, targetId) => this.isEnemy(sourceId, targetId),
         hiding: { state: this.hidingState, map: this.world.definition, world: this.world.spatial },
+        resolveBurst: result => {
+          for (const hit of result.damage) {
+            if (this.modeState.ended) break;
+            const victim = this.actorEntity(hit.targetId);
+            if (victim) this.damageActor(hit.sourceId, victim, hit.amount, actors);
+          }
+          if (!this.modeState.ended) for (const flash of result.flashes) {
+            const victim = this.actorEntity(flash.targetId);
+            if (victim?.health > 0) victim.flashRemaining = Math.min(3, Math.max(victim.flashRemaining, flash.duration));
+          }
+          this.presentGearEvents(result.events);
+          return this.modeState.ended ? null : this.getActors();
+        },
       });
-      for (const hit of result.damage) {
-        if (this.modeState.ended) break;
-        const victim = this.actorEntity(hit.targetId);
-        if (victim) this.damageActor(hit.sourceId, victim, hit.amount, actors);
-      }
-      if (!this.modeState.ended) for (const flash of result.flashes) {
-        const victim = this.actorEntity(flash.targetId);
-        if (victim?.health > 0) victim.flashRemaining = Math.min(3, Math.max(victim.flashRemaining, flash.duration));
-      }
-      this.presentGearEvents(result.events);
     } else {
       // A winning swing can end the round before combat runs. Drain only
       // already-queued feedback; never step projectile damage to obtain it.

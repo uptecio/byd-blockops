@@ -114,3 +114,18 @@ test('hidden supply users can press touch Fire to exit without firing or consumi
   assert.equal(game.player.hiddenSpotId, null); assert.equal(game.weaponState.ammo, ammo); assert.equal(game.player.equipment.supplies.health, 1);
   assert.ok(game.player.equipment.supplyUse);
 });
+
+test('pending online hiding keeps raw attack touch controls available while healing', t => {
+  const { collect, game, ui, tap, document } = fixture(t), $ = id => document.getElementById(id);
+  const view = { label: 'Hide', hidden: false, pending: true, enabled: false };
+  const onHud = runInNewContext(`(${main.match(/function onHud\(current\) \{[\s\S]*?\n\}/)[0]})`, {
+    $, equipmentUI: ui, hidingUI: new HidingUI({ button: $('hide-button'), status: $('hiding-status') }),
+    renderMatchHud() {}, renderProgression() {}, input: game.input, performance: { now: () => 0 }, toastUntil: 1,
+    multiplayer: { isActive: () => true, client: { id: 'local' }, arena: { getHidingView: () => view } },
+  });
+  game.player.health = 30; collect('health'); tap('supply:health'); onHud(game);
+  assert.equal($('fire-button').disabled, false); assert.equal($('throw-button').disabled, false);
+  assert.equal($('hide-button').disabled, true); assert.equal($('hiding-status').hidden, true);
+  view.pending = false; onHud(game);
+  assert.equal($('fire-button').disabled, true); assert.equal($('throw-button').disabled, true);
+});

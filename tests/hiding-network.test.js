@@ -25,17 +25,42 @@ function fixture(t) {
   return { manager, room, a, spot, game, client, arena, sent, snapshot };
 }
 
-test('online hide requests are pending until matching private acknowledgement; snapshots alone move the actor', t => {
+test('online hide requests await acknowledgement and reconciliation; snapshots alone move the actor', t => {
   const f = fixture(t), { arena, game, client, spot, manager, a, sent, snapshot } = f;
   assert.equal(arena.requestHide({ kind: 'enter', spotId: spot.id }).ok, true);
   assert.equal(arena.getHidingView().pending, true); assert.equal(game.player.hiddenSpotId, null);
   const packet = sent.find(p => p.type === 'hide-action'); assert.equal(packet.seq, 1); assert.equal(packet.lifeId, a.lifeId);
   const result = manager.hideAction(a.id, packet);
   arena.receiveHideResult({ ...result, seq: 2 }); assert.equal(arena.getHidingView().pending, true);
-  arena.receiveHideResult(result); assert.equal(arena.getHidingView().pending, false); assert.equal(game.player.hiddenSpotId, null);
+  arena.receiveHideResult(result); assert.equal(arena.getHidingView().pending, true); assert.equal(game.player.hiddenSpotId, null);
   client.room = snapshot(); arena.sync(client.room); assert.equal(game.player.hiddenSpotId, spot.id);
+  assert.equal(arena.getHidingView().pending, false);
   assert.deepEqual(game.camera.position.toArray(), [spot.view.x, spot.view.y, spot.view.z]);
   assert.equal(arena.getHidingView().label, 'Exit'); assert.equal(game.weaponModel.visible, false);
+});
+
+for (const attack of ['fire', 'throw']) test(`${attack} after hide acknowledgement but before snapshot exposes a healing player`, t => {
+  const { arena, game, client, manager, a, spot, sent, snapshot } = fixture(t);
+  a.health = 30; a.equipment.supplies.health = 1;
+  assert.equal(manager.equipmentAction(a.id, { type: 'equipment-action', seq: 1, lifeId: a.lifeId,
+    kind: 'use-supply', supplyType: 'health' }).ok, true);
+  client.actionSeq = 1; client.room = snapshot(); arena.sync(client.room);
+  arena.requestHide({ kind: 'enter', spotId: spot.id });
+  const result = manager.hideAction(a.id, sent.find(p => p.type === 'hide-action'));
+  arena.receiveHideResult(result); sent.length = 0;
+  const ammo = a.equipment.owned.get(a.weaponId).ammo;
+  game.input[`${attack}Pressed`] = true; arena.sendTimer = .04; arena.update(.01);
+  for (const packet of sent) {
+    if (packet.type === 'input') manager.input(a.id, packet);
+    if (packet.type === 'equipment-action') manager.equipmentAction(a.id, packet);
+  }
+  assert.equal(a.hiddenSpotId, null, 'server receives raw intent and exposes before supply gating');
+  assert.equal(a.x, spot.exit.x); assert.equal(a.z, spot.exit.z);
+  assert.equal(game.player.hiddenSpotId, null, 'client never predicts concealment or movement from acknowledgement');
+  manager.tick(.01); client.room = snapshot(); arena.sync(client.room);
+  assert.equal(game.player.hiddenSpotId, null); assert.equal(arena.getHidingView().pending, false);
+  assert.ok(a.equipment.supplyUse); assert.equal(a.equipment.owned.get(a.weaponId).ammo, ammo);
+  assert.equal(a.equipment.supplies.health, 1); assert.equal(manager.roomFor(a.id).gearCombatState.projectiles.length, 0);
 });
 
 test('hide pending times out and reconciles later, while stale life/connection replies cannot affect a new life', t => {

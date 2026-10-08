@@ -302,7 +302,7 @@ function onHud(current) {
   const hiding = (multiplayer?.isActive() ? multiplayer.arena : current).getHidingView?.();
   hidingUI.render(hiding);
   // Raw attacks are also exit controls; runtime resource/supply gates still decide whether they fire.
-  if (hiding?.hidden && current.player.health > 0 && current.player.dead <= 0) {
+  if ((hiding?.hidden || hiding?.pending) && current.player.health > 0 && current.player.dead <= 0) {
     $('fire-button').disabled = false; $('throw-button').disabled = false;
   }
   renderMatchHud(current.getMatchView(), multiplayer?.isActive() ? multiplayer.client.id : 'local');

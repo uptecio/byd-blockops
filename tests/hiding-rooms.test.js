@@ -16,6 +16,23 @@ function fixture(modeId = 'ffa') {
 }
 const input = (p, extra = {}) => ({ type: 'input', lifeId: p.lifeId, x: 0, y: 0, yaw: 0, pitch: 0, fire: false, firePressed: false, ...extra });
 
+test('online consecutive grenade bursts use exposed geometry after the first impact', () => {
+  function run(steps) {
+    const { manager, room, a, b, spot, packet } = fixture();
+    a.armour = 100; manager.hideAction(a.id, packet());
+    for (const [index, fuseRemaining] of [0, .005].entries()) room.gearCombatState.projectiles.push({
+      id: `ordered-${index}`, grenadeType: 'frag', ownerId: b.id, ownerLifeId: b.lifeId,
+      x: spot.occupant.x, y: .12, z: spot.occupant.z, vx: 0, vy: 0, vz: 0, fuseRemaining,
+    });
+    for (const dt of steps) manager.tick(dt);
+    assert.equal(a.hiddenSpotId, null); assert.equal(a.x, spot.exit.x); assert.equal(a.z, spot.exit.z);
+    return { health: a.health, armour: a.armour };
+  }
+  const split = run([.001, .009]), combined = run([.01]);
+  assert.ok(split.health > 55 && split.health < 56);
+  assert.deepEqual(combined, split, 'same two explosions must not damage the old occupied proxy twice');
+});
+
 test('authoritative simultaneous entry has one winner and retries cannot apply or change another action', () => {
   const f = fixture(), { manager, room, a, b, spot, packet } = f;
   const first = manager.hideAction(a.id, packet()), other = manager.hideAction(b.id, packet(b));
