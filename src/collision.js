@@ -1,4 +1,6 @@
-// All solid footprints are centred axis-aligned boxes in the X/Z ground plane.
+import { segmentClear } from './spatial.js';
+
+// Legacy X/Z helpers remain available for ground-only callers during migration.
 export function canOccupy(x, z, radius, solids) {
   for (const solid of solids) {
     const nearX = Math.max(solid.x - solid.w / 2, Math.min(x, solid.x + solid.w / 2));
@@ -26,6 +28,7 @@ export function moveCircle(position, dx, dz, radius, solids) {
 
 export function hasLineOfSight(a, b, solids) {
   const hasHeight = a.y !== undefined || b.y !== undefined;
+  if (hasHeight) return segmentClear({ ...a, y: a.y ?? 1.6 }, { ...b, y: b.y ?? 1.6 }, { solids });
   for (const solid of solids) {
     let enter = 0;
     let leave = 1;
@@ -33,7 +36,6 @@ export function hasLineOfSight(a, b, solids) {
       [a.x, b.x, solid.x - solid.w / 2, solid.x + solid.w / 2],
       [a.z, b.z, solid.z - solid.d / 2, solid.z + solid.d / 2],
     ];
-    if (hasHeight) axes.push([a.y ?? 1.6, b.y ?? 1.6, 0, solid.height ?? Infinity]);
     let intersects = true;
     for (const [start, end, low, high] of axes) {
       const delta = end - start;
