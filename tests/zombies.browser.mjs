@@ -5,6 +5,10 @@ import { WebSocket } from 'ws';
 import { fixture, walkSolo, until, onlinePair } from './helpers/loot-browser.js';
 import { emulateLegacyWebView } from './helpers/legacy-webview.js';
 import { readProfile } from './helpers/progression-browser.js';
+import { observeGame, aimAt, followRoute } from './helpers/traversal-browser.js';
+import { MAPS } from '../src/maps.js';
+import { createNavigation } from '../src/navigation.js';
+import { createSpatialWorld, segmentClear } from '../src/spatial.js';
 
 const legacy=process.env.LEGACY_WEBVIEW==='1';
 const artifacts=process.env.ZOMBIE_ARTIFACTS || 'artifacts/zombies-review';
@@ -20,8 +24,8 @@ async function start(mapId='courtyard') {
   assert.equal(await page.locator('#fatal-screen').isHidden(),true);
   assert.notEqual(await page.locator('#timer').textContent(),'03:00');
 }
-// Read only the screenshot, then use real aim/fire controls. No actor globals,
-// teleports, health changes, grants or skipped waves exist in this test.
+// Screenshot targeting plus passive path observations for exploration. No
+// production hooks, teleports, health changes, grants or skipped waves.
 async function visibleHead() {
   const screenshot=(await page.screenshot()).toString('base64');
   return page.evaluate(async data=>{
@@ -56,7 +60,10 @@ async function aim(dx) {
   }
 }
 async function fightUntilWaveThree() {
-  const deadline=Date.now()+180000; let lastRecovery=0, lastFighting=1, frame=0;
+  // Software rendering can advance far less simulation time than wall time.
+  // Retain the two-wave assertions while allowing genuine patrol/search play.
+  const deadline=Date.now()+360000; let lastRecovery=0, lastFighting=1, frame=0;
+  const observation=await observeGame(page),map=MAPS.find(m=>m.id==='neon-city'),navigation=createNavigation(map,{radius:.34}),world=createSpatialWorld(map);
   await aim(Math.PI/.0026);
   try {
     while(Date.now()<deadline) {
@@ -106,11 +113,25 @@ async function fightUntilWaveThree() {
         if(Math.abs(angle)>.007) await aim(angle/.0026);
         await page.keyboard.down('KeyS');
         await page.keyboard.press('KeyF',{delay:70});
-      } else {await page.keyboard.up('KeyS'); await aim(220);}
+      } else {
+        await page.keyboard.up('KeyS');
+        // Rotation/short-forward loops can circle a corner indefinitely now
+        // that enemies patrol instead of tracking through walls. Observe only
+        // position, then physically follow a supported waypoint into view.
+        const state=await observation.read(),own=state.player;
+        const enemy=state.actors.filter(a=>a.id!=='local'&&a.alive).sort((a,b)=>Math.hypot(a.x-own.x,a.z-own.z)-Math.hypot(b.x-own.x,b.z-own.z))[0];
+        if(enemy) {
+          await aimAt(page,observation.actor,Math.atan2(own.x-enemy.x,own.z-enemy.z),0);
+          if(!segmentClear({...own,y:own.y+1.6},{...enemy,y:enemy.y+1.58},world)) {
+            const next=navigation.nextWaypoint(own,enemy);
+            if(next)await followRoute(page,observation.actor,[next],{map,timeout:15000});
+          }
+        }
+      }
       await page.waitForTimeout(40);
     }
     assert.fail('real control play did not reach wave three');
-  } finally { await page.keyboard.up('KeyF'); await page.keyboard.up('KeyS'); }
+  } finally { await page.keyboard.up('KeyF'); await page.keyboard.up('KeyS'); await observation.close(); }
 }
 try {
   await mkdir(artifacts,{recursive:true});

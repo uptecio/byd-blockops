@@ -6,6 +6,7 @@ import { createBody, moveCharacter } from '../src/character-movement.js';
 import { createSpatialWorld } from '../src/spatial.js';
 import { createHeadlessGame, cleanupGame, positionBot } from './helpers/game-fixture.js';
 import { createZombieBrain, stepZombieBrain } from '../src/zombie-brain.js';
+import { canPerceive } from '../src/actor-perception.js';
 
 function follow(nav, world, start, goal, speed) {
   let body = createBody(start, world), jumped = false;
@@ -76,6 +77,18 @@ test('zombie separation ignores actors on a non-overlapping floor', () => {
   const a = stepZombieBrain(createZombieBrain('walker'), { ...ctx, zombies: [] });
   const b = stepZombieBrain(createZombieBrain('walker'), { ...ctx, zombies: [{ ...actor, id: 'below', y: 0 }] });
   assert.deepEqual(a.body, b.body); assert.equal(b.attack, false);
+});
+
+test('a zombie reaching a stale sighting resumes patrol instead of waiting forever', () => {
+  const map=MAPS[0],world=createSpatialWorld(map),navigation=createNavigation(map);
+  const actor={id:'lost-walker',kind:'walker',...createBody(map.playerSpawn,world),yaw:0,pitch:0,alive:true,flashRemaining:0};
+  const player={id:'local',...map.traversal.shelters[1].point,yaw:0,pitch:0,alive:true,hiddenSpotId:null};
+  assert.equal(canPerceive(actor,player,{world,smokes:[]}),false,'current player is behind solid cover');
+  const brain=createZombieBrain('walker');brain.targetId=player.id;brain.goal={x:actor.x,y:actor.y,z:actor.z-.5};
+  const next=stepZombieBrain(brain,{actor,player,zombies:[],navigation,world,solids:world.solids,smokes:[],dt:1/30});
+  assert.equal(brain.targetId,null,'arrived last-seen target is forgotten without new sight');
+  assert.notDeepEqual(brain.goal,{x:player.x,y:player.y,z:player.z},'patrol cannot use unseen current location');
+  assert.ok(Math.hypot(next.body.x-actor.x,next.body.z-actor.z)>0,'unblocked patrol resumes');
 });
 
 for (const map of MAPS) test(`${map.id}: real walker and runner brains climb after a rooftop sighting`, () => {

@@ -1,3 +1,4 @@
+import { runtimeErrors, setRuntimeStop } from './runtime-bootstrap.js';
 import * as THREE from 'three';
 import { WEAPONS, WEAPON_CLASSES, getWeapon } from './weapons.js';
 import { createWeaponModel } from './world.js';
@@ -11,7 +12,6 @@ import { getSoloMode } from './solo-modes.js';
 import { createZombieRecords } from './zombie-records.js';
 import { renderMatchHud, renderMatchResults } from './match-ui.js';
 import { EquipmentUI } from './equipment-ui.js';
-import { installRuntimeErrors } from './runtime-errors.js';
 import { createProfileStore } from './profile-store.js';
 import { createProgressionSession } from './progression-session.js';
 import { createProgressionController } from './progression-controller.js';
@@ -24,7 +24,7 @@ let mode = 'home', settingsOrigin = 'home', game, preview, home, multiplayer, eq
 let backgroundSuspended = false, frameRequest = null;
 let progressionUI;
 const hidingUI = new HidingUI({ button: $('hide-button'), status: $('hiding-status') });
-const runtimeErrors = installRuntimeErrors(stopAfterFatal);
+setRuntimeStop(stopAfterFatal);
 
 function stopAfterFatal() {
   mode = 'fatal'; confirmation = null;

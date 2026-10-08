@@ -49,6 +49,12 @@ export function stepZombieBrain(brain, { actor, player, zombies, navigation, sol
   brain.pathRemaining = Math.max(0, brain.pathRemaining - dt);
   const visible = canPerceive(actor, player, { world, smokes });
   if (visible) { brain.goal = point(player); brain.targetId = player.id; }
+  else if (brain.targetId === player.id && brain.goal && distance(actor, brain.goal) <= .9 + 1e-8
+    && hasLineOfSight({ ...point(actor), y: actor.y + 1.6 }, { ...brain.goal, y: brain.goal.y + 1.6 }, solids)) {
+    // Search the remembered point, then patrol; an unseen player must not
+    // leave the enemy parked forever at the old melee stopping distance.
+    forgetTarget(brain, player.id);
+  }
   if (!brain.goal || (brain.targetId === null && distance(actor, brain.goal) < .25)) {
     brain.goal = navigation.patrolPoint(actor.id, actor, brain.patrolSequence++);
     brain.waypoint = null; brain.pathRemaining = 0;
