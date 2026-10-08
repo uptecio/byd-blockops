@@ -49,7 +49,8 @@ for (const id of ids) {
     for (const solid of map.solids) {
       for (const key of ['x', 'z', 'w', 'd', 'height']) assert.ok(Number.isFinite(solid[key]));
       for (const key of ['w', 'd', 'height']) assert.ok(solid[key] > 0);
-      assert.ok(map.blocks.some(block => block.x === solid.x && block.z === solid.z && block.w === solid.w && block.d === solid.d && block.h === solid.height && block.y === solid.height / 2), 'each collider has its ground-level rendered box');
+      assert.equal(solid.height, solid.maxY - solid.minY);
+      assert.ok(map.blocks.some(block => block.x === solid.x && block.z === solid.z && block.w === solid.w && block.d === solid.d && block.h === solid.height && block.y === (solid.minY + solid.maxY) / 2), 'each collider matches its explicit-height rendered box');
     }
     for (const team of ['red', 'blue']) {
       assert.ok(map.teamSpawns[team].length >= 5);

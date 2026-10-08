@@ -7,7 +7,7 @@ export function drawMapPreview(canvas, mapId) {
   context.fillStyle = map.environment.sky; context.fillRect(0, 0, 220, 120);
   context.save(); context.translate(110, 60); context.scale(scale, scale);
   context.fillStyle = map.environment.ground; context.fillRect(map.bounds.min, map.bounds.min, extent, extent);
-  for (const block of map.blocks) {
+  for (const block of [...map.blocks].sort((a, b) => a.y + a.h / 2 - b.y - b.h / 2)) {
     if (block.y + block.h / 2 <= .1 || block.w > extent || block.d > extent) continue;
     context.fillStyle = '#14202b33'; context.fillRect(block.x - block.w / 2 + .5, block.z - block.d / 2 + .6, block.w, block.d);
     context.fillStyle = block.colour; context.fillRect(block.x - block.w / 2, block.z - block.d / 2, block.w, block.d);

@@ -1,4 +1,6 @@
 // Shared, texture-free arena records are consumed by rendering and simulation.
+import { addTraversalLayout } from './map-traversal-layouts.js';
+import { validateTraversal } from './map-traversal.js';
 export const DEFAULT_MAP_ID = 'courtyard';
 
 function freeze(value) {
@@ -11,23 +13,39 @@ function freeze(value) {
 
 function builder(id, name, description, environment) {
   const blocks = [], solids = [];
+  const traversal = { roofs: [], shelters: [], links: [], patrolPoints: [] }, hideSpots = [];
   const box = (x, y, z, w, h, d, colour) => blocks.push({ x, y, z, w, h, d, colour });
-  const solid = (x, z, w, d, height, colour) => {
-    solids.push({ x, z, w, d, height });
-    box(x, height / 2, z, w, height, d, colour);
+  const prism = (shape, colour) => {
+    const record = { ...shape, height: shape.maxY - shape.minY };
+    solids.push(record);
+    blocks.push({ x: record.x, y: (record.minY + record.maxY) / 2, z: record.z, w: record.w, h: record.height, d: record.d, colour, solidId: record.id });
+  };
+  const solid = (x, z, w, d, height, colour, solidId = `${id}:solid:${solids.length}`) => {
+    prism({ id: solidId, x, z, w, d, minY: 0, maxY: height }, colour);
+  };
+  const removeSolid = solidId => {
+    const index = solids.findIndex(solid => solid.id === solidId);
+    if (index < 0) throw new Error(`Unknown authored solid ${solidId}`);
+    solids.splice(index, 1);
+    for (let i = blocks.length - 1; i >= 0; i--) if (blocks[i].solidId === solidId) blocks.splice(i, 1);
   };
   const finish = (options = {}) => {
+    addTraversalLayout(api, id);
     const teamSpawns = {
       red: [-8, -4, 0, 4, 8].map(x => ({ x, z: 19 })),
       blue: [-8, -4, 0, 4, 8].map(x => ({ x, z: -19 })),
     };
-    return freeze({
-      id, name, description, environment, bounds: { min: -22, max: 22 }, blocks, solids,
+    const definition = {
+      id, name, description, environment, bounds: { min: -22, max: 22 }, blocks, solids, traversal, hideSpots,
       playerSpawn: { x: 0, z: 19 }, spawns: [...teamSpawns.red.filter(point => point.x !== 0), ...teamSpawns.blue],
       teamSpawns, bases: { red: { x: 0, z: 18 }, blue: { x: 0, z: -18 } }, ...options,
-    });
+    };
+    const validation = validateTraversal(definition);
+    if (!validation.ok) throw new Error(`Invalid ${id} traversal: ${validation.errors.join('; ')}`);
+    return freeze(definition);
   };
-  return { box, solid, finish };
+  const api = { box, solid, prism, removeSolid, finish, traversal, hideSpots };
+  return api;
 }
 
 function courtyard() {
@@ -78,14 +96,14 @@ function courtyard() {
   building(15, -14, palette.coral, palette.coralDark, 7);
   building(-15, 14, palette.coral, palette.coralDark, 5.2);
   building(15, 14, palette.blue, palette.blueDark, 5.8);
-  const wall = (x, z, w, d, h, colour) => {
+  const wall = (x, z, w, d, h, colour, id) => {
     shadow(x, z, w + 0.5, d + 0.5);
-    solidBox(x, z, w, d, h, colour);
-    box(x, h + 0.08, z, w + 0.18, 0.16, d + 0.18, palette.cream);
+    solidBox(x, z, w, d, h, colour, id);
+    if (!id) box(x, h + 0.08, z, w + 0.18, 0.16, d + 0.18, palette.cream);
   };
   wall(-8, 0, 2.2, 6.2, 2.8, palette.blue);
   wall(8, -1, 2.2, 6.2, 2.8, palette.coral);
-  wall(-6, 7, 4, 1.1, 1.1, palette.coral);
+  wall(-6, 7, 4, 1.1, 1.1, palette.coral, 'courtyard:low-wall:south-west');
   wall(6, 7, 4, 1.1, 1.1, palette.blue);
   wall(-5, -7, 3, 1.2, 1.15, palette.cream);
   wall(5, -7, 3, 1.2, 1.15, palette.cream);
