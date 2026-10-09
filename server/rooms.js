@@ -6,7 +6,7 @@ import { getGunFinish } from '../src/cosmetics.js';
 import { emptyTally, awardTally, finishTally } from '../src/progression.js';
 import { getMode, assignTeams, createModeState, addParticipant, areEnemies, recordElimination, tickMode, removeParticipant, getModeSnapshot } from '../src/modes.js';
 import { createSpatialWorld, solidBounds } from '../src/spatial.js';
-import { createBody, moveCharacter, humanMoveSpeed } from '../src/character-movement.js';
+import { createBody, moveCharacter, humanMoveSpeed, clearClimb } from '../src/character-movement.js';
 import { WEAPONS, getWeapon, tryFire, startReload } from '../src/weapons.js';
 import { gunHitDamage } from '../src/gun-damage.js';
 import { createEquipment, equipGun, setHeldItem, selectGrenade, tickEquipment, beginMelee, deathItems, clearEquipment, equipmentDTO } from '../src/equipment.js';
@@ -177,6 +177,9 @@ export class RoomManager {
     for (const key of ['fire', 'firePressed', 'jump', 'reload', 'zoom']) {
       if (packet[key] !== undefined && typeof packet[key] !== 'boolean') throw new Error('Input buttons must be boolean.');
     }
+    // Delayed controls must not replace a new life's accepted movement/edges,
+    // nor refresh its timeout. Clients never choose an authoritative ladder.
+    if (room.phase !== 'playing' || player.health <= 0 || packet.lifeId !== player.lifeId) return;
     let x = Math.max(-1, Math.min(1, packet.x));
     let y = Math.max(-1, Math.min(1, packet.y));
     const length = Math.hypot(x, y); if (length > 1) { x /= length; y /= length; }
@@ -288,6 +291,7 @@ export class RoomManager {
     const items = deathItems(target.equipment);
     this.applyHideTransition(room, target, exitHiding(room.hidingState, target, this.hidingOptions(room)));
     target.health = 0; target.armour = 0; target.respawnRemaining = 2.5; target.input = emptyInput(); target.inputAt = -Infinity;
+    Object.assign(target, clearClimb(target));
     clearEquipment(target.equipment);
     addDeathDrops(room.lootState, { actorId: target.id, lifeId: target.lifeId, position, items, solids: room.physics.solids, world: room.physics.spatial });
     const previousKills = room.modeState.stats[killerId]?.kills;
@@ -323,6 +327,7 @@ export class RoomManager {
     for (const projectile of room.gearCombatState.projectiles) if (projectile.ownerId === id) projectile.visualOnly = true;
     const departing = room.players.get(id), position = hidingDropPosition(room.hidingState, departing, room.map);
     releaseHiding(room.hidingState, id, departing.lifeId); departing.hiddenSpotId = null;
+    Object.assign(departing, clearClimb(departing), { input: emptyInput(), inputAt: -Infinity });
     for (const event of removeParticipant(room.modeState, id, position)) this.event(room, event);
     room.players.delete(id); this.sessions.delete(id);
     if (!room.players.size) this.rooms.delete(room.code);
@@ -485,8 +490,8 @@ export class RoomManager {
     return { code: room.code, hostId: room.hostId, phase: room.phase, roundId: room.roundId, timeLeft: room.timeLeft, winnerId: room.winnerId, winnerName: room.winnerName, mapId, modeId, teamScores, winnerTeamId, flags, events, gear: { loot: lootDTO(room.lootState), ...gearCombatDTO(room.gearCombatState) },
       players: [...room.players.values()].map(player => {
         const state = player.inventory.get(player.weaponId);
-        const { id, name, x, z, y, yaw, pitch, health, armour, kills, deaths, weaponId, respawnRemaining, protectedRemaining, teamId, skinId, pendingSkinId, finishId, pendingFinishId, lifeId, flashRemaining, grounded, supportId, hiddenSpotId } = player;
-        return { id, name, x, z, y, yaw, pitch, health, armour, kills, deaths, weaponId, teamId, skinId, pendingSkinId, finishId, pendingFinishId, lifeId, flashRemaining, grounded, supportId, hiddenSpotId, heldItem: player.equipment.heldItem, ammo: state?.ammo ?? 0, reserve: state?.reserve ?? 0, reloadRemaining: state?.reloadRemaining ?? 0, respawnRemaining, protectedRemaining };
+        const { id, name, x, z, y, yaw, pitch, health, armour, kills, deaths, weaponId, respawnRemaining, protectedRemaining, teamId, skinId, pendingSkinId, finishId, pendingFinishId, lifeId, flashRemaining, grounded, supportId, hiddenSpotId, ladderId } = player;
+        return { id, name, x, z, y, yaw, pitch, health, armour, kills, deaths, weaponId, teamId, skinId, pendingSkinId, finishId, pendingFinishId, lifeId, flashRemaining, grounded, supportId, hiddenSpotId, ladderId, heldItem: player.equipment.heldItem, ammo: state?.ammo ?? 0, reserve: state?.reserve ?? 0, reloadRemaining: state?.reloadRemaining ?? 0, respawnRemaining, protectedRemaining };
       }),
     };
   }

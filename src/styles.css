@@ -91,6 +91,7 @@ body:not([data-mode=playing]) #progression-live-save-status{display:none}
 #results-progression{padding:10px 0;margin-bottom:10px;border-top:1px solid #ffffff22;border-bottom:1px solid #ffffff22;font-size:11px;line-height:1.5}
 #results-progression>strong{color:#dafa58}#results-progression p{font-size:10px;margin:4px 0}#results-progression small{font-size:9px;color:#afc2cf}
 .results-dialog{max-height:92vh;overflow-y:auto;touch-action:pan-y}
+#climb-hint{position:absolute;left:50%;bottom:24%;transform:translateX(-50%);max-width:38%;padding:7px 10px;border:1px solid #b8d9eb55;border-radius:7px;background:#101d32e8;color:#fff;font-size:12px;text-align:center;pointer-events:none;z-index:4}
 @media(max-height:700px){#home-progression{margin-top:8px;font-size:9px}.progression-rank{font-size:12px}.home-screen #skin-grid{max-height:102px}.character-stage{min-height:95px}}
 @media(max-height:560px) and (min-width:651px){.character-panel{padding:13px}.character-stage{min-height:72px}.character-loadout{padding-top:8px}.character-loadout strong{font-size:13px}.home-screen .skin-card{font-size:9px;padding:5px}.home-screen #skin-grid{max-height:96px}.home-screen .home-deploy>span{font-size:8px}.home-screen .home-options{gap:4px}.home-team{font-size:8px}.progression-total{margin-left:0}.save-status{font-size:8px}.finish-card{font-size:9px}}
 @media(max-width:650px) and (orientation:portrait){.armory-layout{flex:none}.arsenal{overflow:visible}.home-screen #skin-grid{max-height:200px}#progression-toast,#progression-live-save-status{max-width:80%}}

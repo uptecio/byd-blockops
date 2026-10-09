@@ -3,6 +3,7 @@ import { createWorld, createWeaponModel } from './world.js';
 import { hasLineOfSight } from './collision.js';
 import { solidBounds } from './spatial.js';
 import { createBody, moveCharacter, humanMoveSpeed, clearClimb } from './character-movement.js';
+import { climbHint } from './climb-presentation.js';
 import { getWeapon, createWeaponState, tryFire, startReload } from './weapons.js';
 import { gunHitDamage } from './gun-damage.js';
 import { assignTeams, createModeState, tickMode, recordElimination, getModeSnapshot, areEnemies } from './modes.js';
@@ -99,6 +100,7 @@ export class ArenaGame {
   }
   getEquipmentView() { return equipmentDTO(this.player.equipment); }
   hidingOptions() { return { map: this.world.definition, world: this.world.spatial, active: this.active && this.hasRound && !this.modeState?.ended }; }
+  getClimbView() { return climbHint({ ...this.player, y:this.player.jump }, this.world.spatial); }
   getHidingView() {
     const context = this.hidingState ? hidingContext(this.hidingState, this.actorRecord(this.player), this.hidingOptions()) : { label: null, enabled: false, spotId: null };
     return { ...context, hidden: !!this.player.hiddenSpotId, pending: false, reason: this.hidingReason ?? null };

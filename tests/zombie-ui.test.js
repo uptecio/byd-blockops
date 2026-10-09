@@ -1,5 +1,6 @@
 import test from 'node:test';
 import { HidingUI } from '../src/hiding-ui.js';
+import { renderClimbHint } from '../src/climb-presentation.js';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { runInNewContext } from 'node:vm';
@@ -62,10 +63,10 @@ test('main HUD adds recovery suppression without undoing equipment death or thro
   const callback=source.match(/function onHud\(current\) \{[\s\S]*?\n\}/)?.[0];
   assert.ok(callback,'production HUD callback is present');
   let equipmentBlocked=false,phase;
-  const onHud=runInNewContext(`(${callback})`,{$,equipmentUI:{render(){
+  const onHud=runInNewContext(`(${callback})`,{$,renderClimbHint,equipmentUI:{render(){
     $('fire-button').disabled=equipmentBlocked;$('throw-button').disabled=equipmentBlocked;
   }},hidingUI:new HidingUI({button:$('hide-button'),status:$('hiding-status')}),renderMatchHud(){},renderProgression(){},multiplayer:null,input:{zoom:false},performance:{now:()=>0},toastUntil:1});
-  const game={getMatchView:()=>phase?{survival:{phase}}:{modeId:'ffa'},
+  const game={getMatchView:()=>phase?{survival:{phase}}:{modeId:'ffa'},getClimbView:()=>({visible:false,text:''}),
     player:{health:100,dead:0},weapon:{name:'M4A1'},weaponState:{ammo:30,reserve:470,reloadRemaining:0},
     hitFlash:0,damageFlash:0,heldItem:'gun'};
   for(const [nextPhase,blocked,expected] of [[undefined,true,true],['fighting',true,true],

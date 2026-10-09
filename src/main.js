@@ -18,6 +18,7 @@ import { createProgressionController } from './progression-controller.js';
 import { createProgressionUI } from './progression-ui.js';
 import { getGunFinish } from './cosmetics.js';
 import { HidingUI } from './hiding-ui.js';
+import { renderClimbHint } from './climb-presentation.js';
 
 const $ = id => document.getElementById(id);
 let mode = 'home', settingsOrigin = 'home', game, preview, home, multiplayer, equipmentUI, audio, input, toastUntil = 0, confirmation = null;
@@ -301,6 +302,7 @@ function onHud(current) {
   $('throw-button').disabled = $('throw-button').disabled || recovery;
   const hiding = (multiplayer?.isActive() ? multiplayer.arena : current).getHidingView?.();
   hidingUI.render(hiding);
+  renderClimbHint($('climb-hint'), current.getClimbView());
   // Raw attacks are also exit controls; runtime resource/supply gates still decide whether they fire.
   if ((hiding?.hidden || hiding?.pending) && current.player.health > 0 && current.player.dead <= 0) {
     $('fire-button').disabled = false; $('throw-button').disabled = false;

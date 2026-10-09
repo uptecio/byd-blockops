@@ -38,6 +38,8 @@ test('isolated build and preview serve staged assets while live dist is preserve
   assert.deepEqual(await files(join(scratch, 'dist')), scratchBefore);
   const stageRoot = join(scratch, staged);
   assert.ok((await readFile(`${stageRoot}/game.js`, 'utf8')).length > 10000);
+  const page = await readFile(`${stageRoot}/index.html`, 'utf8');
+  assert.match(page, /v0\.9\.0 TALL ROOFS/); assert.match(page, /id="climb-hint"/);
   const server = spawn(process.execPath, [resolve('scripts/serve.mjs')], { cwd: scratch, env: { ...process.env, DIST_DIR: staged, PORT: '0' } });
   try {
     const address = await new Promise((resolve, reject) => {

@@ -7,6 +7,8 @@ import { lootItemLabel } from './loot-labels.js';
 import { isUsingSupply, cancelSupplyUse } from './supplies.js';
 import { createHidingState, hidingContext } from './hiding.js';
 import { validHideResult } from './hiding-protocol.js';
+import { clearClimb } from './character-movement.js';
+import { interpolateClimber } from './climb-presentation.js';
 
 const neutral = (yaw, pitch, lifeId) => ({ type: 'input', lifeId, x: 0, y: 0, yaw, pitch, fire: false, firePressed: false, jump: false, reload: false, zoom: false });
 const emptyPending = () => ({ firePressed: false, jump: false, reload: false });
@@ -60,6 +62,7 @@ export class OnlineArena {
     const previousEquipment = game.player.equipment, previousUse = previousEquipment?.supplyUse;
     const lifeChanged = game.player.lifeId !== own.lifeId;
     const hideChanged = (game.player.hiddenSpotId ?? null) !== own.hiddenSpotId;
+    const climbChanged = (game.player.ladderId ?? null) !== (own.ladderId ?? null);
     const roundChanged = this.room && (this.room.roundId !== room.roundId || this.room.phase !== room.phase || this.room.mapId !== room.mapId || this.room.modeId !== room.modeId);
     const useChanged = previousUse?.type !== equipment.supplyUse?.type
       || (previousUse && equipment.supplyUse && equipment.supplyUse.remaining > previousUse.remaining + 1e-8);
@@ -75,18 +78,21 @@ export class OnlineArena {
     }
     Object.assign(game.settings, { mapId: room.mapId, modeId: room.modeId, skinId: own.skinId, finishId: own.finishId });
     this.room = room;
-    this.target = { x: own.x, z: own.z, y: own.y };
+    this.target = { x: own.x, z: own.z, y: own.y, ladderId:own.ladderId, lifeId:own.lifeId };
     const respawned = this.previousRespawn > 0 && own.respawnRemaining === 0;
-    if (initial || respawned || lifeChanged || hideChanged) {
+    if (initial || respawned || lifeChanged || hideChanged || climbChanged) {
       Object.assign(game.player, { x: own.x, z: own.z, y: own.y, jump: own.y, velocityY: 0 });
+    }
+    if (initial || respawned || lifeChanged || hideChanged) {
       game.yaw = own.yaw; game.pitch = own.pitch; game.recoil = 0; game.input.clear();
     }
     if (own.health < game.player.health || own.armour < game.player.armour) game.damageFlash = .3;
     if (own.respawnRemaining > 0 && this.previousRespawn <= 0) { game.input.clear(); this.pending = emptyPending(); this.onToast('ELIMINATED · RESPAWNING'); }
     this.previousRespawn = own.respawnRemaining;
     Object.assign(game.player, { id: own.id, lifeId: own.lifeId, name: own.name, teamId: own.teamId, skinId: own.skinId, pendingSkinId: own.pendingSkinId, finishId: own.finishId, pendingFinishId: own.pendingFinishId, health: own.health, armour: own.armour, dead: own.respawnRemaining, protected: own.protectedRemaining, flashRemaining: own.flashRemaining, equipment });
-    Object.assign(game.player, { hiddenSpotId: own.hiddenSpotId, grounded: own.grounded, supportId: own.supportId });
-    if (initial || lifeChanged || hideChanged) game.placeCamera();
+    Object.assign(game.player, { hiddenSpotId: own.hiddenSpotId, grounded: own.grounded, supportId: own.supportId,
+      ladderId:own.ladderId ?? null, ladderDistance:0, ladderBlockedId:null });
+    if (initial || lifeChanged || hideChanged || climbChanged) game.placeCamera();
     game.matchView = {
       mapId: room.mapId, modeId: room.modeId, timeLeft: room.timeLeft, ended: room.phase === 'ended',
       winnerId: room.winnerId, winnerName: room.winnerName, winnerTeamId: room.winnerTeamId,
@@ -117,7 +123,8 @@ export class OnlineArena {
         model.position.set(player.x, player.y, player.z);
         remote = { model, player, name: player.name }; this.remotes.set(player.id, remote);
       }
-      if (remote.player.lifeId !== player.lifeId || remote.player.hiddenSpotId !== player.hiddenSpotId) remote.model.position.set(player.x, player.y, player.z);
+      if (remote.player.lifeId !== player.lifeId || remote.player.hiddenSpotId !== player.hiddenSpotId
+        || (remote.player.ladderId ?? null) !== (player.ladderId ?? null)) remote.model.position.set(player.x, player.y, player.z);
       remote.player = player; remote.model.visible = player.respawnRemaining <= 0 && !player.hiddenSpotId;
       remote.model.rotation.y = player.yaw + Math.PI;
     }
@@ -258,13 +265,12 @@ export class OnlineArena {
       this.sendTimer = .05;
     }
     const smoothing = 1 - Math.exp(-dt * 18);
-    game.player.x += (this.target.x - game.player.x) * smoothing;
-    game.player.z += (this.target.z - game.player.z) * smoothing;
-    game.player.jump += (this.target.y - game.player.jump) * smoothing;
-    game.player.y = game.player.jump;
+    Object.assign(game.player, interpolateClimber(game.player,this.target,smoothing,game.world.spatial));
+    game.player.jump = game.player.y;
     for (const remote of this.remotes.values()) {
       const target = remote.player;
-      remote.model.position.lerp(new THREE.Vector3(target.x, target.y, target.z), smoothing);
+      const position = interpolateClimber({ ...target, ...remote.model.position },target,smoothing,game.world.spatial);
+      remote.model.position.set(position.x,position.y,position.z);
     }
     game.recoil *= Math.exp(-dt * 13); game.placeCamera();
     // Online shots follow the transmitted pitch. Keep recoil on the weapon
@@ -308,5 +314,6 @@ export class OnlineArena {
     if (this.running) { this.game.objectives?.dispose(); this.game.objectives = null; }
     this.running = false; this.suspended = true; this.room = null; this.target = null;
     this.pendingHide = null; this.hidingReason = null; this.game.player.hiddenSpotId = null;
+    Object.assign(this.game.player, clearClimb(this.game.player));
   }
 }

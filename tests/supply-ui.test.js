@@ -1,5 +1,6 @@
 import test from 'node:test';
 import { HidingUI } from '../src/hiding-ui.js';
+import { renderClimbHint } from '../src/climb-presentation.js';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { runInNewContext } from 'node:vm';
@@ -81,7 +82,7 @@ test('full health explains rejection and changing guns cancels without spending'
 test('real HUD cannot undo supply recovery death or throw locks and renders armour', t => {
   const { collect, game, ui, tap, document } = fixture(t), $ = id => document.getElementById(id);
   const onHud = runInNewContext(`(${main.match(/function onHud\(current\) \{[\s\S]*?\n\}/)[0]})`, {
-    $, equipmentUI: ui, hidingUI: new HidingUI({ button: $('hide-button'), status: $('hiding-status') }), renderMatchHud() {}, renderProgression() {}, multiplayer:null, input:game.input, performance:{now:()=>0}, toastUntil:1,
+    $, renderClimbHint, equipmentUI: ui, hidingUI: new HidingUI({ button: $('hide-button'), status: $('hiding-status') }), renderMatchHud() {}, renderProgression() {}, multiplayer:null, input:game.input, performance:{now:()=>0}, toastUntil:1,
   });
   pickupEquipment(game.player.equipment, { kind:'grenade', grenadeType:'frag' });
   game.player.armour = 35; game.player.health = 30; collect('health'); tap('supply:health'); onHud(game);
@@ -102,7 +103,7 @@ test('real HUD cannot undo supply recovery death or throw locks and renders armo
 test('hidden supply users can press touch Fire to exit without firing or consuming extra supplies', t => {
   const { collect, game, ui, tap, document } = fixture(t), $ = id => document.getElementById(id);
   const onHud = runInNewContext(`(${main.match(/function onHud\(current\) \{[\s\S]*?\n\}/)[0]})`, {
-    $, equipmentUI: ui, hidingUI: new HidingUI({ button: $('hide-button'), status: $('hiding-status') }), renderMatchHud() {}, renderProgression() {}, multiplayer:null, input:game.input, performance:{now:()=>0}, toastUntil:1,
+    $, renderClimbHint, equipmentUI: ui, hidingUI: new HidingUI({ button: $('hide-button'), status: $('hiding-status') }), renderMatchHud() {}, renderProgression() {}, multiplayer:null, input:game.input, performance:{now:()=>0}, toastUntil:1,
   });
   const spot = game.world.definition.hideSpots[0];
   Object.assign(game.player, spot.entry, { health: 30, jump: 0 });
@@ -119,7 +120,7 @@ test('pending online hiding keeps raw attack touch controls available while heal
   const { collect, game, ui, tap, document } = fixture(t), $ = id => document.getElementById(id);
   const view = { label: 'Hide', hidden: false, pending: true, enabled: false };
   const onHud = runInNewContext(`(${main.match(/function onHud\(current\) \{[\s\S]*?\n\}/)[0]})`, {
-    $, equipmentUI: ui, hidingUI: new HidingUI({ button: $('hide-button'), status: $('hiding-status') }),
+    $, renderClimbHint, equipmentUI: ui, hidingUI: new HidingUI({ button: $('hide-button'), status: $('hiding-status') }),
     renderMatchHud() {}, renderProgression() {}, input: game.input, performance: { now: () => 0 }, toastUntil: 1,
     multiplayer: { isActive: () => true, client: { id: 'local' }, arena: { getHidingView: () => view } },
   });

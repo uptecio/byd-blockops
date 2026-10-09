@@ -30,7 +30,7 @@ test('two independent sockets create, join, start, move and transfer host', asyn
   a.send({type:'start'});
   const playing=await b.next(p=>p.type==='state'&&p.room.phase==='playing');
   const old=playing.room.players.find(p=>p.id===welcome.id).z;
-  a.send({type:'input',x:0,y:1,yaw:0,pitch:0,fire:false});
+  a.send({type:'input',lifeId:playing.room.players.find(p=>p.id===welcome.id).lifeId,x:0,y:1,yaw:0,pitch:0,fire:false});
   const moved=await b.next(p=>p.type==='state'&&p.room.players.find(p=>p.id===welcome.id)?.z<old);
   assert.ok(moved.room.timeLeft<180);
   a.send({type:'leave'});
@@ -63,10 +63,10 @@ test('server closes oversized messages and connections exceeding 100 packets a s
   assert.equal(await limited,1008);
 });
 
-test('initial protocol must be exactly version 6 and rejected settings leave the connection unjoined', async t => {
+test('initial protocol must be exactly version 7 and rejected settings leave the connection unjoined', async t => {
   const server = await startServer({ port: 0 }); t.after(() => server.close());
   const client = await connect(server.port); t.after(() => client.socket.terminate());
-  for (const protocol of [undefined, 1, 2, 3, 4, 5, 7, '6', null]) {
+  for (const protocol of [undefined, 1, 2, 3, 4, 5, 6, 8, '7', null]) {
     client.send({ type: 'create', protocol, name: 'A', weaponId: 'g17' });
     assert.equal((await client.next(p => p.type === 'error')).message, 'Update required: install the latest Block Ops APK or reload the game.');
   }
@@ -152,7 +152,7 @@ async function moveTo(client, id, x, z) {
   for (let steps = 0; steps < 200; steps++) {
     const player = state.room.players.find(p => p.id === id);
     const dx = x - player.x, dz = z - player.z, length = Math.hypot(dx, dz);
-    if (length < 0.4) { client.send({ type: 'input', x: 0, y: 0, yaw: 0, pitch: 0 }); return state; }
+    if (length < 0.4) { client.send({ type: 'input', lifeId: player.lifeId, x: 0, y: 0, yaw: 0, pitch: 0 }); return state; }
     client.send({ type: 'input', x: dx / length, y: -dz / length, yaw: 0, pitch: 0, lifeId: player.lifeId });
     state = await client.next(p => p.type === 'state' && p.room.timeLeft < state.room.timeLeft);
   }

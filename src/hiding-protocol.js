@@ -1,5 +1,6 @@
 import { validProgressionId } from './progression-protocol.js';
-import { createSpatialWorld } from './spatial.js';
+import { createSpatialWorld, canOccupyBody } from './spatial.js';
+import { projectLadder } from './access-schema.js';
 import { PROTOCOL_VERSION } from './protocol.js';
 
 const worlds = new WeakMap();
@@ -29,6 +30,12 @@ export function validPlayerSpatial(player, map) {
   if (![player.x, player.y, player.z].every(Number.isFinite) || player.y < 0 || player.y > world.maxFeetY
     || player.x < world.bounds.min || player.x > world.bounds.max || player.z < world.bounds.min || player.z > world.bounds.max
     || typeof player.grounded !== 'boolean') return false;
+  if (player.ladderId !== null) {
+    const ladder = typeof player.ladderId === 'string' && world.ladders.find(l => l.id === player.ladderId);
+    if (!ladder || !(player.health > 0) || player.respawnRemaining !== 0 || player.hiddenSpotId !== null
+      || player.grounded || player.supportId !== null || projectLadder(ladder, player).error > .0001
+      || !canOccupyBody(player, .4, 1.84, world)) return false;
+  }
   if (player.grounded) {
     const height = player.supportId === 'ground' ? 0 : world.solids.find(s => s.id === player.supportId)?.maxY;
     if (height === undefined || Math.abs(player.y - height) > 1e-6) return false;

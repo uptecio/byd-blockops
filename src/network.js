@@ -44,7 +44,7 @@ function validRoom(room) {
   const ids = new Set();
   const map = MAPS.find(map => map.id === room.mapId), spatial = protocolWorld(map);
   for (const player of room.players) {
-    if (!exactKeys(player, ['id', 'name', 'x', 'z', 'y', 'yaw', 'pitch', 'health', 'armour', 'kills', 'deaths', 'weaponId', 'teamId', 'skinId', 'pendingSkinId', 'finishId', 'pendingFinishId', 'lifeId', 'flashRemaining', 'heldItem', 'ammo', 'reserve', 'reloadRemaining', 'respawnRemaining', 'protectedRemaining', 'grounded', 'supportId', 'hiddenSpotId'])
+    if (!exactKeys(player, ['id', 'name', 'x', 'z', 'y', 'yaw', 'pitch', 'health', 'armour', 'kills', 'deaths', 'weaponId', 'teamId', 'skinId', 'pendingSkinId', 'finishId', 'pendingFinishId', 'lifeId', 'flashRemaining', 'heldItem', 'ammo', 'reserve', 'reloadRemaining', 'respawnRemaining', 'protectedRemaining', 'grounded', 'supportId', 'hiddenSpotId', 'ladderId'])
       || !count(player.lifeId) || player.lifeId === 0 || !['gun', 'knife'].includes(player.heldItem)
       || !Number.isFinite(player.flashRemaining) || player.flashRemaining < 0 || player.flashRemaining > 3) return false;
     if (!player || !validId(player.id) || ids.has(player.id) || typeof player.name !== 'string' || !weaponIds.has(player.weaponId) || !skinIds.has(player.skinId) || (player.pendingSkinId !== null && !skinIds.has(player.pendingSkinId))) return false;

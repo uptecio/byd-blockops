@@ -8,9 +8,9 @@ import { MOVEMENT } from '../src/character-movement.js';
 
 const map = MAPS[0], spot = map.hideSpots[0];
 const action = () => ({ type: 'hide-action', seq: 1, roundId: 'round-1', lifeId: 1, kind: 'enter', spotId: spot.id });
-const result = () => ({ type: 'hide-result', protocol: 6, seq: 1, roundId: 'round-1', lifeId: 1, ok: true, reason: null, hiddenSpotId: spot.id });
-test('protocol6 hide action/result enforce exact plain identities and map membership', () => {
-  assert.equal(PROTOCOL_VERSION, 6); assert.equal(validHideAction(action(), map), true); assert.equal(validHideResult(result(), map), true);
+const result = () => ({ type: 'hide-result', protocol: 7, seq: 1, roundId: 'round-1', lifeId: 1, ok: true, reason: null, hiddenSpotId: spot.id });
+test('protocol7 hide action/result enforce exact plain identities and map membership', () => {
+  assert.equal(PROTOCOL_VERSION, 7); assert.equal(validHideAction(action(), map), true); assert.equal(validHideResult(result(), map), true);
   assert.equal(validHideAction({ ...action(), kind: 'exit' }, map), true);
   for (const change of [{ seq: 0 }, { seq: NaN }, { lifeId: -1 }, { seq: 1.2 }, { seq: Number.MAX_SAFE_INTEGER + 1 }, { roundId: '' }, { roundId: null },
     { spotId: MAPS[1].hideSpots[0].id }, { x: 1 }, { y: 3 }, { health: 100 }, { kind: 'teleport' }, { type: 'input' }]) assert.equal(validHideAction({ ...action(), ...change }, map), false);
@@ -23,7 +23,7 @@ test('protocol6 hide action/result enforce exact plain identities and map member
 });
 
 test('public spatial state validates elevation support and hidden occupant identity', () => {
-  const actor = { ...spot.occupant, grounded: true, supportId: 'ground', hiddenSpotId: spot.id, health: 100, respawnRemaining: 0 };
+  const actor = { ...spot.occupant, grounded: true, supportId: 'ground', hiddenSpotId: spot.id, ladderId: null, health: 100, respawnRemaining: 0 };
   assert.equal(validPlayerSpatial(actor, map), true);
   for (const change of [{ y: NaN }, { y: Infinity }, { y: -1 }, { y: 100 }, { x: 100 }, { grounded: 1 }, { grounded: false },
     { supportId: null }, { supportId: 'fake' }, { hiddenSpotId: 'fake' }, { x: spot.entry.x, z: spot.entry.z }, { health: 0 }, { respawnRemaining: 1 }]) assert.equal(validPlayerSpatial({ ...actor, ...change }, map), false, JSON.stringify(change));

@@ -7,7 +7,10 @@ import { createHash } from 'node:crypto';
 import { resolve, join } from 'node:path';
 
 const run = promisify(execFile);
-const apk = resolve(process.env.ANDROID_APK_PATH || 'artifacts/block-ops-v0.8.0-rooftops-hiding.apk');
+// Migration checks may explicitly verify the retained baseline, never infer
+// expected metadata from the artifact being tested.
+const baseline = process.env.ANDROID_PACKAGE_BASELINE === '1';
+const apk = resolve(process.env.ANDROID_APK_PATH || (baseline ? 'artifacts/block-ops-v0.8.0-rooftops-hiding.apk' : 'artifacts/block-ops-v0.9.0-tall-roofs.apk'));
 const dist = resolve(process.env.DIST_DIR || 'dist');
 const sdk = process.env.ANDROID_SDK_ROOT || process.env.ANDROID_HOME || `${process.env.HOME}/Android/Sdk`;
 const versions = (await readdir(join(sdk, 'build-tools'))).sort((a, b) => b.localeCompare(a, undefined, { numeric: true }));
@@ -20,10 +23,10 @@ assert.ok(buildTools, 'SDK aapt and apksigner must be available');
 const { stdout: badging } = await run(join(buildTools, 'aapt'), ['dump', 'badging', apk]);
 
 // Catches accidentally packaging the previous release or changing its Android compatibility.
-test('rooftops APK metadata identifies the new test build', () => {
+test('tall-roofs APK metadata identifies the explicitly selected release', () => {
   assert.match(badging, /package: name='au\.local\.blockops'/);
-  assert.match(badging, /versionCode='10'/);
-  assert.match(badging, /versionName='0\.8\.0'/);
+  assert.match(badging, baseline ? /versionCode='10'/ : /versionCode='11'/);
+  assert.match(badging, baseline ? /versionName='0\.8\.0'/ : /versionName='0\.9\.0'/);
   assert.match(badging, /sdkVersion:'26'/);
   assert.match(badging, /targetSdkVersion:'36'/);
   assert.deepEqual([...badging.matchAll(/^uses-permission: name='([^']+)'/gm)].map(match => match[1]), ['android.permission.INTERNET']);
@@ -43,7 +46,7 @@ test('rooftops APK bundles the exact reviewed offline assets', async () => {
     assert.ok(expected.length > 0, `${name} must not be empty`);
     const { stdout } = await run('unzip', ['-p', apk, `assets/${name}`], { encoding: 'buffer', maxBuffer: 32 * 1024 * 1024 });
     assert.deepEqual(stdout, expected, `${name} bundled bytes must match the tested DIST_DIR`);
-    if(name==='index.html')assert.match(stdout.toString(),/v0\.8\.0 ROOFTOPS \+ HIDING/,'visible release label matches package');
+    if(name==='index.html')assert.match(stdout.toString(),baseline ? /v0\.8\.0 ROOFTOPS \+ HIDING/ : /v0\.9\.0 TALL ROOFS/,'visible release label matches package');
   }
 });
 
