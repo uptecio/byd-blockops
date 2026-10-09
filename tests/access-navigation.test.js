@@ -91,3 +91,23 @@ test('a new jump around a corner is not pulled back onto the previous landing', 
   assert.equal(nav.nextWaypoint(airborne,points[3]).linkId,'link1');
   assert.equal(follow({world},nav,createBody(points[0],world),points[3],1.6).body.supportId,'p2');
 });
+
+test('stairs finish a turning landing without recapturing the previous segment', () => {
+  const f=accessFixture({kind:'stair'}),stairs=f.map.traversal.stairs[0],corner={...f.goal};
+  for(const [id,x,w,y,px] of [['turn-tread',1,.4,1,.779],['turn-deck',1.8,1.2,1.2,1.8]]) {
+    f.map.solids.push({id,x,z:corner.z,w,d:1.6,minY:0,maxY:y});
+    const from=stairs.treads.at(-1),to={supportId:id,point:{x:px,y,z:corner.z},clearWidth:1.6,run:w,landing:w>=1.2};
+    stairs.treads.push(to);
+    stairs.links.push({fromSupportId:from.supportId,toSupportId:id,corridor:{minX:from.point.x-.1,maxX:px+.1,minZ:corner.z-.8,maxZ:corner.z+.8}});
+    f.map.traversal.links.push({id,from:from.point,to:to.point,kind:'stair',routeId:'stair-route',fromSupportId:from.supportId,toSupportId:id});
+  }
+  f.world=createSpatialWorld(f.map);
+  const nav=createNavigation(f.map),goal=stairs.treads.at(-1).point;
+  const leaving=createBody({...corner,x:.08},f.world);
+  assert.equal(nav.nextWaypoint(leaving,goal).linkId,'turn-tread');
+  for(const speed of [1.6,6]) {
+    const up=follow(f,nav,createBody(f.start,f.world),goal,speed);
+    assert.equal(up.intents.some(i=>i.jump),false);
+    assert.equal(follow(f,nav,up.body,f.start,speed).body.supportId,'ground');
+  }
+});

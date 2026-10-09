@@ -79,8 +79,6 @@ function courtyard() {
     shadow(x, z, width + 1, depth + 1);
     solidBox(x, z, width, depth, height, colour);
     box(x, 0.18, z, width + 0.18, 0.36, depth + 0.18, palette.cream);
-    box(x, height + 0.12, z, width + 0.4, 0.24, depth + 0.4, palette.cream);
-    box(x, height + 0.37, z, width - 0.4, 0.26, depth - 0.4, trim);
     const faceZ = z + (z > 0 ? -1 : 1) * (depth / 2 + 0.025);
     const faceX = x + (x > 0 ? -1 : 1) * (width / 2 + 0.025);
     for (const offset of [-2.2, 2.2]) {
@@ -91,8 +89,6 @@ function courtyard() {
     }
     box(x, 1.2, faceZ, 1.4, 2.4, 0.14, trim);
     box(x, 2.55, faceZ + (z > 0 ? -0.5 : 0.5), 3.2, 0.2, 1.2, palette.cream);
-    box(x + 1.5, height + 1, z + 1, 2.5, 1.4, 2.5, colour);
-    box(x + 1.5, height + 1.75, z + 1, 2.7, 0.16, 2.7, palette.cream);
   };
   building(-15, -14, palette.blue, palette.blueDark, 6.2);
   building(15, -14, palette.coral, palette.coralDark, 7);
@@ -121,7 +117,7 @@ function courtyard() {
     box(x, height + 0.035, z, size + 0.03, 0.07, size + 0.03, '#deb37d');
   };
   crate(-16, 3, 1.8, true); crate(16, -3, 1.8, true);
-  crate(-11, -6, 1.4); crate(11, 6, 1.4);
+  crate(-11, -6, 1.4); crate(11, 5.75, 1.4);
   crate(-4, -14, 1.5); crate(4, -14, 1.5);
   const tree = (x, z, height = 3.4) => {
     shadow(x, z, 3.5, 3.2);
@@ -193,14 +189,12 @@ function neonCity() {
   box(0, 0.007, 0, 44, 0.012, 8, '#252d42');
   for (const [x, z, height, colour] of [[-11, -11, 8, '#4fdcda'], [11, -11, 10, '#e86dbe'], [-11, 11, 10, '#e86dbe'], [11, 11, 8, '#4fdcda']]) {
     solid(x, z, 10, 10, height, '#30394e');
-    box(x, height + 0.1, z, 10.2, 0.2, 10.2, colour);
     const signX = x + (x < 0 ? 5.1 : -5.1);
     box(signX, 4.5, z, 0.2, 1.5, 5, colour);
     for (const y of [2.5, 6]) for (const dz of [-3, 0, 3]) box(signX, y, z + dz, 0.15, 0.7, 1.4, '#85b1e5');
   }
   for (const [x, z] of [[-18, -1], [18, 1]]) {
     solid(x, z, 3, 5, 3, '#4c5570');
-    box(x, 3.15, z, 3.2, 0.3, 5.2, '#ddbc5c');
   }
   for (const [x, z] of [[-2, 8], [2, -8]]) {
     solid(x, z, 1.4, 3, 1.3, '#657189');
@@ -264,7 +258,6 @@ function harbor() {
   for (const [x, z, w, d, colour] of [[-12, -11, 5, 10, '#c96551'], [-5, -11, 5, 10, '#648ba2'], [12, 11, 5, 10, '#c96551'], [5, 11, 5, 10, '#648ba2'], [-13, 5, 8, 4, '#d1a750'], [13, -5, 8, 4, '#d1a750']]) {
     solid(x, z, w, d, 3.4, colour);
     for (let offset = -d / 2 + 0.5; offset < d / 2; offset += 1) box(x + w / 2 - 0.04, 1.7, z + offset, 0.08, 3.2, 0.1, '#e5c99e');
-    box(x, 3.5, z, w, 0.2, d, '#d0d8d8');
   }
   for (const [x, z] of [[-18, 13], [18, -13]]) {
     solid(x, z, 2, 2, 9, '#d7b659');
@@ -283,12 +276,9 @@ function desertFort() {
   // Two wall sections leave a central gate and broad left/right passages.
   for (const x of [-9, 9]) {
     solid(x, 0, 10, 2.2, 4.5, '#be885d');
-    for (const offset of [-4, -2, 0, 2, 4]) box(x + offset, 4.9, 0, 1, 0.8, 2.2, '#ecc89a');
   }
   for (const [x, z] of [[-17, -12], [17, -12], [-17, 12], [17, 12]]) {
     solid(x, z, 5, 5, 6.2, '#bc8055');
-    box(x, 6.4, z, 5.4, 0.4, 5.4, '#edd0a2');
-    for (const dx of [-2, 2]) for (const dz of [-2, 2]) box(x + dx, 7.1, z + dz, 1, 1, 1, '#bc8055');
     box(x, 3.8, z + (z < 0 ? 2.55 : -2.55), 1, 1.5, 0.1, '#76523d');
   }
   for (const z of [-10, 10]) {

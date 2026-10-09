@@ -103,13 +103,15 @@ test('spot gun damage excludes headshot bonus, ejects on armour, and dedupes let
 });
 
 test('hidden and rooftop flag carriers drop at safe support on departure; spawn and rematch clear occupancy', () => {
-  for (const hide of [false, true]) {
+  for (const destination of ['original','annex','hidden']) {
+    const hide=destination==='hidden';
     const { manager, room, a, spot, packet } = fixture('ctf');
+    const roof=room.map.traversal.roofs.find(r=>r.source===destination);
     Object.assign(a, room.map.bases.blue); tickMode(room.modeState, .01, manager.actors(room));
     if (hide) { Object.assign(a, spot.entry); manager.hideAction(a.id, packet()); }
-    else Object.assign(a, room.map.traversal.roofs[0].point);
+    else Object.assign(a, roof.point);
     manager.leave(a.id); assert.equal(room.hidingState.occupants.size, 0);
-    const flag = room.modeState.flags.blue; assert.equal(flag.status, 'dropped'); assert.equal(flag.y, hide ? 0 : 2.2);
+    const flag = room.modeState.flags.blue; assert.equal(flag.status, 'dropped'); assert.equal(flag.y, hide ? 0 : roof.point.y);
     if (hide) assert.equal(flag.x, spot.exit.x);
   }
   const { manager, room, a, spot, packet } = fixture(); manager.hideAction(a.id, packet());

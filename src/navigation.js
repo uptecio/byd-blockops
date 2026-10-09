@@ -186,6 +186,11 @@ export function createNavigation(map, { radius = .42, height = 1.84 } = {}) {
         if (square<EPS*EPS) continue;
         const t = ((from.x - a.x) * dx + (from.z - a.z) * dz) / square;
         const sideways = Math.hypot(from.x - a.x - t * dx, from.z - a.z - t * dz);
+        // A completed stair segment must stay complete when the next leg
+        // turns sideways across its landing. Euclidean proximity alone
+        // recaptures that old segment as soon as the actor leaves the corner.
+        if (transition.kind==='stair' && Math.abs(from.y-b.y)<EPS
+          && t>=1-.04/Math.sqrt(square)) continue;
         // Launching the next jump at a corner still lies on the previous
         // segment's endpoint. Do not steer that new rising body backwards.
         if (transition.kind==='jump' && from.velocityY>0 && from.y>b.y+EPS

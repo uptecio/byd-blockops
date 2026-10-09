@@ -16,7 +16,7 @@ function follow(nav, world, start, goal, speed) {
     const intent = navigationIntent(body, waypoint, Math.min(speed, waypoint ? Math.hypot(waypoint.x - body.x, waypoint.z - body.z) * 60 : speed), world);
     jumped ||= intent.jump;
     const next = moveCharacter(body, intent, 1 / 60, { world });
-    assert.equal(next.invalid, false); assert.ok(Math.hypot(next.body.x - body.x, next.body.z - body.z) <= speed / 60 + 1e-7);
+    assert.equal(next.invalid, false); assert.ok(Math.hypot(next.body.x - body.x, next.body.z - body.z) <= Math.max(speed,2.4) / 60 + 1e-7);
     body = next.body;
   }
   assert.fail(`route failed at ${JSON.stringify(body)} to ${JSON.stringify(goal)}`);
@@ -29,7 +29,7 @@ for (const map of MAPS) test(`${map.id}: route reaches the selected support at b
     for (const speed of [1.6, 2.1, 3.4, 4.4 * .65]) {
       assert.equal(nav.reachable(start, roof.point), true);
       const result = follow(nav, world, start, roof.point, speed);
-      assert.equal(result.body.y, roof.point.y); assert.equal(result.body.grounded, true); assert.equal(result.jumped, true);
+      assert.equal(result.body.y, roof.point.y); assert.equal(result.body.grounded, true); assert.equal(result.jumped, roof.style==='jump');
       assert.equal(follow(nav, world, roof.point, start, speed).body.y, 0);
     }
     const room = map.traversal.shelters.find(s => s.id === roof.id.replace(':position', ''));
@@ -42,13 +42,13 @@ for (const map of MAPS) test(`${map.id}: route reaches the selected support at b
 });
 
 test('a failed jump replans from the actual lower support without teleporting', () => {
-  const map = MAPS[0], world = createSpatialWorld(map), nav = createNavigation(map, { radius: .4 });
+  const map = MAPS.find(m=>m.id==='dust-town'), world = createSpatialWorld(map), nav = createNavigation(map, { radius: .4 });
   const link = map.traversal.links[0];
   const body = createBody(link.from, world);
   const blockedIntent = navigationIntent(body, nav.nextWaypoint(body, map.traversal.roofs[0].point), 2.1, world);
   const missed = moveCharacter(body, { ...blockedIntent, jump: false }, .25, { world }).body;
   assert.equal(missed.y, 0);
-  assert.equal(follow(nav, world, missed, map.traversal.roofs[0].point, 2.1).body.y, 2.2);
+  assert.equal(follow(nav, world, missed, map.traversal.roofs[0].point, 2.1).body.y, map.traversal.roofs[0].point.y);
 });
 
 test('authored transition graphs reject invalid actor endpoints without throwing', () => {

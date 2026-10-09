@@ -6,8 +6,13 @@ import { auditRoofApproaches } from '../src/roof-access-validation.js';
 import { replayRoof } from './helpers/roof-route-replay.js';
 import baseline from './fixtures/pre-tall-roof-ground.json' with { type: 'json' };
 
-const families = [ ['dust-town',4,'wooden crates'], ['snow-base',7,'ice blocks'], ['jungle-ruins',4,'broken stone'], ['space-station',9,'metal platforms'] ];
-for (const [id, originals, theme] of families) {
+const families = [ ['dust-town',4,'wooden crates','jump'], ['snow-base',7,'ice blocks','jump'], ['jungle-ruins',4,'broken stone','jump'], ['space-station',9,'metal platforms','jump'],
+  ['courtyard',4,'brick stairs','stair'],['neon-city',6,'fire escape','stair'],['desert-fort',6,'stone stairs','stair'],['harbor',6,'cargo ladders','ladder'] ];
+test('all62 destinations retain46 original buildings and16 annex roofs',()=>{
+  assert.equal(MAPS.reduce((n,m)=>n+m.traversal.roofs.length,0),62);
+  assert.deepEqual(MAPS.map(m=>m.traversal.roofs.filter(r=>r.source==='original').length),[4,4,6,7,4,6,6,9]);
+});
+for (const [id, originals, theme, style] of families) {
   test(`${id}: complete original roof catalog, visible supports and unchanged ground anchors`, () => {
     const map = MAPS.find(m=>m.id===id), world = createSpatialWorld(map);
     for(const key of ['bounds','playerSpawn','spawns','teamSpawns','bases']) assert.deepEqual(map[key],baseline[id][key],`${id}: preserved ${key}`);
@@ -16,11 +21,8 @@ for (const [id, originals, theme] of families) {
     assert.equal(map.traversal.roofs.length, originals+2);
     assert.equal(map.traversal.roofs.filter(r=>r.source==='original').length, originals);
     assert.equal(map.traversal.roofs.filter(r=>r.source==='annex').length, 2);
-    assert.deepEqual(map.bounds,{min:-22,max:22}); assert.deepEqual(map.playerSpawn,{x:0,z:19});
-    assert.deepEqual(map.bases,{red:{x:0,z:18},blue:{x:0,z:-18}});
-    for (const [team,z] of [['red',19],['blue',-19]]) assert.deepEqual(map.teamSpawns[team],[-8,-4,0,4,8].map(x=>({x,z})));
     for (const roof of map.traversal.roofs) {
-      assert.equal(roof.style,'jump'); assert.equal(roof.theme,theme);
+      assert.equal(roof.style,style); assert.equal(roof.theme,theme);
       assert.ok(roof.source==='annex' || roof.id.startsWith(`${id}:original:`));
       assert.equal(supportBelow(roof.point,.42,world)?.id,roof.supportId);
       assert.equal(canOccupyBody(roof.point,.42,1.84,world),true);
@@ -35,7 +37,10 @@ for (const [id, originals, theme] of families) {
       }
       const links=map.traversal.links.filter(l=>l.routeId===roof.routeId);
       assert.equal(links.at(-1).id,roof.entryLinkId);
-      for (const link of links) { assert.ok(link.to.y-link.from.y<=.55+1e-8); assert.ok(link.width>=1.6 && link.depth>=1.2); }
+      for (const link of links) {
+        if(style!=='ladder') assert.ok(link.to.y-link.from.y<=(style==='stair'?.25:.55)+1e-8);
+        assert.equal(link.kind,style); assert.ok(link.width>=1.6 && link.depth>=(style==='stair'?.35:1.2));
+      }
       for(let i=0;i<links.length-1;i++) {
         const a=links[i].from,b=links[i].to,c=links[i+1].to,dx=b.x-a.x,dz=b.z-a.z,length=Math.hypot(dx,dz);
         if(Math.abs(dx*(c.z-b.z)-dz*(c.x-b.x))>1e-6) continue;
@@ -46,7 +51,7 @@ for (const [id, originals, theme] of families) {
     const started=performance.now(),audit=auditRoofApproaches(map);
     assert.equal(audit.ok,true); assert.ok(performance.now()-started<5000,'bounded authoring audit');
   });
-  test(`${id}: every route physically climbs and descends, still requiring Jump`, t => {
+  test(`${id}: every route physically climbs and descends with ${style} controls`, t => {
     const map=MAPS.find(m=>m.id===id);
     assert.equal(map.traversal.roofs.length, originals+2);
     for (const roof of map.traversal.roofs) for (const radius of [.34,.4,.42]) for (const speed of [1.6,2.1,3.4,2.86,5.3,6]) {
@@ -55,11 +60,15 @@ for (const [id, originals, theme] of families) {
         assert.ok(result.seconds<200,`${roof.id}/${radius}/${speed}/${direction}: stalled ${JSON.stringify(result.body)}`);
         assert.equal(result.body.supportId,direction==='up'?roof.supportId:'ground');
         assert.equal(result.trace.every(s=>!s.invalid),true);
-        if (direction==='up') assert.equal(result.intents.some(i=>i.jump),true);
+        if (direction==='up') assert.equal(result.intents.some(i=>i.jump),style==='jump');
+        if(style==='ladder') {
+          assert.equal(result.trace.some(s=>s.body.ladderId!==null),true);
+          assert.equal(result.body.ladderId,null);
+        }
         assert.ok(result.stats.nodes<=40000 && result.stats.cachedFields<=32);
       }
     }
-    for (const roof of map.traversal.roofs) assert.notEqual(replayRoof(map,roof,{speed:6,jump:false}).body.supportId,roof.supportId);
+    if(style==='jump') for (const roof of map.traversal.roofs) assert.notEqual(replayRoof(map,roof,{speed:6,jump:false}).body.supportId,roof.supportId);
     t.diagnostic(`${map.solids.length} solids / ${map.traversal.links.length} links`);
   });
 }

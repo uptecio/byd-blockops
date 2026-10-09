@@ -106,7 +106,9 @@ export function collectLoot(state, actors, { solids, world }) {
     if (record.availableRemaining > 0) continue;
     const candidates = actors.filter(actor => eligible(actor, record, solids, world));
     candidates.sort((a, b) => {
-      const distance = actor => (actor.x - record.x) ** 2 + (actor.z - record.z) ** 2;
+      // Quantize negligible floating-point noise before the stable ID tie-break.
+      // Unlike an epsilon comparator, these integer keys stay transitive.
+      const distance = actor => Math.round(((actor.x - record.x) ** 2 + (actor.z - record.z) ** 2) * 1e10);
       return distance(a) - distance(b) || (String(a.id) < String(b.id) ? -1 : String(a.id) > String(b.id) ? 1 : 0);
     });
     const winner = candidates[0];

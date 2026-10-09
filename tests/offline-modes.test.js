@@ -6,6 +6,7 @@ import { canOccupy, moveCircle } from '../src/collision.js';
 import { ObjectiveView } from '../src/objectives.js';
 import { tickMode } from '../src/modes.js';
 import {createHeadlessGame, cleanupGame, positionBot } from './helpers/game-fixture.js';
+import { canPerceive } from '../src/actor-perception.js';
 
 test('all 24 combinations start cleanly on one reused production game', () => {
   const game = createHeadlessGame();
@@ -219,7 +220,10 @@ test('bots pursue actual human-radius wall contact reached by live player contro
     game.input.clear();
     assert.ok(canOccupy(game.player.x, game.player.z, .34, game.world.solids));
     assert.equal(canOccupy(game.player.x, game.player.z, .4, game.world.solids), false);
-    const bot = game.bots[0]; bot.respawn = 0; positionBot(bot, -10, 0, 0);
+    // Begin with an actual sighting around the end of the wall. An unseen
+    // enemy's random patrol need not discover this position within12seconds.
+    const bot = game.bots[0]; bot.respawn = 0; positionBot(bot, -7, 0, 4);
+    assert.equal(canPerceive(game.getActors()[1],game.getActors()[0],{world:game.world.spatial}),true);
     game.botTuning = { ...game.botTuning, accuracy: 0 };
     for (let i = 0; i < 240; i++) {
       game.update(.05);

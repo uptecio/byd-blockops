@@ -118,6 +118,15 @@ test('contested winners ignore array order and equal distances use stable actor 
   }
 });
 
+test('translated pickup ties survive floating point roundoff without hiding a nearer actor', () => {
+  for(const x of [-16,-8,0,8,16]) for(const reversed of [false,true]) for(const nearer of [false,true]) {
+    const state=create(),item=gunItem(state); item.x=x; state.slots.find(s=>s.id===item.id).x=x;
+    const actors=[createGearActor('a',{...item,x:x+.2}),createGearActor('b',{...item,x:x-(nearer?.1999999:.2)})];
+    const events=collectAt(state,item,reversed?actors.reverse():actors);
+    assert.equal(events.find(e=>e.itemId===item.id).playerId,nearer?'b':'a',`${x}/${reversed}/${nearer}`);
+  }
+});
+
 test('pickup radius and vertical feet separation include the exact limits', () => {
   for (const [distance, height, eligible] of [[1.2, .75, true], [1.20001, 0, false], [0, .75001, false], [0, -.75, true]]) {
     const state = create(), item = gunItem(state);

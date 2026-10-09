@@ -8,6 +8,8 @@ import baseline from './fixtures/pre-tall-roof-ground.json' with { type: 'json' 
 // Explicit, measured relocations around the tall-roof entrances. Every other
 // pickup must retain its pre-feature coordinates and stable identity.
 const relocations={
+  courtyard:{'gun:1':[-8,20],'gun:2':[8,-20],'gun:4':[-8,-20]},
+  'neon-city':{'gun:1':[-10,19],'gun:2':[10,-19]},
   'dust-town':{'frag:1':[-4.5,7],'frag:2':[4.5,-7]},
   'snow-base':{'gun:5':[-20,-4],'gun:6':[20,4],'gun:7':[-2,8],'gun:8':[2,-8],
     'knife:1':[-9.5,0],'knife:2':[9.5,0],'flash:1':[-20.5,0],'flash:2':[20.5,0]},
@@ -93,7 +95,10 @@ for (const map of MAPS) {
       const red = distances('red'), blue = distances('blue');
       assert.ok(red.every((distance, i) => Math.abs(distance - blue[i]) <= 4), JSON.stringify({ type, red, blue }));
     }
-    assert.deepEqual(slots.filter(p => p.kind === 'gun').map(p => [p.x,p.z]), map.id==='snow-base'
+    assert.deepEqual(slots.filter(p => p.kind === 'gun').map(p => [p.x,p.z]), map.id==='courtyard'
+      ? [[-8,20],[8,-20],[10,18],[-8,-20],[-18,-4],[18,4],[-2,6],[2,-6]]
+      : map.id==='neon-city' ? [[-10,19],[10,-19],[10,18],[-10,-18],[-18,-4],[18,4],[-2,6],[2,-6]]
+      : map.id==='snow-base'
       ? [[-10,18],[10,-18],[10,18],[-10,-18],[-20,-4],[20,4],[-2,8],[2,-8]]
       : map.id==='space-station' ? [[-10,18],[10,-18],[10,18],[-10,-18],[-18,-2],[18,4],[-2,6],[2,-6]]
       : [[-10,18],[10,-18],[10,18],[-10,-18],[-18,-4],[18,4],[-2,6],[2,-6]]);

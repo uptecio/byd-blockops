@@ -6,15 +6,18 @@ import { createSpatialWorld, canOccupyBody, supportBelow, segmentClear } from '.
 import { createBody, moveCharacter } from '../src/character-movement.js';
 import { createNavigation } from '../src/navigation.js';
 import { LOOT_SPAWNS } from '../src/loot-spawns.js';
+import { ladderLength } from '../src/access-schema.js';
 
 function replay(link, speed, world) {
   let body = createBody(link.from, world, { radius: .42 });
-  for (let n = 0; n < 360; n++) {
+  const ladder=world.ladders.find(l=>l.id===link.ladderId);
+  const ticks=ladder?Math.ceil(ladderLength(ladder)/2.4*120)+120:360;
+  for (let n = 0; n < ticks; n++) {
     const dx = link.to.x - body.x, dz = link.to.z - body.z, distance = Math.hypot(dx, dz);
     if (distance < .02 && Math.abs(body.y - link.to.y) < 1e-8 && body.grounded) return true;
     const velocity = Math.min(speed, distance * 120);
     const result = moveCharacter(body, { vx: distance ? dx / distance * velocity : 0,
-      vz: distance ? dz / distance * velocity : 0, jump: n === 0 && link.kind === 'jump' }, 1 / 120, { world, radius: .42 });
+      vz: distance ? dz / distance * velocity : 0, jump: n === 0 && link.kind === 'jump',climb:ladder?1:0 }, 1 / 120, { world, radius: .42 });
     assert.equal(result.invalid, false); body = result.body;
   }
   return false;
@@ -57,7 +60,7 @@ for (const map of MAPS) {
 }
 
 test('invalid route risers, narrow landings and corrupt hide anchors are rejected', () => {
-  const base = MAPS[0];
+  const base = MAPS.find(m=>m.id==='dust-town');
   for (const mutate of [
     map => { map.solids.push({ ...map.solids[0] }); },
     map => { map.traversal.links.find(l => l.kind === 'jump').to.y += 2; },
@@ -84,9 +87,9 @@ test('a marked single-entrance roof rejects an extra normal-jump staircase', () 
 });
 
 test('single-entrance validation catches an undeclared physical bypass staircase', () => {
-  const map = structuredClone(MAPS[0]), roof = map.traversal.roofs[0];
-  // New approach climbs south to the north annex, without declaring any links.
-  for (let i = 1; i <= 4; i++) map.solids.push({ id: `bypass:${i}`, x: 20, z: 3.8 - i * 1.4,
+  const map = structuredClone(MAPS[0]), roof = map.traversal.roofs.find(r=>r.id==='courtyard:annex:2:position');
+  // Independent west approach reaches the guard top, opposite its east stairs.
+  for (let i = 1; i <= 6; i++) map.solids.push({ id: `bypass:${i}`, x: -24.8+i*1.4, z: 6.5,
     w: 1.6, d: 1.4, minY: 0, maxY: i * .44, height: i * .44 });
   assert.equal(validateTraversal(map).ok, false, roof.id);
 });
