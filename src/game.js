@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import { createWorld, createWeaponModel } from './world.js';
 import { hasLineOfSight } from './collision.js';
 import { solidBounds } from './spatial.js';
-import { createBody, moveCharacter, humanMoveSpeed } from './character-movement.js';
+import { createBody, moveCharacter, humanMoveSpeed, clearClimb } from './character-movement.js';
 import { getWeapon, createWeaponState, tryFire, startReload } from './weapons.js';
 import { gunHitDamage } from './gun-damage.js';
 import { assignTeams, createModeState, tickMode, recordElimination, getModeSnapshot, areEnemies } from './modes.js';
@@ -170,6 +170,7 @@ export class ArenaGame {
   }
   loadMap(mapId) {
     const map = getMap(mapId);
+    Object.assign(this.player,clearClimb(this.player)); this.input.clear();
     for (const bot of this.bots) disposeModel(bot.model);
     this.bots = []; this.clearEffects(); this.objectives?.dispose();
     this.gearView?.dispose(); this.gearView = new GearView(THREE, this.scene);
@@ -311,6 +312,8 @@ export class ArenaGame {
     for (const actor of [this.player, ...this.bots]) if (actor.equipment) cancelSupplyUse(actor.equipment);
     this.clearSupplyCombat();
     this.pause(); this.hasRound = false; this.gearView?.clear();
+    Object.assign(this.player,clearClimb(this.player));
+    for(const bot of this.bots) if(bot.body) Object.assign(bot.body,clearClimb(bot.body));
     this.hidingState = createHidingState(); this.player.hiddenSpotId = null;
     if (this.zombieRuntime) {
       this.zombieRuntime.record(); this.zombieRuntime.dispose(); this.zombieRuntime = null;
@@ -550,7 +553,8 @@ export class ArenaGame {
         const remembered = bot.lastKnownTargets.get(enemy.id);
         if (!enemy.alive || (remembered && remembered.lifeId !== enemy.lifeId)) bot.lastKnownTargets.delete(enemy.id);
         if (canPerceive(actor, enemy, { world: this.world.spatial, smokes: this.gearCombatState.smokes }))
-          bot.lastKnownTargets.set(enemy.id, { x: enemy.x, y: enemy.y, z: enemy.z, lifeId: enemy.lifeId });
+          bot.lastKnownTargets.set(enemy.id, { x: enemy.x, y: enemy.y, z: enemy.z, lifeId: enemy.lifeId,
+            ...(enemy.ladderId?{ladderId:enemy.ladderId}:{}) });
       }
       const oldTarget = actors.find(other => other.id === bot.intent?.targetId);
       const concealed = bot.flashRemaining > 0 || (oldTarget && smokeBlocksSight(eye(actor), eye(oldTarget), this.gearCombatState.smokes));
@@ -560,13 +564,13 @@ export class ArenaGame {
         bot.intentTimer = .25; bot.pathTimer = 0;
       }
       if (!bot.intent.goal) {
-        if (!bot.patrolGoal || Math.hypot(actor.x - bot.patrolGoal.x, actor.z - bot.patrolGoal.z) < .25) {
+        if (!bot.patrolGoal || Math.hypot(actor.x - bot.patrolGoal.x, actor.y-(bot.patrolGoal.y??0), actor.z - bot.patrolGoal.z) < .25) {
           bot.patrolGoal = this.navigation.patrolPoint(bot.id, actor, bot.patrolSequence ?? 0);
           bot.patrolSequence = (bot.patrolSequence ?? 0) + 1;
         }
         bot.intent.goal = bot.patrolGoal;
       }
-      if (bot.pathTimer <= 0 || (bot.waypoint && Math.hypot(bot.waypoint.x - actor.x, bot.waypoint.z - actor.z) < .06)) {
+      if (bot.pathTimer <= 0 || (bot.waypoint && Math.hypot(bot.waypoint.x - actor.x, bot.waypoint.y-actor.y, bot.waypoint.z - actor.z) < .06)) {
         const goal = bot.intent.goal;
         const human = actors[0];
         const humanConcealed = !canPerceive(actor, human, { world: this.world.spatial, smokes: this.gearCombatState.smokes });
@@ -635,6 +639,10 @@ export class ArenaGame {
     const applied = damageVitals(victim, damage);
     if (!applied.ok || applied.healthDamage + applied.armourDamage <= 0) return false;
     this.applyHidingTransition(victim, exitHiding(this.hidingState, before, { ...this.hidingOptions(), reason: 'damage' }));
+    if(victim.health===0) {
+      const body=victim.id===this.player.id?victim:victim.body;
+      Object.assign(body,clearClimb(body));
+    }
     const record = actors?.find(actor => actor.id === victim.id);
     if (record) Object.assign(record, this.actorRecord(victim), { alive: victim.health > 0 });
     if (victim.id === 'local') this.damageFlash = .3;

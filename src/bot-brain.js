@@ -4,7 +4,7 @@ import { hasOwn } from './has-own.js';
 import { isUsingSupply } from './supplies.js';
 import { canPerceive } from './actor-perception.js';
 
-const point = ({ x, y = 0, z }) => ({ x, y, z });
+const point = ({ x, y = 0, z, ladderId }) => ({ x, y, z, ...(ladderId?{ladderId}:{}) });
 const distance = (a, b) => Math.hypot(a.x - b.x, (a.y ?? 0) - (b.y ?? 0), a.z - b.z);
 const validPoint = actor => actor && Number.isFinite(actor.x) && Number.isFinite(actor.z);
 const stableNearest = (origin, actors) => actors.slice().sort((a, b) => distance(origin, a) - distance(origin, b)

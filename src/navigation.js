@@ -131,6 +131,10 @@ export function createNavigation(map, { radius = .42, height = 1.84 } = {}) {
   }
   const waypoint = (p, kind = 'walk', linkId = null) => ({ ...p, kind, linkId,...(kind==='ladder'?ladderEdges.get(linkId):{}) });
   const climbWaypoint=(ladder,at)=>({...sampleLadder(ladder,at),kind:'ladder',linkId:null,ladderId:ladder.id,ladderDistance:at});
+  const atEntry=(body,entry)=>body.grounded!==false && Math.abs(body.y-entry.point.y)<EPS
+    && body.x>=entry.zone.minX-EPS && body.x<=entry.zone.maxX+EPS
+    && body.z>=entry.zone.minZ-EPS && body.z<=entry.zone.maxZ+EPS
+    && supported(body) && supportBelow(body,radius,world)?.id===entry.supportId;
   const attached=p=>p?.ladderId?ladderNodes.get(p.ladderId):null;
   function cellsFor(p) {
     if (p?.ladderId) { const entry=attached(p); return entry?[entry.bottom,entry.top]:[]; }
@@ -155,8 +159,9 @@ export function createNavigation(map, { radius = .42, height = 1.84 } = {}) {
       if (from.ladderId && from.ladderId===goal.ladderId) return climbWaypoint(attached(from).ladder,projectLadder(attached(from).ladder,goal).distance);
       if (goal.ladderId) {
         const landing=goalLanding(from,goal); if (!landing) return null;
-        if (!from.ladderId && from.grounded!==false && Math.hypot(from.x-landing.x,from.y-landing.y,from.z-landing.z)<.06)
-          return climbWaypoint(attached(goal).ladder,projectLadder(attached(goal).ladder,goal).distance);
+        const {ladder,bottom}=attached(goal),entry=landing===nodes[bottom].point?ladder.bottom:ladder.top;
+        if (!from.ladderId && atEntry(from,entry))
+          return climbWaypoint(ladder,projectLadder(ladder,goal).distance);
         return api.nextWaypoint(from,landing);
       }
       const end = cellFor(goal);
@@ -172,6 +177,12 @@ export function createNavigation(map, { radius = .42, height = 1.84 } = {}) {
           best=d; score=field[cell]; travel=Math.abs(d-at);
         }
         return best===null?null:climbWaypoint(entry.ladder,best);
+      }
+      // The mover aligns continuously inside an authored entry zone. Requiring
+      // an exact center here makes a separated crowd barricade a shared ladder.
+      for(const {ladder,bottom,top} of ladderNodes.values()) {
+        if(field[top]>=0 && field[top]<field[bottom] && atEntry(from,ladder.bottom)) return climbWaypoint(ladder,ladderLength(ladder));
+        if(field[bottom]>=0 && field[bottom]<field[top] && atEntry(from,ladder.top)) return climbWaypoint(ladder,0);
       }
       // A route transition must finish at its landing, not be snapped back to
       // the last ground cell while its feet are in the air.

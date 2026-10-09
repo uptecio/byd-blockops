@@ -49,7 +49,7 @@ export function stepZombieBrain(brain, { actor, player, zombies, navigation, sol
   brain.attackRemaining = Math.max(0, brain.attackRemaining - dt);
   brain.pathRemaining = Math.max(0, brain.pathRemaining - dt);
   const visible = canPerceive(actor, player, { world, smokes });
-  if (visible) { brain.goal = point(player); brain.targetId = player.id; }
+  if (visible) { brain.goal = {...point(player),...(player.ladderId?{ladderId:player.ladderId}:{})}; brain.targetId = player.id; }
   else if (brain.targetId === player.id && brain.goal && distance(actor, brain.goal) <= .9 + 1e-8
     && hasLineOfSight({ ...point(actor), y: actor.y + 1.6 }, { ...brain.goal, y: brain.goal.y + 1.6 }, solids)) {
     // Search the remembered point, then patrol; an unseen player must not
@@ -66,13 +66,25 @@ export function stepZombieBrain(brain, { actor, player, zombies, navigation, sol
   }
   let intent = { vx: 0, vz: 0, jump: false };
   const goal = brain.goal;
+  // Complete the path/landing before applying the usual ground melee stop.
+  // A nearby target must not strand a climber just short of the roof exit.
+  const climbingGoal=!!body.ladderId || !!goal?.ladderId;
   const clearGoal = goal && hasLineOfSight({ ...point(actor), y: actor.y + 1.6 }, { ...goal, y: goal.y + 1.6 }, solids);
-  if (actor.flashRemaining <= 0 && brain.waypoint && (!clearGoal || distance(actor, goal) > .9 || brain.targetId === null)) {
+  if (actor.flashRemaining <= 0 && brain.waypoint && (climbingGoal || !clearGoal || distance(actor, goal) > .9 || brain.targetId === null)) {
     const toWaypoint = Math.hypot(brain.waypoint.x - actor.x, brain.waypoint.z - actor.z);
-    const speed = Math.min(config.speed, toWaypoint / dt, clearGoal && brain.targetId !== null ? Math.max(0, distance(actor, goal) - .9) / dt : Infinity);
+    const speed = Math.min(config.speed, toWaypoint / dt, !climbingGoal && clearGoal && brain.targetId !== null ? Math.max(0, distance(actor, goal) - .9) / dt : Infinity);
     intent = navigationIntent(body, brain.waypoint, speed, world);
   }
-  if (actor.flashRemaining <= 0) {
+  // Soft crowd steering must not oppose the mover's continuous alignment
+  // inside a valid entry zone. This does not reserve the ladder for one actor.
+  const entering = Math.abs(intent.climb ?? 0)>=.25 && body.grounded && world.ladders?.some(ladder=>{
+    if(ladder.id!==brain.waypoint?.ladderId || ladder.id===body.ladderBlockedId) return false;
+    const end=intent.climb>0?ladder.bottom:ladder.top;
+    return body.supportId===end.supportId && Math.abs(body.y-end.point.y)<1e-8
+      && body.x>=end.zone.minX-1e-8 && body.x<=end.zone.maxX+1e-8
+      && body.z>=end.zone.minZ-1e-8 && body.z<=end.zone.maxZ+1e-8;
+  });
+  if (actor.flashRemaining <= 0 && !body.ladderId && !entering) {
     let pushX = 0, pushZ = 0;
     for (const other of zombies) {
       if (other.id === actor.id || !other.alive || actor.y >= other.y + 1.84 || other.y >= actor.y + 1.84) continue;

@@ -111,3 +111,14 @@ test('stairs finish a turning landing without recapturing the previous segment',
     assert.equal(follow(f,nav,up.body,f.start,speed).body.supportId,'ground');
   }
 });
+
+test('navigation engages throughout the authored ladder entry zone, not only its center',()=>{
+  const f=accessFixture(),nav=createNavigation(f.map),middle={x:0,y:1.2,z:-1.5,ladderId:f.ladderId};
+  for(const goal of [middle,f.goal]) {
+    const body=createBody({...f.start,x:.2},f.world);
+    assert.equal(nav.nextWaypoint(body,goal).kind,'ladder');
+    const next=follow(f,nav,body,goal,2.1);
+    assert.ok(Math.abs(next.body.y-goal.y)<.01);
+    assert.equal(nav.nextWaypoint(createBody({...f.start,x:.31},f.world),goal).kind,'walk');
+  }
+});
