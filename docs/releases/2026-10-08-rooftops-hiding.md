@@ -1,6 +1,6 @@
-# Rooftops and hiding — candidate verification
+# Rooftops and hiding — verified release
 
-Status: **reviewed candidate verified; awaiting fresh public deployment approval**. Version 0.8.0 / Android code 10 / protocol 6. The public 0.7 release and previous APK have not been replaced. Parked-BYD hardware acceptance is still required.
+Status: **public release deployed and verified** on 2026-10-09. Version 0.8.0 / Android code 10 / protocol 6. Browser and multiplayer use the same existing origin; the previous source/assets/APK remain available for rollback. Parked-BYD hardware acceptance is still required.
 
 ## Scope
 
@@ -61,7 +61,7 @@ Only the copied disposable AVD`BlockOpsRooftopsTask` (`emulator-5586`,1280×720)
 - `native-progression-online2`: genuine private 10 XP, both peers' rendered skin/gun palettes, pending appearance through an open Loadout menu and respawn, and force-stop retention pass. The prior setup overshot a waypoint through TLS; bounded real-key pulses with neutral snapshot settling fixed that test controller.
 - `native-full-final`: supplemental single-run all-eight-map climb/Hide/Fire/world, witnessed Zombie forgetting, concealed healing/armour, physical rooftop pursuit and lifecycle/full-storage/install-r acceptance passes with exit 0. This resumes code 10; the separate genuine 9→10 upgrade evidence remains `native-offline`.
 
-## Pending release gates
+## Independent review and rebuilt-byte verification
 
 The independent whole-branch review found two Important defects, now fixed in one TDD pass (`3142c1a`): acknowledgement-before-snapshot raw Fire/Throw while healing, including touch control availability; and multiple same-frame grenade bursts using stale concealed geometry after ejection. Six targeted assertions failed before and pass after; final full suite 960/960 and package 3/3 pass (`final-handoff-unit.log`, `final-handoff-package.log`). Consecutive-burst tests now leave 55.45771566246195 health in both one-frame and split-frame simulations, instead of incorrect 20 health in one frame. Rebuilt browser/native acceptance passes.
 
@@ -73,22 +73,38 @@ Post-review rebuilt-byte results:
 - `review-touch`, `review-supplies`, `review-webview`, `review-modern-layout`, `review-legacy-layout`: gameplay, legacy startup, seven diagnostics and both six-profile hiding/touch layout runs; chain exit 0. Supplemental supply source-renderer layout checks remain separately labelled.
 - `review-modern-online`: FFA passed, then TDM test-controller entrance alignment timed out under concurrent software rendering; failed evidence retained. Unchanged lower-load `review-modern-online2` passes all three modes, rejoin/rematch and explicit owned cleanup with exit 0.
 
-Owned native staging server/tunnel and disposable emulator were stopped after their identity and empty-room checks. AVD userdata and all artifacts are retained. The public server/tunnel remain untouched.
+Owned native staging server/tunnel and disposable emulator were stopped after their identity and empty-room checks. AVD userdata and all artifacts are retained. At that candidate-verification stage the public server/tunnel remained untouched; the subsequent approved deployment is recorded below.
 
-The candidate APK is `artifacts/block-ops-v0.8.0-rooftops-hiding.apk`. Solo is ready for testing; online requires the separately approved protocol-6 server cutover. Browser refresh/older-client APK update will be required after that cutover. Saved server overrides and the existing browser origin must be preserved; do not clear app/browser data. Frozen deployable source is `artifacts/rooftops-hiding-zQylUE/release-source` from commit `3142c1a`, with the exact reviewed assets. The latest read-only public health check still showed zero rooms, but this must be checked again immediately before an approved restart.
+The delivered APK is `artifacts/block-ops-v0.8.0-rooftops-hiding.apk`. Solo and the approved protocol-6 online server are available. Refresh existing browser tabs and update older APKs before joining online. Saved server overrides and the existing browser origin are preserved; do not clear app/browser data. Frozen deployed source is `artifacts/rooftops-hiding-zQylUE/release-source` from commit `3142c1a`, with the exact reviewed assets.
 
 One Minor issue is deferred: at a narrow roof-edge band, an online body can still stand on its .4-radius support while the .34-radius dropped-item anchor falls to the ground below. Loot/flags remain recoverable; an improvement should preserve the grounded support and choose a valid nearby rooftop anchor. No physical BYD acceptance is claimed from software-renderer or emulator results.
 
-Public cutover requires a freshly approved empty-room maintenance window. Saved browser data is origin-specific; APK server preferences override the build default. Preserve the existing origin and previous release for rollback. Parked-BYD map loading, jumping, hiding and touch responsiveness remain a user hardware check.
+Saved browser data is origin-specific; APK server preferences override the build default. The existing origin and previous release are preserved. Parked-BYD map loading, jumping, hiding and touch responsiveness remain a user hardware check, requested at handoff. No physical BYD performance claim is made.
+
+## Approved public delivery — 2026-10-09
+
+The user's fresh **yes** approved updating the live browser/multiplayer server when rooms were empty. Immediately before cutover, the guarded script rechecked PID/cwd/command/environment and local health `rooms: 0`. No room was evicted. At **01:26:27 UTC / 09:26:27 Australia/Perth**, only old Node PID620214 was stopped; the existing tunnel PID21648 and public origin were retained. Replacement Node PID1226232 serves frozen `release-source` on `127.0.0.1:4185`. `cutover-old-identity.json`, `live-identity.json` and `cutover.log` record both identities. Rollback was not needed; verified old source with its dependencies is also extracted under `rollback-source`.
+
+- Browser: [Block Ops](https://myth-referring-tablets-venture.trycloudflare.com).
+- APK: `artifacts/block-ops-v0.8.0-rooftops-hiding.apk`; same-signed install over the existing app, without uninstall/data clearing.
+- Fresh regression before deployment: **960/960** (`deploy-unit.log`).
+- Fresh APK verification: **3/3**, retained signer/version and exact bundled assets (`deploy-package-check.log`).
+- Read-only independent artifact check: all four files in both reviewed-dist and frozen source match the manifest; all 67 runtime source files and both package manifests equal commit3142c1a.
+- Actual public two-browser CTF room, using real UI/touch/key inputs: protocol6 welcomes; physical rooftop landing/elevation received by the other peer; occupied prop hides avatar, name and carried flag; G17 body hit deals exactly23 damage and ejects; hidden carrier departure drops the flag at the safe exit; local profile survives reload. **Exit0, no browser errors, final health rooms0** (`live-smoke.log`, `live-smoke/evidence.json`, three screenshots). Both owned peers and the unused temporary local fixture were closed; no ordinary test room remains.
+- Post-smoke delivery verification: all four public asset responses are200/no-store and match the exact manifest SHA256 and frozen disk bytes; APK hash unchanged; protocol5 is refused with an explicit update-required error before room creation; public health remains healthy with rooms0 (`live-verification.json`, `live-verification.log`).
+
+Keep the running release-source directory and existing tunnel. Saved Android server settings can override the default: if an old URL is saved, choose the browser origin above in Online settings without clearing saves. The server intentionally has no APK HTTP route; the artifact is delivered by its local clickable path. The public endpoint is an existing process-backed quick tunnel, not a newly provisioned permanent hosting service.
+
+Release report/plan are committed on `feat/offline-arena`; no merge/push/PR is authorized or performed. The repository has no configured remote or separate base branch. After the final task gate, this plan's execution notes are retained recoverably under `artifacts/rooftops-hiding-zQylUE/execution-archive`; unrelated user changes and other plan workspaces are untouched.
 
 ## Pre-cutover identity and rollback
 
-Read-only discovery on 2026-10-08 around 10:13 UTC confirms the public server still runs `artifacts/xp-cosmetics-live-dEhwLP/release-source/server/server.mjs` (PID 620214), bound to `127.0.0.1:4185`, with its own `dist` assets. Tunnel PID 21648 still serves `https://myth-referring-tablets-venture.trycloudflare.com`. Local/public health returned 200 with zero rooms; all four asset responses were `no-store` and matched the live disk bytes. This observation is not maintenance approval, and identity/room count must be checked again immediately before an approved cutover.
+Read-only discovery on 2026-10-08 around 10:13 UTC found `artifacts/xp-cosmetics-live-dEhwLP/release-source/server/server.mjs` (PID620214), bound to `127.0.0.1:4185`, with its own `dist` assets. Tunnel PID21648 served `https://myth-referring-tablets-venture.trycloudflare.com`. Local/public health returned200 with zero rooms; all four asset responses were `no-store` and matched live disk bytes. These identities and empty-room state were freshly revalidated on2026-10-09 before the separately approved cutover above.
 
-The live release remains 0.7.0 / protocol 5. Its server does not expose an APK download route; APK delivery is the local artifact link, not an invented public URL. The separate owned test server on port 38861 is not production.
+That previous release was0.7.0 / protocol5. The separate owned test server on port38861 was not production and has been stopped.
 
 Rollback copies retained under `artifacts/rooftops-hiding-zQylUE`:
 
 - `rollback-source.tar` includes exact live source/assets and dereferenced installed dependencies: SHA256 `15a4bf2fdee7f35451ccaa02de39f68dff4b83ac96b311ff9556e97262e4f66e`.
 - `rollback-v0.7.0.apk`: SHA256 `faa2f4f2cf0252b9f9f135344c748664572c16de0c1ebfe841a679b9e6e152ed`.
-- Live HTML SHA256 `93943a5d0c7d7ff4d224c3d2efec8cbda4655c04e52e1ba51138f5753d772ab4`; live game.js SHA256 `1bd2d7d0241a5dcd241cf957e1da4fda400dd682b93f55a6128665e890573636`.
+- Previous-live HTML SHA256 `93943a5d0c7d7ff4d224c3d2efec8cbda4655c04e52e1ba51138f5753d772ab4`; previous-live game.js SHA256 `1bd2d7d0241a5dcd241cf957e1da4fda400dd682b93f55a6128665e890573636`.
