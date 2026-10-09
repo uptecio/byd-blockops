@@ -4,7 +4,8 @@ import * as THREE from 'three';
 import { MAPS, DEFAULT_MAP_ID, getMap } from '../src/maps.js';
 import { canOccupy, moveCircle } from '../src/collision.js';
 import { createWorld } from '../src/world.js';
-import { createSpatialWorld } from '../src/spatial.js';
+import { createSpatialWorld, sweepBodyClear } from '../src/spatial.js';
+import { LOOT_SPAWNS } from '../src/loot-spawns.js';
 
 const ids = ['courtyard', 'dust-town', 'neon-city', 'snow-base', 'jungle-ruins', 'harbor', 'desert-fort', 'space-station'];
 const radius = 0.42;
@@ -35,6 +36,7 @@ test('shared definitions cannot be changed by a room or renderer', () => {
 });
 
 for (const id of ids) {
+  const groundSolids=getMap(id).solids.filter(s=>s.minY<1.84);
   test(`${id} has finite geometry and clear spawn and base points`, () => {
     const map = getMap(id);
     assert.ok(map.name && map.description);
@@ -63,7 +65,7 @@ for (const id of ids) {
       assert.ok(Number.isFinite(point.x) && Number.isFinite(point.z));
       assert.ok(point.x >= -22 + radius && point.x <= 22 - radius);
       assert.ok(point.z >= -22 + radius && point.z <= 22 - radius);
-      assert.equal(canOccupy(point.x, point.z, radius, map.solids), true, JSON.stringify(point));
+      assert.equal(canOccupy(point.x, point.z, radius, groundSolids), true, JSON.stringify(point));
     }
   });
 
@@ -71,7 +73,7 @@ for (const id of ids) {
     const map = getMap(id);
     for (const point of points(map)) {
       for (const [dx, dz] of [[60, 0], [-60, 0], [0, 60], [0, -60]]) {
-        const moved = moveCircle(point, dx, dz, radius, map.solids);
+        const moved = moveCircle(point, dx, dz, radius, groundSolids);
         assert.ok(moved.x >= -22 + radius - 1e-8 && moved.x <= 22 - radius + 1e-8);
         assert.ok(moved.z >= -22 + radius - 1e-8 && moved.z <= 22 - radius + 1e-8);
       }
@@ -87,7 +89,7 @@ for (const id of ids) {
     const open = new Uint8Array(size * size);
     const reached = new Uint8Array(size * size);
     for (let z = 0; z < size; z++) for (let x = 0; x < size; x++) {
-      open[z * size + x] = Number(canOccupy(coordinate(x), coordinate(z), radius, map.solids));
+      open[z * size + x] = Number(canOccupy(coordinate(x), coordinate(z), radius, groundSolids));
     }
     const indexFor = point => Math.round((point.z + 21.5) * 2) * size + Math.round((point.x + 21.5) * 2);
     const start = indexFor(map.playerSpawn);
@@ -100,17 +102,22 @@ for (const id of ids) {
         if (nx < 0 || nz < 0 || nx >= size || nz >= size) continue;
         const next = nz * size + nx;
         if (reached[next] || !open[next]) continue;
-        if (!canOccupy((coordinate(x) + coordinate(nx)) / 2, (coordinate(z) + coordinate(nz)) / 2, radius, map.solids)) continue;
+        if (!canOccupy((coordinate(x) + coordinate(nx)) / 2, (coordinate(z) + coordinate(nz)) / 2, radius, groundSolids)) continue;
         reached[next] = 1;
         queue.push(next);
       }
     }
-    for (const point of points(map)) {
-      const index = indexFor(point);
-      const snapped = { x: coordinate(index % size), z: coordinate(Math.floor(index / size)) };
-      const movement = moveCircle(point, snapped.x - point.x, snapped.z - point.z, radius, map.solids);
-      assert.ok(Math.hypot(movement.x - snapped.x, movement.z - snapped.z) < 1e-8);
-      assert.equal(reached[index], 1, `unreachable ${JSON.stringify(point)}`);
+    const world=createSpatialWorld(map);
+    for (const point of [...points(map),...LOOT_SPAWNS[id],...map.hideSpots.flatMap(s=>[s.entry,s.exit,s.recovery]),
+      ...map.traversal.shelters.map(s=>s.point),...map.traversal.links.filter(l=>l.from.y===0).map(l=>l.from)]) {
+      const index=indexFor(point),ix=index%size,iz=Math.floor(index/size);
+      let connected=false;
+      for(let dz=-1;dz<=1;dz++) for(let dx=-1;dx<=1;dx++) {
+        const nx=ix+dx,nz=iz+dz;
+        if(nx<0||nz<0||nx>=size||nz>=size||!reached[nz*size+nx]) continue;
+        if(sweepBodyClear({...point,y:0},{x:coordinate(nx),y:0,z:coordinate(nz)},radius,1.84,world)) connected=true;
+      }
+      assert.equal(connected,true,`unreachable ground anchor ${JSON.stringify(point)}`);
     }
   });
 

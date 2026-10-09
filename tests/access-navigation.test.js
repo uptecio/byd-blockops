@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { accessFixture } from './helpers/access-fixture.js';
 import { createNavigation, navigationIntent } from '../src/navigation.js';
 import { createBody, moveCharacter } from '../src/character-movement.js';
+import { createSpatialWorld } from '../src/spatial.js';
 import { advanceBody } from './helpers/traversal-fixture.js';
 import { createHeadlessGame, cleanupGame } from './helpers/game-fixture.js';
 
@@ -79,4 +80,14 @@ test('the ordinary bot runtime supplies climb intent even on a purely vertical s
   bot.intent={goal:f.goal,targetId:null}; bot.intentTimer=100; bot.pathTimer=0; bot.cooldown=100;
   for (let n=0;n<900 && bot.body.supportId!=='deck';n++) game.updateBots(1/120);
   assert.equal(bot.body.supportId,'deck'); assert.equal(bot.body.y,2.4);
+});
+
+test('a new jump around a corner is not pulled back onto the previous landing', () => {
+  const points=[{x:0,y:0,z:0},{x:1.4,y:.4,z:0},{x:1.4,y:.8,z:1.4},{x:2.8,y:1.2,z:1.4}];
+  const map={id:'corner',bounds:{min:-10,max:10},solids:points.slice(1).map((p,i)=>({id:`p${i}`,x:p.x,z:p.z,w:1.6,d:1.6,minY:0,maxY:p.y})),
+    traversal:{links:points.slice(1).map((p,i)=>({id:`link${i}`,from:points[i],to:p,kind:'jump',routeId:'corner'}))}};
+  const world=createSpatialWorld(map),nav=createNavigation(map),body=createBody(points[1],world);
+  const airborne=moveCharacter(body,{vx:0,vz:1.6,jump:true},1/60,{world}).body;
+  assert.equal(nav.nextWaypoint(airborne,points[3]).linkId,'link1');
+  assert.equal(follow({world},nav,createBody(points[0],world),points[3],1.6).body.supportId,'p2');
 });

@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { MAPS } from '../src/maps.js';
 import { canOccupy } from '../src/collision.js';
+import { createSpatialWorld, canOccupyBody } from '../src/spatial.js';
 import { createModeState, recordElimination, tickMode } from '../src/modes.js';
 import { createNavigation } from '../src/navigation.js';
 import { chooseBotIntent } from '../src/bot-brain.js';
@@ -26,6 +27,7 @@ const decide = (context, role = context.role) => chooseBotIntent(context.actors[
 
 // Breaks if a route is disconnected, loops, enters cover, or cuts through a wall.
 function follow(nav, from, goal, map, radius = .42) {
+  const world=createSpatialWorld(map);
   let current = point(from);
   for (let step = 0; step < 600; step++) {
     if (Math.hypot(current.x - goal.x, current.z - goal.z) < 1e-8) return;
@@ -40,7 +42,7 @@ function follow(nav, from, goal, map, radius = .42) {
       const z = current.z + (next.z - current.z) * t;
       assert.ok(x >= map.bounds.min + radius - 1e-8 && x <= map.bounds.max - radius + 1e-8);
       assert.ok(z >= map.bounds.min + radius - 1e-8 && z <= map.bounds.max - radius + 1e-8);
-      assert.equal(canOccupy(x, z, radius, map.solids), true, `wall collision at ${x},${z}`);
+      assert.equal(canOccupyBody({x,y:0,z},radius,1.84,world),true,`wall collision at ${x},${z}`);
     }
     current = next;
   }
@@ -123,6 +125,7 @@ test('a moving actor between grid centers keeps advancing toward the goal', () =
 test('repeated fractional movement follows routes through every real map', () => {
   for (const map of MAPS) {
     const nav = createNavigation(map);
+    const world=createSpatialWorld(map);
     let current = point(map.teamSpawns.red[0]);
     const goal = map.bases.blue;
     for (let step = 0; step < 1500 && Math.hypot(current.x - goal.x, current.z - goal.z) > .01; step++) {
@@ -133,7 +136,7 @@ test('repeated fractional movement follows routes through every real map', () =>
       assert.ok(length > 1e-8, `stalled on ${map.id}`);
       const scale = Math.min(.11, length) / length;
       current = { x: current.x + dx * scale, z: current.z + dz * scale };
-      assert.equal(canOccupy(current.x, current.z, .42, map.solids), true);
+      assert.equal(canOccupyBody({...current,y:0},.42,1.84,world),true);
     }
     assert.ok(Math.hypot(current.x - goal.x, current.z - goal.z) <= .01, `did not arrive on ${map.id}`);
   }

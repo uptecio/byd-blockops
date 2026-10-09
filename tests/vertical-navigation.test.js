@@ -29,10 +29,11 @@ for (const map of MAPS) test(`${map.id}: route reaches the selected support at b
     for (const speed of [1.6, 2.1, 3.4, 4.4 * .65]) {
       assert.equal(nav.reachable(start, roof.point), true);
       const result = follow(nav, world, start, roof.point, speed);
-      assert.equal(result.body.y, 2.2); assert.equal(result.body.grounded, true); assert.equal(result.jumped, true);
+      assert.equal(result.body.y, roof.point.y); assert.equal(result.body.grounded, true); assert.equal(result.jumped, true);
       assert.equal(follow(nav, world, roof.point, start, speed).body.y, 0);
     }
     const room = map.traversal.shelters.find(s => s.id === roof.id.replace(':position', ''));
+    if (!room) { assert.equal(roof.source,'original'); continue; }
     assert.equal(nav.reachable(room.point, roof.point), true);
     const a = nav.nextWaypoint(start, room.point), b = nav.nextWaypoint(start, roof.point);
     assert.ok(a && b);
@@ -93,7 +94,8 @@ test('a zombie reaching a stale sighting resumes patrol instead of waiting forev
 
 for (const map of MAPS) test(`${map.id}: real walker and runner brains climb after a rooftop sighting`, () => {
   const world = createSpatialWorld(map), navigation = createNavigation(map, { radius: .4 });
-  const roof = map.traversal.roofs[0], start = map.traversal.links[0].from;
+  const roof = map.traversal.roofs.find(r=>r.id===`${map.id}:annex:1:position`);
+  const entry=map.traversal.links.find(l=>l.id===roof.entryLinkId),start=map.traversal.links.find(l=>l.routeId===entry.routeId).from;
   const center = map.traversal.shelters[0].point;
   for (const kind of ['walker', 'runner']) {
     const player = { id: 'local', ...center, y: roof.point.y, alive: true, yaw: 0, pitch: 0, protectedRemaining: 0 };

@@ -1,4 +1,5 @@
 import { addRoom, addStepRoute, addHideSpot, SIDES } from './map-traversal.js';
+import { ROOF_ACCESS } from './roof-access-catalog.js';
 
 // Explicit small annexes retain the existing arena lanes and team-side access.
 // Each row: center X/Z, staircase attachment side, walk-in doorway side.
@@ -21,10 +22,13 @@ export function addTraversalLayout(builder, mapId) {
     const id = `${mapId}:annex:${index + 1}`, roofY = 2.2, u = SIDES[side];
     addRoom(builder, { id, x, z, w: 4, d: 4, roofY, floorY: 0, doorSide, colour: layout.colour, trim: layout.trim });
     const points = [8.3, 6.9, 5.5, 4.1, 2.7, 1.3].map((offset, n) => ({ x: x + u.x * offset, y: n * .44, z: z + u.z * offset }));
-    const route = addStepRoute(builder, { id: `${id}:approach`, points, width: 1.6, depth: 1.4, colour: layout.steps });
-    builder.traversal.roofs.push({ id: `${id}:position`, point: points[5], singleEntrance: true,
-      entryLinkId: route.entryLinkId, supportId: `${id}:roof`, routeSolidIds: route.solidIds });
-    builder.traversal.patrolPoints.push(points[0], { x, y: 0, z });
+    if (!ROOF_ACCESS[mapId]) {
+      const route = addStepRoute(builder, { id: `${id}:approach`, points, width: 1.6, depth: 1.4, colour: layout.steps });
+      builder.traversal.roofs.push({ id: `${id}:position`, point: points[5], singleEntrance: true,
+        entryLinkId: route.entryLinkId, supportId: `${id}:roof`, routeSolidIds: route.solidIds });
+      builder.traversal.patrolPoints.push(points[0]);
+    }
+    builder.traversal.patrolPoints.push({ x, y: 0, z });
     const facing = SIDES[doorSide], v = { x: -facing.z, z: facing.x };
     const occupant = { x: x - facing.x * 1.08 + v.x * .78, y: 0, z: z - facing.z * 1.08 + v.z * .78 };
     const ahead = amount => ({ x: occupant.x + facing.x * amount, y: 0, z: occupant.z + facing.z * amount });

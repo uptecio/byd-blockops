@@ -1,5 +1,6 @@
 // Shared, texture-free arena records are consumed by rendering and simulation.
 import { addTraversalLayout } from './map-traversal-layouts.js';
+import { addRoofAccess } from './map-roof-access.js';
 import { validateTraversal } from './map-traversal.js';
 export const DEFAULT_MAP_ID = 'courtyard';
 
@@ -31,6 +32,7 @@ function builder(id, name, description, environment) {
   };
   const finish = (options = {}) => {
     addTraversalLayout(api, id);
+    addRoofAccess(api, id);
     const teamSpawns = {
       red: [-8, -4, 0, 4, 8].map(x => ({ x, z: 19 })),
       blue: [-8, -4, 0, 4, 8].map(x => ({ x, z: -19 })),
@@ -166,9 +168,7 @@ function dustTown() {
   const { box, solid } = map;
   for (const [x, z, w, d] of [[-13, -11, 8, 7], [12, -7, 8, 8], [-12, 9, 9, 7], [13, 12, 8, 6]]) {
     solid(x, z, w, d, 5, '#c9975d');
-    box(x, 5.2, z, w + 0.3, 0.4, d + 0.3, '#f1d5a0');
     box(x, 3.5, z - d / 2 - 0.04, 2, 1.2, 0.08, '#704d38');
-    box(x - 1.5, 6, z + 1, 2, 1.2, 2, '#d5a86b');
   }
   for (const [x, z, colour] of [[-5, -2, '#bf6251'], [5, 3, '#689e91']]) {
     solid(x, z, 2.4, 3, 1.2, '#a97446');
@@ -215,18 +215,14 @@ function snowBase() {
     { sky: '#cadfe9', fog: '#cadfe9', ground: '#eff5f6', accent: '#5db9dc' }, '#a8d8e9');
   const { box, solid } = map;
   solid(0, 0, 11, 8, 4.2, '#8bafc2');
-  box(0, 4.35, 0, 11.5, 0.3, 8.5, '#ffffff');
   for (const z of [-4.05, 4.05]) box(0, 2.7, z, 8, 1.2, 0.1, '#345d75');
   box(0, 5.7, 0, 0.4, 2.4, 0.4, '#657e8e');
   box(0, 6.9, 0, 3.5, 0.6, 0.7, '#d7e8ed');
   for (const [x, z] of [[-15, -10], [15, -10], [-15, 10], [15, 10]]) {
     solid(x, z, 4, 5, 2.4, '#8ed1e6');
-    box(x, 2.55, z, 4.2, 0.3, 5.2, '#e5f4f8');
-    box(x + 0.5, 3.2, z, 2, 1, 3, '#a9dfed');
   }
   for (const x of [-15, 15]) {
     solid(x, 0, 4, 4, 3.4, '#d0dee2');
-    box(x, 3.5, 0, 4.3, 0.2, 4.3, '#ffffff');
     box(x, 2.5, -2.05, 2.5, 0.8, 0.1, '#5db9dc');
   }
   for (const z of [-11, 11]) solid(0, z, 3, 1.5, 1, '#bed4df');
@@ -240,8 +236,10 @@ function jungleRuins() {
   const { box, solid } = map;
   for (const [x, z, w, d, h] of [[-7, -10, 11, 1.5, 3], [8, -5, 1.5, 11, 3.5], [-8, 4, 1.5, 11, 2.8], [7, 10, 11, 1.5, 3], [1, 0, 5, 1.5, 1.1]]) {
     solid(x, z, w, d, h, '#8f9878');
-    box(x, h + 0.12, z, w, 0.24, d, '#b1b491');
-    box(x - w / 4, h + 0.6, z, Math.min(1.5, w), 0.8, Math.min(1.5, d), '#7c8769');
+    if (h===1.1) {
+      box(x, h + 0.12, z, w, 0.24, d, '#b1b491');
+      box(x - w / 4, h + 0.6, z, Math.min(1.5, w), 0.8, Math.min(1.5, d), '#7c8769');
+    }
   }
   for (const [x, z] of [[-16, -12], [16, -12], [-16, 12], [16, 12], [-17, 0], [17, 0]]) {
     solid(x, z, 2.5, 2.5, 4, '#667858');
@@ -309,16 +307,11 @@ function spaceStation() {
   // Broken chamber partitions have doors on both axes and room around the ends.
   for (const z of [-8, 8]) for (const x of [-11, 11]) {
     solid(x, z, 12, 1.5, 3.8, '#768898');
-    box(x, 3.9, z, 12, 0.2, 1.5, '#6de3cc');
   }
   for (const x of [-8, 8]) for (const z of [-13, 13]) {
     solid(x, z, 1.5, 5, 3.8, '#768898');
-    box(x, 3.9, z, 1.5, 0.2, 5, '#8bb7ef');
   }
   solid(0, 0, 5, 5, 4.8, '#36465b');
-  box(0, 5, 0, 5.4, 0.4, 5.4, '#aab8c3');
-  box(0, 6.3, 0, 3.2, 2.2, 3.2, '#6de3cc');
-  box(0, 7.6, 0, 4.5, 0.4, 4.5, '#aab8c3');
   for (const [x, z] of [[-16, 0], [16, 0], [0, -13], [0, 13]]) {
     solid(x, z, 2.4, 3, 1.6, '#354b63');
     box(x, 1.7, z, 2.4, 0.2, 3, '#8bb7ef');

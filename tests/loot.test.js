@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { MAPS, getMap } from '../src/maps.js';
 import { canOccupy, hasLineOfSight, moveCircle } from '../src/collision.js';
 import { createNavigation } from '../src/navigation.js';
+import { createSpatialWorld, canOccupyBody } from '../src/spatial.js';
 import { createEquipment, equipGun, deathItems, pickupEquipment } from '../src/equipment.js';
 import { WEAPONS } from '../src/weapons.js';
 import { LOOT_SPAWNS } from '../src/loot-spawns.js';
@@ -33,10 +34,11 @@ for (const map of MAPS) {
     for (const type of ['frag', 'smoke', 'flash']) assert.equal(locations.filter(point => point.grenadeType === type).length, 2);
     assert.ok(Object.isFrozen(LOOT_SPAWNS) && Object.isFrozen(locations));
     const navigation = createNavigation(map);
+    const world=createSpatialWorld(map);
     const centers = [map.playerSpawn, ...map.spawns, ...map.teamSpawns.red, ...map.teamSpawns.blue, ...Object.values(map.bases)];
     for (const point of locations) {
       assert.ok(Object.isFrozen(point));
-      assert.ok(canOccupy(point.x, point.z, .42, map.solids), `blocked ${point.id}`);
+      assert.ok(canOccupyBody({...point,y:0},.42,1.84,world),`blocked ${point.id}`);
       assert.ok(navigation.reachable(map.playerSpawn, point), `unreachable ${point.id}`);
       for (const center of centers) assert.ok(Math.hypot(point.x - center.x, point.z - center.z) > 1.2, `interaction overlap ${point.id}`);
     }

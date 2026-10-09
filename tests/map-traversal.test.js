@@ -49,7 +49,8 @@ for (const map of MAPS) {
     const starts = map.traversal.links.filter(link => link.from.y === 0).map(link => link.from);
     for (const team of ['red', 'blue']) assert.ok(starts.some(point => navigation.reachable(map.teamSpawns[team][0], point)));
     for (const point of [map.playerSpawn, ...map.spawns, ...map.teamSpawns.red, ...map.teamSpawns.blue,
-      map.bases.red, map.bases.blue, ...LOOT_SPAWNS[map.id], ...starts, ...map.traversal.shelters.map(room => room.point)]) {
+      map.bases.red, map.bases.blue, ...LOOT_SPAWNS[map.id], ...starts, ...map.traversal.shelters.map(room => room.point),
+      ...map.hideSpots.flatMap(s=>[s.entry,s.exit,s.recovery])]) {
       assert.ok(navigation.reachable(map.playerSpawn, point), `disconnected ${JSON.stringify(point)}`);
     }
   });

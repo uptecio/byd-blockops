@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { MAPS } from '../src/maps.js';
-import { canOccupy } from '../src/collision.js';
+import { canOccupyBody } from '../src/spatial.js';
 import { createHeadlessGame, cleanupGame } from './helpers/game-fixture.js';
 
 for(const map of MAPS) test(`${map.id}: production spawn, pursuit, elimination and recovery complete wave one`, t=>{
@@ -10,7 +10,7 @@ for(const map of MAPS) test(`${map.id}: production spawn, pursuit, elimination a
   for(let steps=0;steps<100 && game.modeState.phase==='fighting';steps++) {
     game.update(.1);
     for(const z of game.bots) {
-      assert.ok(canOccupy(z.model.position.x,z.model.position.z,.4,map.solids));
+      assert.ok(canOccupyBody(z.model.position,.4,1.84,game.world.spatial));
       assert.ok(game.navigation.nextApproachWaypoint(z.model.position,game.player,.34));
       game.damageActor('local',z,100);
     }

@@ -26,14 +26,20 @@ export function addRoom(builder, { id, x, z, w, d, floorY = 0, roofY, doorSide, 
   builder.traversal.shelters.push({ id, point: point(x, floorY, z) });
 }
 
-export function addStepRoute(builder, { id, points, width = 1.6, depth = 1.4, colour }) {
+export function addStepRoute(builder, { id, points, width = 1.6, depth = 1.4, colour, slabThickness = 0 }) {
   const solids = [];
   for (let i = 1; i < points.length - 1; i++) {
     const here = points[i], alongX = Math.abs(here.x - points[i - 1].x) > Math.abs(here.z - points[i - 1].z);
     const solidId = `${id}:step:${i}`;
+    const minY=slabThickness?Math.max(0,here.y-slabThickness):0;
     builder.prism({ id: solidId, x: here.x, z: here.z, w: alongX ? depth : width,
-      d: alongX ? width : depth, minY: 0, maxY: here.y }, colour);
+      d: alongX ? width : depth, minY, maxY: here.y }, colour);
     solids.push(solidId);
+    if(minY>0) for(const sign of [-1,1]) {
+      const postId=`${solidId}:post:${sign}`;
+      builder.prism({id:postId,x:here.x+(alongX?0:sign*.7),z:here.z+(alongX?sign*.7:0),w:.12,d:.12,minY:0,maxY:minY},colour);
+      solids.push(postId);
+    }
   }
   for (let i = 1; i < points.length; i++) builder.traversal.links.push({
     id: `${id}:link:${i}`, from: points[i - 1], to: points[i], kind: 'jump', width, depth, routeId: id,
