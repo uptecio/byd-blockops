@@ -2,7 +2,7 @@
 
 Date: 2026-10-09
 
-Status: conversational design approved; this written specification awaits user review. Approval of this file permits implementation planning, not coding or a live-server restart.
+Status: written specification approved by the user on 2026-10-09. Approval permits implementation planning, not coding or a live-server restart. The implementation plan requires a separate review before execution.
 
 Baseline: Block Ops 0.8.0, Android version code 10, protocol 6. Feature source is `3142c1a`; release documentation is committed through `af5968f` on `feat/offline-arena`. Preserve existing saves, unrelated working-tree changes, release artifacts and the running public game.
 
@@ -38,7 +38,7 @@ The short gameplay loop is: spot the map's themed entrance, climb to the roof, f
 
 ## Roof coverage and concrete defaults for review
 
-The following scope and mechanical details complete the conversational design. They are proposed defaults for approval with this written specification, not additional choices already answered individually in chat.
+The following scope and mechanical details complete the conversational design. These defaults were approved with this written specification, rather than answered individually in chat.
 
 Include the main original structures below, plus both existing annex roofs on every map. Maps without conventional buildings use their substantial ruin, cargo or machinery platforms as roof destinations.
 
@@ -203,4 +203,4 @@ No super-jump, double jump, general mantling, grappling hook, moving platforms, 
 
 This specification supersedes only the previous roof-coverage and access restrictions in [the 0.8 rooftop and hiding design](2026-10-08-rooftops-hiding-design.md): original tall destinations are now required, and authored stairs/ladders are added. Existing approved hiding, combat, save and safety rules otherwise remain in force.
 
-Next gate: ask the user to review this written specification, especially the destination catalog and concrete movement defaults. After approval, write an implementation plan for review and execution-method selection. Do not begin implementation from conversational approval alone.
+Next gate: review [the implementation plan](../plans/2026-10-09-tall-roof-access.md) and confirm the execution method. Do not begin implementation until that review; deployment still requires fresh maintenance approval.
