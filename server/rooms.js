@@ -205,6 +205,7 @@ export class RoomManager {
   actor(player) {
     return { id: player.id, lifeId: player.lifeId, teamId: player.teamId, x: player.x, y: player.y, z: player.z, yaw: player.yaw, pitch: player.pitch,
       health: player.health, armour: player.armour, alive: player.health > 0, grounded: player.grounded, supportId: player.supportId,
+      ladderId:player.ladderId,ladderDistance:player.ladderDistance,ladderBlockedId:player.ladderBlockedId,
       hiddenSpotId: player.hiddenSpotId, protectedRemaining: player.protectedRemaining, flashRemaining: player.flashRemaining, equipment: player.equipment };
   }
   hidingOptions(room) { return { map: room.map, world: room.physics.spatial, active: room.phase === 'playing' }; }
@@ -412,7 +413,7 @@ export class RoomManager {
       if (input.lifeId === player.lifeId) this.exposeAttack(room, player, input);
       if (!wasHidden && !player.hiddenSpotId) {
         const movement = moveCharacter(player, { vx: (Math.cos(player.yaw) * input.x - Math.sin(player.yaw) * input.y) * speed,
-          vz: (-Math.sin(player.yaw) * input.x - Math.cos(player.yaw) * input.y) * speed, jump: input.jump }, dt, { world: room.physics.spatial });
+          vz: (-Math.sin(player.yaw) * input.x - Math.cos(player.yaw) * input.y) * speed, jump: input.jump,climb:input.y }, dt, { world: room.physics.spatial });
         Object.assign(player, movement.body);
       }
       if (!isUsingSupply(player.equipment) && input.lifeId === player.lifeId && input.reload && player.equipment.heldItem === 'gun') startReload(state);

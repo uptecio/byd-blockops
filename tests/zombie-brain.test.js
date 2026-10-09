@@ -75,13 +75,13 @@ test('smoke preserves remembered goal while human moves; no memory means no purs
   assert.equal(result.yaw,0);
   assert.equal(result.attack,false);
   const fresh = stepZombieBrain(createZombieBrain('walker'),hidden);
-  assert.deepEqual(fresh,{ x:0,y:0,z:0,yaw:0,attack:false,body:{x:0,y:0,z:0,velocityY:0,grounded:true,supportId:'ground'} });
+  assert.deepEqual(fresh,{ x:0,y:0,z:0,yaw:0,attack:false,body:{x:0,y:0,z:0,velocityY:0,grounded:true,supportId:'ground',ladderId:null,ladderDistance:0,ladderBlockedId:null} });
 });
 
 test('flash freezes movement and attacks; invalid delta does not mutate brain', () => {
   const brain = createZombieBrain('walker'); brain.attackRemaining=0;
   const ctx = context({ actor:actor({ flashRemaining:1 }), player:player({ z:-1 }), zombies:[actor({ id:'other',x:.1 })] });
-  assert.deepEqual(stepZombieBrain(brain,ctx),{ x:0,y:0,z:0,yaw:0,attack:false,body:{x:0,y:0,z:0,velocityY:0,grounded:true,supportId:'ground'} });
+  assert.deepEqual(stepZombieBrain(brain,ctx),{ x:0,y:0,z:0,yaw:0,attack:false,body:{x:0,y:0,z:0,velocityY:0,grounded:true,supportId:'ground',ladderId:null,ladderDistance:0,ladderBlockedId:null} });
   for (const dt of [0,-1,NaN,Infinity]) {
     const before = JSON.stringify(brain);
     assert.equal(stepZombieBrain(brain,{ ...ctx,dt }).attack,false);

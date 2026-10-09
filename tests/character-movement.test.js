@@ -10,7 +10,7 @@ test('rooftop support persists without drifting to ground', () => {
   const start = createBody(roof, world);
   const result = advanceBody(start, idle, 1, world);
   assert.equal(result.y, 3); assert.equal(result.grounded, true); assert.equal(result.supportId, 'roof');
-  assert.deepEqual(start, { ...roof, velocityY: 0, grounded: true, supportId: 'roof' });
+  assert.deepEqual(start, { ...roof, velocityY: 0, grounded: true, supportId: 'roof', ladderId:null,ladderDistance:0,ladderBlockedId:null });
 });
 
 test('a .55 step needs a jump and can be landed on with ordinary jump physics', () => {

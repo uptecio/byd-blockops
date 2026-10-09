@@ -36,7 +36,8 @@ export function createZombieBrain(kind) {
 }
 
 export function stepZombieBrain(brain, { actor, player, zombies, navigation, solids, world, smokes, dt }) {
-  const body = { ...point(actor), velocityY: actor.velocityY ?? 0, grounded: actor.grounded ?? true, supportId: actor.supportId ?? 'ground' };
+  const body = { ...point(actor), velocityY: actor.velocityY ?? 0, grounded: actor.grounded ?? true, supportId: actor.supportId ?? 'ground',
+    ladderId:actor.ladderId ?? null,ladderDistance:actor.ladderDistance ?? 0,ladderBlockedId:actor.ladderBlockedId ?? null };
   const result = { x: actor.x, y: actor.y, z: actor.z, yaw: actor.yaw, attack: false, body };
   if (!Number.isFinite(dt) || dt <= 0 || !finite(actor) || !finite(player) || !actor.alive || !player.alive) return result;
   const config = balance[actor.kind]; if (!config) return result;

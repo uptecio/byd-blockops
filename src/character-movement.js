@@ -1,5 +1,6 @@
 import { canOccupyBody, overlapsFootprint, supportBelow } from './spatial.js';
 import { stepStair } from './stair-movement.js';
+import { stepLadder } from './ladder-movement.js';
 
 import { MOVEMENT } from './movement-constants.js';
 export { MOVEMENT } from './movement-constants.js';
@@ -14,25 +15,39 @@ export function createBody(position, world, { radius = .4, height = 1.84 } = {})
   if (!canOccupyBody(point, radius, height, world)) throw new Error('Invalid initial character body');
   const support = supportBelow(point, radius, world);
   const grounded = !!support && Math.abs(support.y - point.y) < EPS;
-  return { ...point, velocityY: 0, grounded, supportId: grounded ? support.id : null };
+  return clearClimb({ ...point, velocityY: 0, grounded, supportId: grounded ? support.id : null });
+}
+
+export function clearClimb(body) {
+  return {...body,ladderId:null,ladderDistance:0,ladderBlockedId:null};
 }
 
 export function moveCharacter(body, intent, dt, { world, radius = .4, height = 1.84 }) {
-  if (![dt, body.x, body.y, body.z, body.velocityY, intent.vx, intent.vz, radius, height].every(Number.isFinite)
+  if (![dt, body.x, body.y, body.z, body.velocityY, intent.vx, intent.vz, intent.climb ?? 0, radius, height].every(Number.isFinite)
+    || (body.ladderId!=null && (typeof body.ladderId!=='string' || !body.ladderId))
+    || (body.ladderBlockedId!=null && (typeof body.ladderBlockedId!=='string' || !body.ladderBlockedId))
     || dt < 0 || radius <= 0 || height <= 0 || !canOccupyBody(body, radius, height, world)) return { body, invalid: true };
   if (!dt) return { body, invalid: false };
-  const next = { ...body }, duration = Math.min(dt, MOVEMENT.maxFrame);
+  const next = { ...body,ladderId:body.ladderId ?? null,ladderDistance:body.ladderDistance ?? 0,ladderBlockedId:body.ladderBlockedId ?? null }, duration = Math.min(dt, MOVEMENT.maxFrame);
   const support = supportBelow(next, radius, world);
-  next.grounded = !!support && Math.abs(next.y - support.y) < EPS && next.velocityY <= 0;
+  next.grounded = !next.ladderId && !!support && Math.abs(next.y - support.y) < EPS && next.velocityY <= 0;
   next.supportId = next.grounded ? support.id : null;
   if (intent.jump && next.grounded) {
     next.velocityY = MOVEMENT.jumpVelocity; next.grounded = false; next.supportId = null;
   }
-  const maxSpeed = Math.hypot(intent.vx, intent.vz, Math.abs(next.velocityY) + MOVEMENT.gravity * duration);
+  const maxSpeed = Math.max(2.4,Math.hypot(intent.vx, intent.vz, Math.abs(next.velocityY) + MOVEMENT.gravity * duration));
   const steps = Math.max(1, Math.ceil(duration / MOVEMENT.maxStep), Math.ceil(duration * maxSpeed / .1));
   if (!Number.isSafeInteger(steps) || steps > 100000) return { body, invalid: true };
   const h = duration / steps;
+  let jump=!!intent.jump;
   for (let step = 0; step < steps; step++) {
+    let climb;
+    try { climb=stepLadder(next,{...intent,jump},h,{world,radius,height}); }
+    catch { return {body,invalid:true}; }
+    if (climb.invalid) return {body,invalid:true};
+    Object.assign(next,climb.body);
+    if (climb.consumeJump) jump=false;
+    if (climb.handled) continue;
     for (const [axis, velocity] of [['x', intent.vx], ['z', intent.vz]]) {
       const candidate = { ...next, [axis]: Math.max(world.bounds.min + radius, Math.min(world.bounds.max - radius, next[axis] + velocity * h)) };
       const stair=stepStair(next,candidate,{world,radius,height});

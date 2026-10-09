@@ -9,6 +9,7 @@ import { createEquipment } from '../src/equipment.js';
 import { createGearCombatState, throwGrenade, stepGearCombat, meleeTarget } from '../src/gear-combat.js';
 import { stackedFixture } from './helpers/traversal-fixture.js';
 import { getWeapon } from '../src/weapons.js';
+import { accessFixture } from './helpers/access-fixture.js';
 
 function runtimes(t, world = createSpatialWorld({ id: 'empty', bounds: { min: -10, max: 10 }, solids: [] })) {
   const game = createHeadlessGame(); game.start('m4a1', { bots: 0 }); t.after(() => cleanupGame(game));
@@ -41,6 +42,16 @@ test('solo and server share a movement trace with the same supported feet and gr
     assert.ok(Math.hypot(game.player.x - a.x, game.player.jump - a.y, game.player.z - a.z) < 1e-8);
     assert.ok(Math.abs(game.player.velocityY - a.velocityY) < 1e-8);
   }
+});
+
+test('solo and server retain ladder attachment across raw-axis ticks and aim changes', t => {
+  const f=accessFixture(),{game,manager,room,a,place,step}=runtimes(t,f.world); place(f.start);
+  for (let n=0;n<60;n++) step(1/120,{y:1,yaw:n/10});
+  assert.ok(Math.abs(game.player.jump-1.2)<1e-8); assert.ok(Math.abs(a.y-1.2)<1e-8);
+  assert.equal(game.player.ladderId,f.ladderId); assert.equal(a.ladderId,f.ladderId);
+  assert.equal(game.getActors()[0].ladderId,f.ladderId); assert.equal(manager.actors(room)[0].ladderId,f.ladderId);
+  for (let n=0;n<30;n++) step(1/120,{yaw:3});
+  assert.ok(Math.abs(a.y-1.2)<1e-8); assert.equal(a.velocityY,0);
 });
 
 test('runtime roofs remain supported and a walk-off fall has no health cost', t => {

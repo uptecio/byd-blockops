@@ -259,11 +259,13 @@ export class ArenaGame {
   actorRecord(entity) {
     if (entity.id === this.player.id) return { id: this.player.id, name: this.player.name, teamId: this.player.teamId, x: this.player.x, y: this.player.jump, z: this.player.z,
       grounded: this.player.grounded, supportId: this.player.supportId, velocityY: this.player.velocityY, hiddenSpotId: this.player.hiddenSpotId ?? null,
+      ladderId:this.player.ladderId,ladderDistance:this.player.ladderDistance,ladderBlockedId:this.player.ladderBlockedId,
       alive: this.player.health > 0 && this.player.dead <= 0, protectedRemaining: this.player.protected, lifeId: this.player.lifeId, skinId: this.player.skinId,
       yaw: this.yaw, pitch: this.pitch, flashRemaining: this.player.flashRemaining ?? 0, equipment: this.player.equipment, health: this.player.health, armour: this.player.armour };
     const bot = entity;
     return { id: bot.id, name: bot.name ?? bot.model.name, kind: bot.kind, teamId: bot.teamId ?? null, x: bot.body.x, y: bot.body.y, z: bot.body.z,
       grounded: bot.body.grounded, supportId: bot.body.supportId, velocityY: bot.body.velocityY, hiddenSpotId: bot.hiddenSpotId ?? null,
+      ladderId:bot.body.ladderId,ladderDistance:bot.body.ladderDistance,ladderBlockedId:bot.body.ladderBlockedId,
       alive: bot.health > 0 && bot.respawn <= 0, protectedRemaining: bot.protected, lifeId: bot.lifeId, skinId: bot.skinId,
       yaw: bot.yaw, pitch: 0, flashRemaining: bot.flashRemaining, equipment: bot.equipment, health: bot.health, armour: bot.armour,
       lastGrenadeAttempt: bot.lastGrenadeAttempt, carryingFlag: Object.values(this.modeState.flags ?? {}).some(flag => flag.carrierId === bot.id) };
@@ -387,7 +389,8 @@ export class ArenaGame {
       const vz = (-Math.sin(this.yaw) * input.x - Math.cos(this.yaw) * input.y) * speed;
       if (!wasHidden && !this.player.hiddenSpotId) {
         const moved = moveCharacter({ x: this.player.x, y: this.player.jump, z: this.player.z, velocityY: this.player.velocityY,
-          grounded: this.player.grounded, supportId: this.player.supportId }, { vx, vz, jump: input.jump }, dt, { world: this.world.spatial, radius: PLAYER_RADIUS });
+          grounded: this.player.grounded, supportId: this.player.supportId, ladderId:this.player.ladderId,
+          ladderDistance:this.player.ladderDistance,ladderBlockedId:this.player.ladderBlockedId }, { vx, vz, jump: input.jump,climb:input.y }, dt, { world: this.world.spatial, radius: PLAYER_RADIUS });
         Object.assign(this.player, moved.body, { jump: moved.body.y });
       }
       Object.assign(playerActor, { x: this.player.x, y: this.player.jump, z: this.player.z, yaw: this.yaw, pitch: this.pitch });
