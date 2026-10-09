@@ -13,7 +13,7 @@ for(const size of [{width:854,height:480},{width:1200,height:700},{width:1280,he
     await page.goto(f.base);await page.locator('#home-settings').tap();await page.locator('#bots').fill('1');
     await page.locator('#difficulty').selectOption('easy');await page.locator('#sound').uncheck();await page.locator('#control-size').fill(String(scale));await page.locator('#settings-done').tap();
     await page.locator('#home-solo').tap();await page.waitForSelector('body[data-mode="playing"]');observation=await observeGame(page);
-    const map=MAPS[0],spot=map.hideSpots[1];
+    const map=MAPS[0],spot=map.hideSpots.find(s=>s.id===`${map.id}:annex:2:hide`);
     controls=await touchControls(page);const stick=await controls.point('#joystick',51),jump=await controls.point('#jump-button',52);
     const start=await observation.actor();await controls.send('touchStart',[stick,jump]);
     await controls.send('touchMove',[{...stick,x:stick.x+8},jump]);

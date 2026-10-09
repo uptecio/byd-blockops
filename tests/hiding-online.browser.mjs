@@ -16,7 +16,7 @@ const evidence={distDir:process.env.DIST_DIR,legacy,rounds:[],errors:[]};const o
 const previousWebSocket=globalThis.WebSocket;globalThis.WebSocket=WebSocket;const late=new RoomClient();
 try {
   for(const modeId of process.env.HIDING_MODE?[process.env.HIDING_MODE]:['ffa','tdm','ctf']) {
-    const map=MAPS[0],spot=map.hideSpots[0];
+    const map=MAPS[0],spot=map.hideSpots.find(s=>s.id===`${map.id}:annex:1:hide`),roof=map.traversal.roofs.find(r=>r.id===`${map.id}:annex:1:position`);
     for(const [index,page] of f.pages.entries()) {
       f.packets[index].length=0;await page.goto(f.base);await page.locator('#home-online').tap();
       await page.locator('#player-name').fill(`HidePeer${index}`);await page.locator('.server-settings summary').tap();await page.locator('#server-address').fill(f.base);
@@ -39,8 +39,8 @@ try {
     if(modeId==='ctf') {
       await walk(1,[{...map.bases.red,y:0}]);await until(()=>peers[0].room.flags.red.carrierId===peers[1].id,'guest stole enemy flag');
     }
-    await walk(0,[map.traversal.roofs[0].point]);
-    assert.equal(peers[0].player.supportId,map.traversal.roofs[0].supportId);
+    await walk(0,[roof.point]);
+    assert.equal(peers[0].player.supportId,roof.supportId);
     await walk(0,[spot.entry]);await walk(1,[spot.entry]);
     console.log(`SETUP ${modeId}: ${peers[0].room.timeLeft.toFixed(1)} seconds remain`);
     await guest.locator('#hide-button').tap();await until(()=>peers[1].player.hiddenSpotId===spot.id,'guest is hidden');
@@ -56,7 +56,7 @@ try {
     assert.equal(before-peers[1].player.health,23,'occupied prop cannot grant enormous headshot damage');
     if(modeId==='ctf') {
       await guest.locator('#hide-button').tap();await until(()=>peers[1].player.hiddenSpotId===spot.id,'flag carrier hides again');
-      await walk(0,[map.traversal.roofs[0].point,{x:spot.exit.x,y:2.2,z:spot.exit.z}]);
+      await walk(0,[roof.point,{x:spot.exit.x,y:roof.point.y,z:spot.exit.z}]);
       console.log(`FLOOR ${modeId}: ${peers[0].room.timeLeft.toFixed(1)} seconds remain`);
       await goHome(guest);
       await until(()=>peers[0].room.flags.red.status==='dropped','leaving hidden drops flag below roof');

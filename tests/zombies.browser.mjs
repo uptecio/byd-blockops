@@ -11,7 +11,7 @@ import { createNavigation } from '../src/navigation.js';
 import { createSpatialWorld, segmentClear } from '../src/spatial.js';
 
 const legacy=process.env.LEGACY_WEBVIEW==='1';
-const artifacts=process.env.ZOMBIE_ARTIFACTS || 'artifacts/zombies-review';
+const artifacts=process.env.ARTIFACT_DIR || process.env.ZOMBIE_ARTIFACTS || 'artifacts/zombies-review';
 const f=await fixture(),page=f.pages[0];
 const home=async()=>{ await page.locator('#home-button').tap(); await page.locator('#confirm-home').tap(); };
 async function start(mapId='courtyard') {

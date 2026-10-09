@@ -6,7 +6,7 @@ import { emulateLegacyWebView } from './legacy-webview.js';
 export async function fixture(viewport = { width: 1200, height: 700 }, { legacy = false } = {}) {
   const server = await startServer({ port: 0, distDir: process.env.DIST_DIR || 'dist' });
   const browser = await chromium.launch({ headless: true, args: ['--no-sandbox', '--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader'] });
-  const errors = [], assets = [], packets = [[], []];
+  const errors = [], assets = [], consoleErrors = [], packets = [[], []];
   const pages = [];
   for (let i = 0; i < 2; i++) {
     const context = await browser.newContext({ viewport, hasTouch: true });
@@ -40,13 +40,14 @@ export async function fixture(viewport = { width: 1200, height: 700 }, { legacy 
       }
     });
     page.on('pageerror', error => errors.push(error.message));
+    page.on('console', message => { if(message.type()==='error'&&!message.location().url?.endsWith('/favicon.ico'))consoleErrors.push(message.text()); });
     page.on('response', response => { if (response.status() >= 400 && !response.url().endsWith('/favicon.ico')) assets.push(`${response.status()} ${response.url()}`); });
     page.on('requestfailed', request => assets.push(`${request.failure()?.errorText} ${request.url()}`));
     page.on('websocket', socket => socket.on('framereceived', frame => packets[i].push(JSON.parse(String(frame.payload)))));
     pages.push(page);
   }
   return { server, browser, pages, packets, base: `http://127.0.0.1:${server.port}`,
-    clean() { assert.deepEqual(errors, [], 'no page exceptions'); assert.deepEqual(assets, [], 'no failed game assets (favicon is separate)'); },
+    clean() { assert.deepEqual(errors, [], 'no page exceptions'); assert.deepEqual(assets, [], 'no failed game assets (favicon is separate)'); assert.deepEqual(consoleErrors, [], 'no unexpected console errors'); },
     async close() { await browser.close(); await server.close(); } };
 }
 

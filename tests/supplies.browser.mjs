@@ -1,6 +1,10 @@
 import assert from 'node:assert/strict';
 import { mkdir, writeFile } from 'node:fs/promises';
 import { fixture, freshSolo, walkSolo, onlinePair, moveTo, lookTo, lookAt, until, equip } from './helpers/loot-browser.js';
+import { MAPS } from '../src/maps.js';
+import { LOOT_SPAWNS } from '../src/loot-spawns.js';
+import { followRoute,observeGame,aimAt } from './helpers/traversal-browser.js';
+import { createSpatialWorld,segmentClear } from '../src/spatial.js';
 
 const legacy = process.env.LEGACY_WEBVIEW === '1';
 const artifacts = process.env.SUPPLY_ARTIFACTS || 'artifacts/supplies-review';
@@ -71,9 +75,30 @@ async function simulated(duration) {
 async function zombieRecovery() {
   await page.goto(f.base);await page.locator('[data-map="neon-city"]').tap();await page.locator('[data-mode-id="zombies"]').tap();
   await page.locator('#home-solo').tap();await page.waitForSelector('body[data-mode="playing"]');
-  // Collect both packs, adding armour while walking to the frag at (-4,9).
-  await walkSolo(page,'KeyW',2);await walkSolo(page,'KeyA',5);await walkSolo(page,'KeyD',10);await slot(page,'armour').tap();
-  await walkSolo(page,'KeyA',9);await walkSolo(page,'KeyW',8);
+  // Route around visible fire-escape supports rather than assuming timed
+  // straight-line keys crossed them. Every pickup still uses real movement.
+  const map=MAPS.find(m=>m.id==='neon-city'),view=await observeGame(page),spawns=LOOT_SPAWNS[map.id],setupTrace={combat:[],routes:[]};
+  try {
+    // New exterior geometry makes the observed pickup tour take longer than
+    // the former timed key chord. Earn the same four real kills first; retain
+    // one living walker for the unchanged contact/recovery scenario below.
+    const deadline=Date.now()+120000,world=createSpatialWorld(map);
+    while(true) {
+      const state=await view.read(),actor=state.player;setupTrace.combat.push({at:Date.now(),...state});assert.ok(actor.health>0,'survive real preparation combat');
+      if(state.queued===0&&state.activeIds===1)break;
+      assert.ok(Date.now()<deadline,'real shots leave one wave-one walker');assert.equal(state.wave,1);
+      const target=state.actors.filter(a=>a.enemy&&a.alive&&segmentClear({...actor,y:actor.y+1.6},{...a,y:a.y+1.58},world)).sort((a,b)=>Math.hypot(a.x-actor.x,a.z-actor.z)-Math.hypot(b.x-actor.x,b.z-actor.z))[0];
+      if(target){const dx=target.x-actor.x,dz=target.z-actor.z;await aimAt(page,view.actor,Math.atan2(-dx,-dz),Math.atan2(target.y+1.58-(actor.y+1.6),Math.hypot(dx,dz)));
+        if(Number(await page.locator('#ammo-count').textContent())===0)await page.keyboard.press('KeyR');else await page.keyboard.press('KeyF',{delay:25});}
+      await page.waitForTimeout(80);
+    }
+    setupTrace.routes.push({item:'health',trace:await followRoute(page,view.actor,[{...spawns.find(p=>p.supplyType==='health'),y:0}],{map})});
+    assert.equal(await count(page,'health'),1);
+    setupTrace.routes.push({item:'armour',trace:await followRoute(page,view.actor,[{...spawns.find(p=>p.supplyType==='armour'),y:0}],{map})});
+    assert.equal(await count(page,'armour'),1);await slot(page,'armour').tap();
+    setupTrace.routes.push({item:'frag',trace:await followRoute(page,view.actor,[{...spawns.find(p=>p.grenadeType==='frag'&&p.z>0),y:0}],{map})});
+    await aimAt(page,view.actor,0,0);
+  }finally{setupTrace.last=await view.read();await writeFile(`${artifacts}/zombie-setup-trace.json`,JSON.stringify(setupTrace,null,2));await view.close();}
   assert.equal(await count(page,'health'),1);await page.locator('[data-inventory-key="grenade:frag"]').waitFor();
   // Stay in the clear west lane: returning toward the rear spawn walks into
   // the pursuing horde before the setup has finished.
@@ -222,7 +247,8 @@ try {
     for(const packets of f.packets)packets.length=0;
     await page.locator('[data-map="space-station"]').tap();await page.locator(`[data-mode-id="${modeId}"]`).tap();
     const [host]=await onlinePair(f);assert.equal(host.room.modeId,modeId);assert.equal(host.room.mapId,'space-station');
-    await moveTo(page,host,0,19);await moveTo(page,host,0,17);await moveTo(page,host,5,17);await moveTo(page,host,0,17);
+    const map=MAPS.find(m=>m.id==='space-station'),armour=LOOT_SPAWNS[map.id].find(p=>p.supplyType==='armour'&&p.z>0);
+    await followRoute(page,async()=>({...host.player}),[{...armour,y:0},{...map.teamSpawns.red[0],y:0}],{map,online:true});
     await slot(page,'armour').tap();await until(()=>host.player.armour===50,`${modeId} authoritative armour use`);
     assert.equal(await page.locator('#fatal-screen').isHidden(),true);console.log(`PASS space-station ${modeId} supplies`);await leavePair();
   }

@@ -1,6 +1,8 @@
 import assert from 'node:assert/strict';
+import { mkdir } from 'node:fs/promises';
 import { fixture, freshSolo, emptyControls, soloLoot, selectGrenade, until, onlinePair, moveTo } from './helpers/loot-browser.js';
 
+const artifacts=process.env.ARTIFACT_DIR||'artifacts/loot-review';await mkdir(artifacts,{recursive:true});
 const f = await fixture({ width: 854, height: 480 });
 try {
   await freshSolo(f.pages[0], f.base);
@@ -26,7 +28,7 @@ try {
       document.querySelector('#aim-zone').addEventListener('pointermove', () => window.__touchProof.aim++);
       document.querySelector('#aim-zone').addEventListener('pointercancel', () => window.__touchProof.cancel++);
     });
-    await page.screenshot({ path: 'artifacts/loot-review/loot-controls-854.png' });
+    await page.screenshot({ path: `${artifacts}/loot-controls-854.png` });
     const loaded = await ammo();
     await touch('touchStart', [stick, aim]);
     await touch('touchMove', [{ ...stick, x: stick.x + 20 }, { ...aim, x: aim.x + 25 }]);
@@ -58,7 +60,7 @@ try {
     assert.equal(await count(), 2, 'type picker selection preserves grenade inventory');
     await page.waitForTimeout(700);
     assert.equal(await ammo(), paused); assert.equal(await page.locator('#timer').textContent(), timer, 'solo picker pauses equipment and match timers');
-    await page.screenshot({ path: 'artifacts/loot-review/loot-picker-854.png' });
+    await page.screenshot({ path: `${artifacts}/loot-picker-854.png` });
     await page.locator('#grenade-picker-resume').click();
     await stable('picker resume clears still-held fire'); await touch('touchEnd');
     await stable('late modal release stays neutral');
