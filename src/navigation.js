@@ -1,5 +1,6 @@
 import { hasLineOfSight } from './collision.js';
 import { createSpatialWorld, canOccupyBody, supportBelow } from './spatial.js';
+import { ladderLength, projectLadder, sampleLadder } from './access-schema.js';
 
 const STEP = .5, MAX_FIELDS = 32, EPS = 1e-7;
 const point = p => ({ x: p.x, y: p.y ?? 0, z: p.z });
@@ -8,12 +9,20 @@ const distance = (a, b) => Math.hypot(a.x - b.x, a.z - b.z);
 const key = p => `${Math.round(p.x * 1e6)}:${Math.round(p.y * 1e6)}:${Math.round(p.z * 1e6)}`;
 
 export function navigationIntent(body, waypoint, speed, world) {
-  if (!waypoint || !finite(body) || !finite(waypoint) || !Number.isFinite(speed) || speed < 0) return { vx: 0, vz: 0, jump: false };
+  if (!waypoint || !finite(body) || !finite(waypoint) || !Number.isFinite(speed) || speed < 0) return { vx: 0, vz: 0, jump: false, climb:0 };
+  if (waypoint.kind==='ladder') {
+    const ladder=world.ladders?.find(l=>l.id===waypoint.ladderId);
+    if (!ladder || !Number.isFinite(waypoint.ladderDistance)) return {vx:0,vz:0,jump:false,climb:0};
+    const at=projectLadder(ladder,body).distance,delta=waypoint.ladderDistance-at;
+    // Climbing is not throttled by zero horizontal distance or ground gun speed.
+    const magnitude=Math.abs(delta)<1e-7?0:Math.max(.101,Math.min(1,Math.abs(delta)*60/2.4));
+    return {vx:0,vz:0,jump:false,climb:Math.sign(delta)*magnitude};
+  }
   const dx = waypoint.x - body.x, dz = waypoint.z - body.z, length = Math.hypot(dx, dz);
   const support = supportBelow(body, .4, world);
   return { vx: length > EPS ? dx / length * speed : 0, vz: length > EPS ? dz / length * speed : 0,
     jump: !!body.grounded && !!support && Math.abs(support.y - body.y) < EPS
-      && waypoint.kind === 'jump' && waypoint.y > body.y + EPS && length <= 1.8 };
+      && waypoint.kind === 'jump' && waypoint.y > body.y + EPS && length <= 1.8, climb:0 };
 }
 
 export function createNavigation(map, { radius = .42, height = 1.84 } = {}) {
@@ -22,7 +31,7 @@ export function createNavigation(map, { radius = .42, height = 1.84 } = {}) {
     throw new Error('Navigation requires a positive body fitting within map bounds.');
   const origin = min + Math.ceil(radius / STEP) * STEP;
   const size = Math.floor((max - Math.ceil(radius / STEP) * STEP - origin) / STEP) + 1;
-  const nodes = [], byKey = new Map(), buckets = new Map(), fields = new Map(), transitions = [];
+  const nodes = [], byKey = new Map(), buckets = new Map(), fields = new Map(), transitions = [],ladderNodes=new Map(),ladderEdges=new Map();
   const bucketKey = p => `${Math.floor((p.x - origin) / STEP)}:${Math.round(p.y * 1e6)}:${Math.floor((p.z - origin) / STEP)}`;
   const supported = (p, r = radius) => canOccupyBody(p, r, height, world) && Math.abs((supportBelow(p, r, world)?.y ?? -100) - p.y) < EPS;
   function clear(a, b, r = radius) {
@@ -80,10 +89,18 @@ export function createNavigation(map, { radius = .42, height = 1.84 } = {}) {
   };
   for (const link of map.traversal?.links ?? []) {
     const from = endpoint(link.from), to = endpoint(link.to);
+    const reverseKind=link.kind==='jump'?'drop':link.kind==='drop'?'jump':link.kind;
     edge(from, to, link.kind, link.id);
-    edge(to, from, link.kind === 'jump' ? 'drop' : link.kind === 'drop' ? 'jump' : 'walk', `${link.id}:reverse`);
+    edge(to, from, reverseKind, `${link.id}:reverse`);
     transitions.push({ from, to, kind: link.kind, linkId: link.id },
-      { from: to, to: from, kind: link.kind === 'jump' ? 'drop' : 'jump', linkId: `${link.id}:reverse` });
+      { from: to, to: from, kind: reverseKind, linkId: `${link.id}:reverse` });
+    if (link.kind==='ladder') {
+      const ladder=world.ladders.find(l=>l.id===link.ladderId);
+      if (!ladder) throw new Error('Missing navigation ladder');
+      ladderNodes.set(ladder.id,{ladder,bottom:from,top:to});
+      ladderEdges.set(link.id,{ladderId:ladder.id,ladderDistance:ladderLength(ladder)});
+      ladderEdges.set(`${link.id}:reverse`,{ladderId:ladder.id,ladderDistance:0});
+    }
   }
   function surface(p, r = radius) {
     if (!finite(p)) return null;
@@ -112,20 +129,61 @@ export function createNavigation(map, { radius = .42, height = 1.84 } = {}) {
     if (fields.size === MAX_FIELDS) fields.delete(fields.keys().next().value);
     fields.set(goal, field); return field;
   }
-  const waypoint = (p, kind = 'walk', linkId = null) => ({ ...p, kind, linkId });
+  const waypoint = (p, kind = 'walk', linkId = null) => ({ ...p, kind, linkId,...(kind==='ladder'?ladderEdges.get(linkId):{}) });
+  const climbWaypoint=(ladder,at)=>({...sampleLadder(ladder,at),kind:'ladder',linkId:null,ladderId:ladder.id,ladderDistance:at});
+  const attached=p=>p?.ladderId?ladderNodes.get(p.ladderId):null;
+  function cellsFor(p) {
+    if (p?.ladderId) { const entry=attached(p); return entry?[entry.bottom,entry.top]:[]; }
+    const cell=cellFor(p); return cell<0?[]:[cell];
+  }
+  function goalLanding(from,goal) {
+    const entry=attached(goal); if (!entry) return null;
+    const at=projectLadder(entry.ladder,goal).distance,length=ladderLength(entry.ladder);
+    let best=null,score=Infinity;
+    for (const [cell,d] of [[entry.bottom,at],[entry.top,length-at]]) {
+      const field=fieldFor(cell);
+      for (const start of cellsFor(from)) if (field[start]>=0 && field[start]+d/STEP<score) {
+        best=nodes[cell].point; score=field[start]+d/STEP;
+      }
+    }
+    return best;
+  }
   const api = {
     nextWaypoint(from, goal) {
       if (!finite(from) || !finite(goal)) return null;
+      if ((from.ladderId && !attached(from)) || (goal.ladderId && !attached(goal))) return null;
+      if (from.ladderId && from.ladderId===goal.ladderId) return climbWaypoint(attached(from).ladder,projectLadder(attached(from).ladder,goal).distance);
+      if (goal.ladderId) {
+        const landing=goalLanding(from,goal); if (!landing) return null;
+        if (!from.ladderId && from.grounded!==false && Math.hypot(from.x-landing.x,from.y-landing.y,from.z-landing.z)<.06)
+          return climbWaypoint(attached(goal).ladder,projectLadder(attached(goal).ladder,goal).distance);
+        return api.nextWaypoint(from,landing);
+      }
       const end = cellFor(goal);
       if (end < 0) return null;
       const field = fieldFor(end);
+      if (from.ladderId) {
+        const entry=attached(from),at=projectLadder(entry.ladder,from).distance,length=ladderLength(entry.ladder);
+        let best=null,score=Infinity,travel=Infinity;
+        // Follow the graph's downhill field. Adding physical distance to its
+        // unweighted edge count would repeatedly choose the near entry again.
+        for (const [cell,d] of [[entry.bottom,0],[entry.top,length]]) if (field[cell]>=0
+          && (field[cell]<score || (field[cell]===score && Math.abs(d-at)<travel))) {
+          best=d; score=field[cell]; travel=Math.abs(d-at);
+        }
+        return best===null?null:climbWaypoint(entry.ladder,best);
+      }
       // A route transition must finish at its landing, not be snapped back to
       // the last ground cell while its feet are in the air.
       for (const transition of transitions) {
         if (field[transition.to] < 0 || field[transition.to] >= field[transition.from]) continue;
         const a = nodes[transition.from].point, b = nodes[transition.to].point;
-        if (from.grounded !== false && (transition.kind !== 'drop' || Math.abs(from.y - a.y) > EPS)) continue;
+        if (transition.kind==='ladder') continue;
+        if (transition.kind==='stair') {
+          if (from.grounded===false || Math.hypot(from.x-b.x,from.y-b.y,from.z-b.z)<.04) continue;
+        } else if (from.grounded !== false && (transition.kind !== 'drop' || Math.abs(from.y - a.y) > EPS)) continue;
         const dx = b.x - a.x, dz = b.z - a.z, square = dx * dx + dz * dz;
+        if (square<EPS*EPS) continue;
         const t = ((from.x - a.x) * dx + (from.z - a.z) * dz) / square;
         const sideways = Math.hypot(from.x - a.x - t * dx, from.z - a.z - t * dz);
         if (t >= -.01 && t <= 1.01 && sideways < .25 && from.y >= Math.min(a.y, b.y) - EPS && from.y <= Math.max(a.y, b.y) + .72)
@@ -145,9 +203,10 @@ export function createNavigation(map, { radius = .42, height = 1.84 } = {}) {
       if (distance(a, snapped) > EPS) return waypoint(snapped);
       return null;
     },
-    reachable(from, goal) { const a = cellFor(from), b = cellFor(goal); return a >= 0 && b >= 0 && fieldFor(b)[a] >= 0; },
+    reachable(from, goal) { return cellsFor(from).some(a=>cellsFor(goal).some(b=>fieldFor(b)[a]>=0)); },
     nextApproachWaypoint(from, goal, goalRadius) {
       if (!Number.isFinite(goalRadius) || goalRadius <= 0 || goalRadius > radius) return null;
+      if (goal?.ladderId || from?.ladderId) return api.nextWaypoint(from,goal);
       const p = surface(goal, goalRadius); if (!p) return null;
       if (cellFor(p) >= 0) return api.nextWaypoint(from, p);
       const candidates = nearby(p).map(id => nodes[id].point).filter(q => distance(p, q) <= .75 && clear(p, q, goalRadius)).sort((a, b) => distance(a, p) - distance(b, p));
@@ -165,6 +224,7 @@ export function createNavigation(map, { radius = .42, height = 1.84 } = {}) {
       return null;
     },
     clearCache() { fields.clear(); },
+    stats() { return {nodes:nodes.length,cachedFields:fields.size}; },
   };
   return api;
 }

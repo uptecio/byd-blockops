@@ -584,7 +584,7 @@ export class ArenaGame {
       if (bot.waypoint) {
         const dx = bot.waypoint.x - position.x, dz = bot.waypoint.z - position.z, length = Math.hypot(dx, dz);
         const step = Math.min(length, this.botTuning.speed * dt);
-        if (length > .001) {
+        if (length > .001 || bot.waypoint.kind === 'ladder') {
           movement = navigationIntent(position, bot.waypoint, step / dt, this.world.spatial);
           bot.model.rotation.y = Math.atan2(dx, dz);
         }
