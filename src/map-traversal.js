@@ -1,4 +1,4 @@
-import { createSpatialWorld, canOccupyBody, supportBelow, segmentClear } from './spatial.js';
+import { createSpatialWorld, canOccupyBody, supportBelow, segmentClear, sweepBodyClear } from './spatial.js';
 
 export const SIDES = Object.freeze({ N: { x: 0, z: -1 }, S: { x: 0, z: 1 }, E: { x: 1, z: 0 }, W: { x: -1, z: 0 } });
 const point = (x, y, z) => ({ x, y, z });
@@ -88,6 +88,15 @@ export function validateTraversal(map) {
   if (!traversal || !Array.isArray(map.hideSpots)) return { ok: false, errors: ['Missing traversal metadata'] };
   if (traversal.roofs.length < 2 || !traversal.shelters.length || map.hideSpots.length < 2) errors.push('Incomplete map traversal content');
   const supported = p => canOccupyBody(p, .42, 1.84, world) && Math.abs((supportBelow(p, .42, world)?.y ?? -100) - p.y) < 1e-8;
+  for (const ladder of world.ladders) {
+    for (const end of [ladder.bottom,ladder.top]) if (!supported(end.point) || supportBelow(end.point,.42,world)?.id!==end.supportId) errors.push(`Unsupported ladder endpoint ${ladder.id}`);
+    for (let i=1;i<ladder.path.length;i++) {
+      if (!sweepBodyClear(ladder.path[i-1],ladder.path[i],.42,1.84,world)) errors.push(`Blocked ladder body path ${ladder.id}`);
+    }
+  }
+  for (const stair of world.stairs) for (const tread of stair.treads) {
+    if (!supported(tread.point) || supportBelow(tread.point,.42,world)?.id!==tread.supportId) errors.push(`Unsupported stair tread ${stair.id}`);
+  }
   const ids = new Set();
   for (const object of [...traversal.roofs, ...traversal.shelters, ...traversal.links, ...map.hideSpots]) {
     if (!object.id || ids.has(object.id)) errors.push(`Duplicate metadata ID ${object.id}`);
@@ -95,15 +104,18 @@ export function validateTraversal(map) {
   }
   for (const link of traversal.links) {
     if (!supported(link.from) || !supported(link.to)) errors.push(`Unsupported link ${link.id}`);
-    if (!['walk', 'jump', 'drop'].includes(link.kind) || link.width < 1.6 || link.depth < 1.2
+    if (!['walk', 'jump', 'drop', 'stair', 'ladder'].includes(link.kind) || link.width < 1.6 || link.depth < (link.kind==='stair'?.35:1.2)
       || !Number.isFinite(link.width) || !Number.isFinite(link.depth)) errors.push(`Narrow/invalid route ${link.id}`);
+    if (link.kind==='ladder' && !world.ladders.some(l=>l.id===link.ladderId && l.routeId===link.routeId
+      && distance(l.bottom.point,link.from)<1e-8 && distance(l.top.point,link.to)<1e-8)) errors.push(`Missing ladder access ${link.id}`);
+    if (link.kind==='stair' && !world.stairs.some(s=>s.routeId===link.routeId && s.links.some(l=>l.fromSupportId===link.fromSupportId && l.toSupportId===link.toSupportId))) errors.push(`Missing stair access ${link.id}`);
     const rise = link.to.y - link.from.y;
     if (link.kind === 'jump' && (rise <= 0 || rise > .55 + 1e-8)) errors.push(`Impossible riser ${link.id}`);
     const supportId = supportBelow(link.to, .42, world)?.id;
     const landing = world.solids.find(s => s.id === supportId);
     if (landing) {
       const alongX = Math.abs(link.to.x - link.from.x) > Math.abs(link.to.z - link.from.z);
-      if ((alongX ? landing.d : landing.w) < 1.6 || (alongX ? landing.w : landing.d) < 1.2) errors.push(`Narrow physical landing ${link.id}`);
+      if ((alongX ? landing.d : landing.w) < 1.6 || (alongX ? landing.w : landing.d) < (link.kind==='stair'?.35:1.2)) errors.push(`Narrow physical landing ${link.id}`);
     }
   }
   for (const roof of traversal.roofs) {

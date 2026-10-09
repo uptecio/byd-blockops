@@ -1,5 +1,6 @@
 // Feet positions and solid heights use world units. Ground is the implicit Y=0 plane.
 import { MOVEMENT } from './movement-constants.js';
+import { normalizeAccess } from './access-schema.js';
 const EPS = 1e-8;
 const finitePoint = point => point && [point.x, point.y, point.z].every(Number.isFinite);
 
@@ -23,7 +24,7 @@ export function createSpatialWorld(map) {
     ids.add(id);
     return { ...source, id, minY, maxY, height: maxY - minY };
   });
-  return { mapId: map.id, bounds, solids, maxFeetY: Math.max(0, ...solids.map(solid => solid.maxY)) + MOVEMENT.jumpVelocity ** 2 / (2 * MOVEMENT.gravity) + .1 };
+  return { mapId: map.id, bounds, solids, ...normalizeAccess(map), maxFeetY: Math.max(0, ...solids.map(solid => solid.maxY)) + MOVEMENT.jumpVelocity ** 2 / (2 * MOVEMENT.gravity) + .1 };
 }
 
 export function overlapsFootprint(position, radius, solid) {
@@ -42,6 +43,37 @@ export function canOccupyBody(position, radius, height, world) {
     || position.y < -EPS || !inBounds(position, radius, world)) return false;
   return !world.solids.some(solid => position.y < solid.maxY - EPS && position.y + height > solid.minY + EPS
     && overlapsFootprint(position, radius, solid));
+}
+
+// Continuous upright cylinder sweep. Restrict each solid to its vertical
+// overlap interval, then measure horizontal segment-to-rectangle distance.
+export function sweepBodyClear(a, b, radius, height, world) {
+  if (!canOccupyBody(a,radius,height,world) || !canOccupyBody(b,radius,height,world)) return false;
+  const dy=b.y-a.y;
+  for (const solid of world.solids) {
+    const low=solid.minY-height+EPS,high=solid.maxY-EPS;
+    let enter=0,leave=1;
+    if (Math.abs(dy)<1e-12) { if (a.y<=low || a.y>=high) continue; }
+    else {
+      const u=(low-a.y)/dy,v=(high-a.y)/dy;
+      enter=Math.max(0,Math.min(u,v)); leave=Math.min(1,Math.max(u,v));
+      if (enter>=leave) continue;
+    }
+    const p={x:a.x+(b.x-a.x)*enter,z:a.z+(b.z-a.z)*enter};
+    const q={x:a.x+(b.x-a.x)*leave,z:a.z+(b.z-a.z)*leave};
+    const minX=solid.x-solid.w/2,maxX=solid.x+solid.w/2,minZ=solid.z-solid.d/2,maxZ=solid.z+solid.d/2;
+    const dx=q.x-p.x,dz=q.z-p.z,square=dx*dx+dz*dz;
+    const pointDistance = v => (v.x-Math.max(minX,Math.min(maxX,v.x)))**2+(v.z-Math.max(minZ,Math.min(maxZ,v.z)))**2;
+    let nearest=Math.min(pointDistance(p),pointDistance(q));
+    if (square>0 && rayBoxHit({x:p.x,y:0,z:p.z},{x:dx,y:0,z:dz},Math.sqrt(square),
+      {min:{x:minX,y:-1,z:minZ},max:{x:maxX,y:1,z:maxZ}})) nearest=0;
+    for (const x of [minX,maxX]) for (const z of [minZ,maxZ]) {
+      const t=square?Math.max(0,Math.min(1,((x-p.x)*dx+(z-p.z)*dz)/square)):0;
+      nearest=Math.min(nearest,(x-p.x-t*dx)**2+(z-p.z-t*dz)**2);
+    }
+    if (nearest<radius*radius-EPS) return false;
+  }
+  return true;
 }
 
 export function supportBelow(position, radius, world) {
