@@ -1,4 +1,5 @@
 import { canOccupyBody, overlapsFootprint, supportBelow } from './spatial.js';
+import { stepStair } from './stair-movement.js';
 
 import { MOVEMENT } from './movement-constants.js';
 export { MOVEMENT } from './movement-constants.js';
@@ -34,7 +35,9 @@ export function moveCharacter(body, intent, dt, { world, radius = .4, height = 1
   for (let step = 0; step < steps; step++) {
     for (const [axis, velocity] of [['x', intent.vx], ['z', intent.vz]]) {
       const candidate = { ...next, [axis]: Math.max(world.bounds.min + radius, Math.min(world.bounds.max - radius, next[axis] + velocity * h)) };
-      if (canOccupyBody(candidate, radius, height, world)) next[axis] = candidate[axis];
+      const stair=stepStair(next,candidate,{world,radius,height});
+      if (stair) Object.assign(next,stair);
+      else if (canOccupyBody(candidate, radius, height, world)) next[axis] = candidate[axis];
     }
     next.velocityY -= MOVEMENT.gravity * h;
     let targetY = next.y + next.velocityY * h;
