@@ -59,17 +59,25 @@ test('strict room snapshots accept actual climbing, reject forged fields atomica
   assert.equal(client.room.players.length,3);assert.equal(client.room.players[0].ladderId,ladder.id);
 });
 
-test('independent websocket peers and a late join see actual public-input ascent hold and descent',async t=>{
-  const previous=globalThis.WebSocket;globalThis.WebSocket=WebSocket;t.after(()=>{globalThis.WebSocket=previous;});
+for (const snapshotDelay of [0,100]) test(`independent websocket peers and a late join see actual public-input ascent hold and descent (${snapshotDelay}ms snapshot delay)`,async t=>{
+  class DelayedWebSocket extends WebSocket {
+    addEventListener(type,listener,...options) {
+      return super.addEventListener(type,type==='message'&&snapshotDelay
+        ? event=>setTimeout(()=>{if(this.readyState===WebSocket.OPEN)listener(event);},snapshotDelay)
+        : listener,...options);
+    }
+  }
+  const previous=globalThis.WebSocket;globalThis.WebSocket=DelayedWebSocket;t.after(()=>{globalThis.WebSocket=previous;});
   const server=await startServer({port:0});t.after(()=>server.close());
   const errors=[],clients=Array.from({length:3},()=>new RoomClient({onError:e=>errors.push(e)}));
   t.after(()=>clients.forEach(c=>c.close()));const [a,b,late]=clients,url=`http://127.0.0.1:${server.port}`;
-  const until=async(check,timeout=5000)=>{const deadline=Date.now()+timeout;while(Date.now()<deadline){if(check())return;await new Promise(r=>setTimeout(r,30));}assert.fail('Authoritative ladder state timed out');};
+  const inputTrace=[];
+  const until=async(check,timeout=5000)=>{const deadline=Date.now()+timeout;while(Date.now()<deadline){if(check())return;await new Promise(r=>setTimeout(r,30));}assert.fail(`Authoritative ladder state timed out: ${JSON.stringify({inputTrace:inputTrace.slice(-12),clients:clients.map(c=>({id:c.id,room:c.room})),errors})}`);};
   await a.connect(url,{type:'create',name:'Climber',mapId:'harbor'});await b.connect(url,{type:'join',name:'Observer',code:a.room.code});
   a.send({type:'start'});await until(()=>a.room.phase==='playing'&&b.room.phase==='playing');
   const map=getMap('harbor'),ladder=map.traversal.ladders[0],navigation=createNavigation(map,{radius:.4}),goal=ladder.bottom.point;
   const own=()=>a.room.players.find(p=>p.id===a.id);
-  const controls=fields=>a.send({type:'input',lifeId:own().lifeId,x:0,y:0,yaw:0,pitch:0,...fields});
+  const controls=fields=>{inputTrace.push({at:Date.now(),body:{...own()},fields});return a.send({type:'input',lifeId:own().lifeId,x:0,y:0,yaw:0,pitch:0,...fields});};
   const deadline=Date.now()+30000;
   while(Math.hypot(own().x-goal.x,own().z-goal.z)>.08&&Date.now()<deadline) {
     const body=own(),next=navigation.nextWaypoint(body,goal);assert.ok(next);
@@ -77,6 +85,11 @@ test('independent websocket peers and a late join see actual public-input ascent
     controls({x:dx*scale,y:-dz*scale});await new Promise(r=>setTimeout(r,67));
   }
   assert.ok(Math.hypot(own().x-goal.x,own().z-goal.z)<=.08,'public controls reached authored ladder entry');
+  // The last walking packet can carry the server past the centre while this
+  // snapshot still shows the near side. Stop and observe newer simulation
+  // time before deriving facing; an away-facing grab is correctly refused.
+  const arrivalTime=a.room.timeLeft;controls({});
+  await until(()=>a.room.timeLeft<arrivalTime-.4);
   controls({y:1,yaw:Math.atan2(own().x-goal.x,own().z-goal.z)});
   await until(()=>own().ladderId===ladder.id&&own().y>.25);controls({yaw:2,pitch:.7});
   await new Promise(r=>setTimeout(r,400));const height=own().y;
