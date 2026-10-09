@@ -50,3 +50,18 @@ export function accessFixture({ kind = 'ladder', blocked = false } = {}) {
   }
   return { map, world:createSpatialWorld(map), start:{...start}, goal:{...goal}, ladderId };
 }
+
+export function roofAuditFixture({ screen = true, open = false, high = false, guardTop = false } = {}) {
+  const target={id:'target',x:0,z:0,w:4,d:4,minY:0,maxY:4};
+  const source={id:'source',x:-5,z:0,w:4,d:4,minY:0,maxY:high?6:4};
+  const ownLadder={id:'own-ladder',routeId:'own-route',width:1.6,
+    path:[{x:3,y:0,z:0},{x:3,y:4,z:0},{x:1,y:4,z:0}],
+    bottom:{point:{x:3,y:0,z:0},supportId:'ground',zone:{minX:2.8,maxX:3.2,minZ:-.2,maxZ:.2}},
+    top:{point:{x:1,y:4,z:0},supportId:'target',zone:{minX:.8,maxX:1.2,minZ:-.2,maxZ:.2}}};
+  const solids=[target,source];
+  if (screen) for (const [z,d] of open?[[-4.5,7],[4.5,7]]:[[0,16]]) solids.push({id:`guard:${z}`,x:-2.1,z,w:.2,d,minY:0,maxY:guardTop?4.5:5});
+  return {id:'audit',bounds:{min:-25,max:25},solids,traversal:{
+    roofs:[{id:'target-roof',point:{x:1,y:4,z:0},supportId:'target',singleEntrance:true,routeId:'own-route',routeSolidIds:[],guardSolidIds:solids.filter(s=>s.id.startsWith('guard')).map(s=>s.id)},
+      {id:'source-roof',point:{x:-5,y:source.maxY,z:0},supportId:'source',singleEntrance:false,routeSolidIds:[]}],
+    ladders:[ownLadder],stairs:[],links:[]}};
+}

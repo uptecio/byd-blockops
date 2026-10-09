@@ -1,34 +1,9 @@
 import { createSpatialWorld, canOccupyBody, supportBelow, segmentClear, sweepBodyClear } from './spatial.js';
+import { auditRoofApproaches } from './roof-access-validation.js';
 
 export const SIDES = Object.freeze({ N: { x: 0, z: -1 }, S: { x: 0, z: 1 }, E: { x: 1, z: 0 }, W: { x: -1, z: 0 } });
 const point = (x, y, z) => ({ x, y, z });
 const distance = (a, b) => Math.hypot(a.x - b.x, a.y - b.y, a.z - b.z);
-
-function roofHasBypass(world, roof) {
-  const omitted = new Set(roof.routeSolidIds ?? []), radius = .42;
-  const boxes = world.solids.filter(s => !omitted.has(s.id));
-  // Conservative reachability: this graph permits every possible jump between
-  // footprints, even obstructed ones. If it still cannot reach the roof after
-  // its staircase is removed, no faster/diagonal normal-jump bypass exists.
-  const surfaces = boxes.filter(s => s.x + s.w / 2 > world.bounds.min && s.x - s.w / 2 < world.bounds.max
-    && s.z + s.d / 2 > world.bounds.min && s.z - s.d / 2 < world.bounds.max
-    && !boxes.some(ceiling => ceiling.id !== s.id && ceiling.maxY > s.maxY + 1e-8 && ceiling.minY < s.maxY + 1.84
-      && ceiling.x - ceiling.w / 2 <= s.x - s.w / 2 && ceiling.x + ceiling.w / 2 >= s.x + s.w / 2
-      && ceiling.z - ceiling.d / 2 <= s.z - s.d / 2 && ceiling.z + ceiling.d / 2 >= s.z + s.d / 2));
-  const apex = 4.3 ** 2 / 26;
-  const reached = new Set(surfaces.filter(s => s.maxY <= apex).map(s => s.id));
-  const queue = surfaces.filter(s => reached.has(s.id));
-  for (let head = 0; head < queue.length; head++) for (const target of surfaces) {
-    if (reached.has(target.id)) continue;
-    const source = queue[head], rise = target.maxY - source.maxY;
-    if (rise > apex) continue;
-    const flight = (4.3 + Math.sqrt(4.3 ** 2 - 26 * rise)) / 13;
-    const dx = Math.max(0, Math.abs(target.x - source.x) - (target.w + source.w) / 2);
-    const dz = Math.max(0, Math.abs(target.z - source.z) - (target.d + source.d) / 2);
-    if (Math.hypot(dx, dz) <= flight * 6 + radius * 2) { reached.add(target.id); queue.push(target); }
-  }
-  return reached.has(roof.supportId);
-}
 
 export function addRoom(builder, { id, x, z, w, d, floorY = 0, roofY, doorSide, colour, trim }) {
   const thickness = .18, ceiling = roofY - thickness, doorway = 1.8;
@@ -124,7 +99,6 @@ export function validateTraversal(map) {
       const entrances = traversal.links.filter(link => link.to.y === roof.point.y && distance(link.to, roof.point) < .05 && link.kind !== 'drop');
       if (entrances.length !== 1 || entrances[0].id !== roof.entryLinkId) errors.push(`Multiple roof entrances ${roof.id}`);
       if (!world.solids.some(s => s.id === roof.supportId)) errors.push(`Missing roof support ${roof.id}`);
-      else if (roofHasBypass(world, roof)) errors.push(`Alternative roof approach ${roof.id}`);
     }
   }
   for (const shelter of traversal.shelters) if (!supported(shelter.point)) errors.push(`Blocked shelter ${shelter.id}`);
@@ -142,5 +116,6 @@ export function validateTraversal(map) {
         y: a.y + (b.y - a.y) * n / 8, z: a.z + (b.z - a.z) * n / 8 }, .42, 1.84, world)) errors.push(`Blocked anchor passage ${spot.id}`);
     }
   }
+  if (!errors.length) errors.push(...auditRoofApproaches(map).errors);
   return { ok: errors.length === 0, errors };
 }
