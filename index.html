@@ -12,7 +12,7 @@
 <body data-mode="home">
   <canvas id="arena" aria-label="First-person block arena"></canvas>
   <section id="home-screen" class="screen home-screen">
-    <header class="topbar"><div class="brand"><span class="brand-mark" aria-hidden="true">B<span>O</span></span><div>BLOCK OPS<small>YOUR ARENA. YOUR RULES.</small></div></div><button id="home-settings" class="secondary">⚙ SETTINGS</button></header>
+    <header class="topbar"><div class="brand"><button id="home-secret-logo" type="button" class="brand-mark secret-logo" aria-label="Block Ops logo">B<span>O</span></button><div>BLOCK OPS<small>YOUR ARENA. YOUR RULES.</small></div></div><button id="home-settings" class="secondary">⚙ SETTINGS</button></header>
     <main class="home-layout">
       <section class="character-panel" aria-label="Selected character">
         <span class="eyebrow">READY WHEN YOU ARE</span><h1 id="home-skin-name">Ranger</h1><span id="home-team" class="home-team">COSMETICS ONLY · ALL GUNS FREE</span>
@@ -106,7 +106,26 @@
   <div id="progression-toast" role="status" aria-live="polite"></div>
   <div id="progression-live-save-status" class="save-status" role="status" aria-live="polite" hidden></div>
   <section id="grenade-picker" class="modal-screen" role="dialog" aria-modal="true" aria-labelledby="grenade-picker-title" hidden><div class="dialog"><div class="dialog-heading"><h2 id="grenade-picker-title">GRENADE TYPE</h2><button id="grenade-picker-close" class="icon-button" aria-label="Close grenade picker">×</button></div><p>Select a carried type. Use Throw when you return to the match.</p><div id="grenade-options"></div><button id="grenade-picker-resume" class="primary">RETURN TO MATCH ↗</button></div></section>
-  <section id="pause-screen" class="modal-screen" hidden><div class="dialog pause-dialog"><span class="eyebrow">TAKE YOUR TIME</span><h2>GAME PAUSED</h2><p>Your round is right where you left it.</p><button id="resume-button" class="primary">BACK TO THE ACTION <span>↗</span></button><button id="pause-loadout" class="secondary">CHANGE LOADOUT</button><button class="secondary settings-open">SETTINGS</button><button id="pause-home" class="secondary">HOME</button><button id="quit-button" class="text-button">End round & return Home</button></div></section>
+  <section id="pause-screen" class="modal-screen" hidden><div class="dialog pause-dialog"><button id="pause-secret-logo" type="button" class="brand-mark secret-logo" aria-label="Block Ops logo" hidden>B<span>O</span></button><span class="eyebrow">TAKE YOUR TIME</span><h2>GAME PAUSED</h2><p>Your round is right where you left it.</p><button id="resume-button" class="primary">BACK TO THE ACTION <span>↗</span></button><button id="pause-loadout" class="secondary">CHANGE LOADOUT</button><button class="secondary settings-open">SETTINGS</button><button id="pause-home" class="secondary">HOME</button><button id="quit-button" class="text-button">End round & return Home</button></div></section>
+  <section id="solo-powers-screen" class="modal-screen" role="dialog" aria-modal="true" aria-labelledby="solo-powers-title" aria-describedby="solo-powers-status" hidden>
+    <div class="dialog solo-powers-dialog">
+      <h2 id="solo-powers-title">ENTER YOUR PIN</h2><p id="solo-powers-status" role="status" aria-live="polite"></p>
+      <form id="solo-powers-pin-form" autocomplete="off">
+        <label class="secret-pin-row">PIN<input id="solo-powers-pin" type="password" inputmode="numeric" minlength="4" maxlength="8" pattern="[0-9]{4,8}" autocomplete="off" required></label>
+        <label id="solo-powers-confirm-row" class="secret-pin-row" hidden>CONFIRM PIN<input id="solo-powers-pin-confirm" type="password" inputmode="numeric" minlength="4" maxlength="8" pattern="[0-9]{4,8}" autocomplete="off"></label>
+        <button id="solo-powers-pin-submit" type="submit" class="primary">UNLOCK</button>
+      </form>
+      <div id="solo-powers-controls" hidden>
+        <label class="secret-switch">Invincibility<input id="solo-powers-invincible" type="checkbox"></label>
+        <label class="secret-switch">Unlimited gun ammo · no reload<input id="solo-powers-ammo" type="checkbox"></label>
+        <label class="secret-switch">Super speed<input id="solo-powers-speed" type="checkbox"></label>
+        <label class="secret-speed" for="solo-powers-speed-multiplier">Speed <output id="solo-powers-speed-value" for="solo-powers-speed-multiplier">2.0×</output></label>
+        <input id="solo-powers-speed-multiplier" type="range" min="2" max="5" step="0.1" value="2" disabled>
+        <button id="solo-powers-apply" type="button" class="primary">APPLY</button>
+      </div>
+      <button id="solo-powers-cancel" type="button" class="secondary">CANCEL</button>
+    </div>
+  </section>
   <section id="confirm-home-screen" class="modal-screen" role="dialog" aria-modal="true" aria-labelledby="confirm-home-title" hidden><div class="dialog"><span class="eyebrow">RETURN HOME</span><h2 id="confirm-home-title">END THIS ROUND?</h2><p id="confirm-home-message">Your current solo round will end.</p><button id="confirm-home" class="primary">RETURN HOME <span>↗</span></button><button id="cancel-home" class="secondary">KEEP PLAYING</button></div></section>
   <section id="settings-screen" class="modal-screen" hidden><div class="dialog settings-dialog"><div class="dialog-heading"><div><span class="eyebrow">MAKE IT YOURS</span><h2>SETTINGS</h2></div><button id="close-settings" class="icon-button" aria-label="Close settings">×</button></div><label class="setting-row">Look sensitivity <output id="sensitivity-value"></output><input id="sensitivity" type="range" min="0.4" max="2" step="0.1"></label><label class="setting-row">Control size <output id="control-size-value"></output><input id="control-size" type="range" min="0.8" max="1.3" step="0.1"></label><label class="setting-row">Bot count <output id="bots-value"></output><input id="bots" type="range" min="1" max="8" step="1"></label><label class="setting-row">Bot difficulty<select id="difficulty"><option value="easy">Easy · relaxed warm-up</option><option value="normal">Normal · keep moving</option><option value="hard">Hard · stay sharp</option></select></label><label class="switch-row">Game sound<input id="sound" type="checkbox"></label><p class="setting-note"><span id="bot-settings-note">Bot count and difficulty apply to normal solo rounds, not Zombies.</span><br>Desktop: WASD move · drag to aim · F fire · R reload · Space jump · E aim · Esc pause.</p><button id="settings-done" class="primary">DONE <span>✓</span></button></div></section>
   <section id="results-screen" class="modal-screen" hidden><div class="dialog results-dialog"><span id="result-mode" class="eyebrow">ROUND COMPLETE</span><h2 id="result-title">NICE SHOOTING.</h2><p>Another round. Another chance to beat your best.</p><div class="result-stats"><div><strong id="result-kills">0</strong><span id="result-kills-label">ELIMINATIONS</span></div><div><strong id="result-deaths">0</strong><span id="result-deaths-label">DEATHS</span></div></div><p id="zombie-best" hidden></p><section id="results-progression" aria-label="Round XP"></section><button id="again-button" class="primary">PLAY AGAIN <span>↗</span></button><button id="results-loadout" class="secondary">CHANGE LOADOUT</button><button id="results-home" class="secondary">HOME</button></div></section>

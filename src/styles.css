@@ -95,3 +95,20 @@ body:not([data-mode=playing]) #progression-live-save-status{display:none}
 @media(max-height:700px){#home-progression{margin-top:8px;font-size:9px}.progression-rank{font-size:12px}.home-screen #skin-grid{max-height:102px}.character-stage{min-height:95px}}
 @media(max-height:560px) and (min-width:651px){.character-panel{padding:13px}.character-stage{min-height:72px}.character-loadout{padding-top:8px}.character-loadout strong{font-size:13px}.home-screen .skin-card{font-size:9px;padding:5px}.home-screen #skin-grid{max-height:96px}.home-screen .home-deploy>span{font-size:8px}.home-screen .home-options{gap:4px}.home-team{font-size:8px}.progression-total{margin-left:0}.save-status{font-size:8px}.finish-card{font-size:9px}}
 @media(max-width:650px) and (orientation:portrait){.armory-layout{flex:none}.arsenal{overflow:visible}.home-screen #skin-grid{max-height:200px}#progression-toast,#progression-live-save-status{max-width:80%}}
+
+/* Hidden solo controls keep the existing Home/Pause origin underneath. */
+.secret-logo{min-width:44px;min-height:44px;padding:0;flex-shrink:0}
+#pause-secret-logo{display:inline-flex;vertical-align:middle;margin:0 14px 0 0}
+#solo-powers-screen{z-index:45;padding:12px;align-items:center}
+.solo-powers-dialog{width:440px;max-height:100%;padding:20px;overflow-y:auto;touch-action:pan-y;-webkit-overflow-scrolling:touch}
+.solo-powers-dialog h2{margin:0 0 8px;font-size:24px}
+.solo-powers-dialog p{margin:0 0 12px;line-height:1.45;min-height:18px}
+.secret-pin-row{display:block;margin:10px 0;font-size:11px;font-weight:700;letter-spacing:1px}
+.secret-pin-row input{display:block;width:100%;min-height:44px;margin-top:6px;padding:10px;background:#0f1b28;color:#fff;border:1px solid #7fa1b5;border-radius:5px;font-size:18px;letter-spacing:5px;touch-action:auto;-webkit-user-select:text;user-select:text}
+.secret-switch{display:flex;align-items:center;justify-content:space-between;min-height:48px;font-size:13px;border-bottom:1px solid #ffffff18;touch-action:pan-y}
+.secret-switch input{width:44px;height:44px;flex-shrink:0;margin:0 0 0 10px;accent-color:#dafa58;touch-action:manipulation}
+.secret-speed{display:flex;justify-content:space-between;margin-top:12px;font-size:12px}.secret-speed output{color:#dafa58}
+#solo-powers-speed-multiplier{width:100%;min-height:44px;margin:0;touch-action:pan-x;accent-color:#dafa58}
+.solo-powers-dialog button{min-height:44px;touch-action:manipulation}
+#solo-powers-pin-submit,#solo-powers-apply,#solo-powers-cancel{width:100%;margin-top:10px;padding:13px}
+@media(max-height:400px){#solo-powers-screen{align-items:flex-start;padding:8px}.solo-powers-dialog{padding:14px}.solo-powers-dialog h2{font-size:20px}}
