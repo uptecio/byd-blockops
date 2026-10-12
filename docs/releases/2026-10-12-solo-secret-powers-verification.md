@@ -1,6 +1,6 @@
 # Solo secret powers verification
 
-Candidate: Block Ops **0.9.1**, Android version code **12**, network protocol **7**. Modern/legacy browser powers suites, exact APK packaging, Android emulator acceptance and segmented rooftop follow-up pass. Final full-suite gate and independent review are pending. This is not a physical-BYD compatibility claim or a live deployment.
+Candidate: Block Ops **0.9.1**, Android version code **12**, network protocol **7**. Modern/legacy browser powers suites, exact APK packaging, Android emulator acceptance, segmented rooftop follow-up and the final full unit suite pass. Independent review is pending. This is not a physical-BYD compatibility claim or a live deployment.
 
 ## Feature and access
 
@@ -12,7 +12,7 @@ Powers are solo-only, memory-only and reset when a round ends, the player confir
 
 | Check | Result and evidence |
 | --- | --- |
-| Full unit suite | 1,301 passed, 0 failed/skipped; `task-6-unit-full-second.log`, 150,401 ms. |
+| Full unit suite | Final gate: 1,301 passed, 0 failed/skipped; `task-6-tests.log`, 135,339 ms. Earlier complete run also passed1,301 in150,401 ms (`task-6-unit-full-second.log`). |
 | Home/Pause browser integration | Real held fire, cancellation, explicit Resume, native-pause callback, fatal callback, failed join, a genuine 15-kill round, earned skin, and persistent-browser reopening passed. |
 | Capability failures | Missing crypto, throwing crypto getter and throwing storage getter leave the secret gate locked while ordinary Solo starts. |
 | Touch layouts | All eight viewport/scale cases passed in modern and capability-masked legacy Chromium: 1280×720, 1024×600, 854×480 and keyboard-reduced 854×300; scales 0.8 and 1.3. Five actual taps, focus containment/wrapping, 44px targets, scrolling and touch slider tested. |
@@ -73,3 +73,7 @@ The native test ran from the working checkout after two test-only measurement/sy
 ## Compatibility boundary
 
 Capability-masked Chromium and Android16's emulator are not the BYD browser engine/GPU. Physical head-unit Web Crypto/PBKDF2, touch interaction and 5× frame performance remain unverified. No player saves, old APKs or public game rooms were cleared, and no public server was restarted.
+
+## Local preview
+
+An isolated Solo preview is serving `reviewed-dist` at `http://localhost:35359`; all four HTTP responses were checked byte-for-byte against the frozen assets. It is localhost-only and does not replace the public multiplayer server. This new browser origin has separate local saves/PIN from previous URLs and the APK; no existing save was overwritten or migrated.
