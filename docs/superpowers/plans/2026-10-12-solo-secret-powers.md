@@ -10,7 +10,7 @@
 
 **Spec:** `docs/superpowers/specs/2026-10-12-solo-secret-powers-design.md` (approved 2026-10-12).
 
-**Status:** Awaiting user review and execution-method selection. Nothing below has been implemented or tested by writing this plan.
+**Status:** User approved the plan and selected option 1 (native inline implementation) on 2026-10-12. Execution evidence is tracked separately; unchecked steps are not completion claims.
 
 ## Global Constraints
 
