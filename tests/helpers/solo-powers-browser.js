@@ -21,5 +21,5 @@ export async function choosePowers(page,config) {
   }
   if(config.superSpeed)await page.locator('#solo-powers-speed-multiplier').fill(String(config.speedMultiplier));
   await page.locator('#solo-powers-apply').click();
-  await page.waitForSelector('#solo-powers-screen[hidden]',{state:'attached'});
+  await page.waitForFunction(()=>document.getElementById('solo-powers-screen').hidden);
 }

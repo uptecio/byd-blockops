@@ -18,7 +18,7 @@ export async function observeGame(page) {
   const read = async () => {
     const result = await cdp.send('Runtime.callFunctionOn', { objectId: found.result.objectId, returnByValue: true,
       functionDeclaration: `function(){const materials=new Set();this.scene.traverse(o=>{for(const m of (Array.isArray(o.material)?o.material:[o.material]))if(m)materials.add(m);});return {
-        active:this.active, modeId:this.settings.modeId, mapId:this.settings.mapId,
+        active:this.active, modeId:this.settings.modeId, mapId:this.settings.mapId, simulationTime:this.simulationTime,
         player:{x:this.player.x,y:this.player.jump,z:this.player.z,yaw:this.yaw,pitch:this.pitch,
           lifeId:this.player.lifeId,health:this.player.health,armour:this.player.armour,grounded:this.player.grounded,supportId:this.player.supportId,hiddenSpotId:this.player.hiddenSpotId,
           velocityY:this.player.velocityY,ladderId:this.player.ladderId,ladderDistance:this.player.ladderDistance,ladderBlockedId:this.player.ladderBlockedId},

@@ -1,6 +1,6 @@
 {
   "name": "block-ops-offline",
-  "version": "0.9.0",
+  "version": "0.9.1",
   "private": true,
   "type": "module",
   "scripts": {
@@ -22,6 +22,7 @@
     "test:progression": "node tests/progression.browser.mjs && node tests/progression-layout.browser.mjs",
     "test:progression:modes": "node tests/progression-modes.browser.mjs",
     "test:progression:online": "node tests/progression-online.browser.mjs",
+    "test:solo-powers": "node tests/solo-powers.browser.mjs && node tests/solo-powers-layout.browser.mjs && node tests/solo-powers-online.browser.mjs",
     "test:rooftops": "node tests/rooftops.browser.mjs",
     "test:tall-roofs": "node tests/tall-roofs.browser.mjs",
     "test:tall-roofs:online": "node tests/tall-roofs-online.browser.mjs",

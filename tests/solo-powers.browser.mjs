@@ -4,6 +4,7 @@ import { resolve } from 'node:path';
 import { persistentFixture, setupSolo, fightSolo, goHome, readProfile } from './helpers/progression-browser.js';
 import { fixture, until } from './helpers/loot-browser.js';
 import { openPowers, choosePowers } from './helpers/solo-powers-browser.js';
+import { runArenaAcceptance } from './helpers/solo-powers-acceptance.js';
 
 const artifactDir=resolve(process.env.ARTIFACT_DIR || 'artifacts/solo-powers-browser');
 await mkdir(artifactDir,{recursive:true});
@@ -116,3 +117,4 @@ for(const fault of ['crypto-absent','crypto-throws','storage-throws']) {
     console.log(`PASS: ${fault} locks only secret feature; ordinary game starts`);
   } finally {await faults.close();}
 }
+await runArenaAcceptance({artifactDir,legacy});
