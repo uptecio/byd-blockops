@@ -19,11 +19,15 @@ import { createProgressionUI } from './progression-ui.js';
 import { getGunFinish } from './cosmetics.js';
 import { HidingUI } from './hiding-ui.js';
 import { renderClimbHint } from './climb-presentation.js';
+import { defaultSoloPowers, normalizeSoloPowers } from './solo-powers.js';
+import { createSoloPowersPinGate } from './solo-powers-pin.js';
+import { createSoloPowersUI } from './solo-powers-ui.js';
 
 const $ = id => document.getElementById(id);
 let mode = 'home', settingsOrigin = 'home', game, preview, home, multiplayer, equipmentUI, audio, input, toastUntil = 0, confirmation = null;
 let backgroundSuspended = false, frameRequest = null;
 let progressionUI;
+let powersUI, pendingSoloPowers = defaultSoloPowers(), powersScreenToken = {};
 const hidingUI = new HidingUI({ button: $('hide-button'), status: $('hiding-status') });
 setRuntimeStop(stopAfterFatal);
 
@@ -31,6 +35,8 @@ function stopAfterFatal() {
   mode = 'fatal'; confirmation = null;
   // Each subsystem gets a shutdown attempt even when another is broken.
   for (const stop of [
+    () => invalidatePowerMenu(),
+    () => resetPowerSession(),
     () => cancelAnimationFrame(frameRequest),
     () => input?.setEnabled(false),
     () => game?.pause(),
@@ -81,6 +87,8 @@ function renderProgression() {
 }
 function setMode(next) {
   if (runtimeErrors.failed) return;
+  invalidatePowerMenu();
+  if (next === 'lobby' || next === 'results' || multiplayer?.isConnected()) resetPowerSession();
   // A remote start may create/enable an arena while native rendering is
   // suspended. Re-pause it synchronously and retain that state on foreground.
   if (next === 'playing' && (backgroundSuspended || document.hidden)) { backgroundSuspended = true; next = 'paused'; }
@@ -94,6 +102,8 @@ function setMode(next) {
   $('online-screen').hidden = next !== 'lobby';
   $('game-ui').hidden = !['playing', 'paused', 'results', 'confirm-home', 'grenade-picker'].includes(next);
   $('pause-screen').hidden = next !== 'paused';
+  $('pause-secret-logo').hidden = next !== 'paused' || multiplayer?.isConnected() || multiplayer?.busy
+    || !game?.hasRound || game.modeState?.ended || game.settings.progressionSource !== 'solo';
   $('results-screen').hidden = next !== 'results';
   const online = multiplayer && multiplayer.isActive();
   document.querySelector('.pause-dialog h2').textContent = online ? 'MATCH STILL LIVE' : 'GAME PAUSED';
@@ -105,6 +115,30 @@ function setMode(next) {
   renderProgression();
 }
 function showHome() { progression.retry(); setMode('home'); home.render(); renderProgression(); }
+function invalidatePowerMenu() { powersScreenToken = {}; powersUI?.invalidate(); }
+function resetPowerSession() { pendingSoloPowers = defaultSoloPowers(); game?.resetSoloPowers(); }
+function powerContext() {
+  const origin = mode === 'home' || mode === 'paused' ? mode : null;
+  const liveSolo = game?.hasRound && !game.modeState?.ended && game.settings.progressionSource === 'solo';
+  const competing = [...document.querySelectorAll('.modal-screen:not([hidden])')]
+    .some(element => element.id !== 'solo-powers-screen' && !(origin === 'paused' && element.id === 'pause-screen'));
+  // backgroundSuspended deliberately stays set until Resume; it does not mean
+  // a foreground Home/Pause screen is unavailable for explicit menu taps.
+  const allowed = !!origin && !runtimeErrors.failed && !document.hidden && document.hasFocus()
+    && !multiplayer?.isConnected() && !multiplayer?.busy && !competing
+    && (origin === 'home' ? !liveSolo : liveSolo);
+  return {allowed, origin, token:powersScreenToken, roundId:origin === 'paused' ? game?.modeState : null,
+    config:origin === 'paused' ? game.getSoloPowers() : {...pendingSoloPowers}};
+}
+function applyPowerSelection(config, captured) {
+  const current = powerContext(), normalized = normalizeSoloPowers(config);
+  if (!normalized || !current.allowed || captured.token !== current.token || captured.origin !== current.origin || captured.roundId !== current.roundId)
+    return {ok:false, reason:'This screen or round changed. Reopen the secret menu.'};
+  if (current.origin === 'home') { pendingSoloPowers = normalized; return {ok:true}; }
+  const result = game.setSoloPowers(normalized, captured.roundId);
+  if (result.ok) game.events.onHud(game);
+  return result;
+}
 function sessionToken() { return multiplayer?.isConnected() ? multiplayer.arena || multiplayer.room.code : game?.modeState; }
 function requestHome(after = showHome) {
   const connected = multiplayer?.isConnected(), liveSolo = game?.hasRound && !game.match.ended;
@@ -124,6 +158,7 @@ $('confirm-home').addEventListener('click', () => {
   if (!pending || pending.token !== sessionToken()) return;
   confirmation = null;
   if (multiplayer?.isConnected()) multiplayer.leave(); else game.quit();
+  resetPowerSession();
   input.clear(); pending.after();
 });
 $('cancel-home').addEventListener('click', () => {
@@ -157,10 +192,11 @@ function selectConfiguration(next) {
   else return apply();
 }
 function pauseGame() {
+  if (powersUI?.isOpen()) { invalidatePowerMenu(); input.clear(); return; }
   if (mode === 'grenade-picker') { setMode('paused'); $('resume-button').focus({ preventScroll: true }); return; }
   if (mode === 'playing') { setMode('paused'); $('resume-button').focus({ preventScroll: true }); }
 }
-function suspendForBackground() { if (runtimeErrors.failed) return; backgroundSuspended = true; input.clear(); equipmentUI?.close(); if (mode === 'grenade-picker') setMode('paused'); else pauseGame(); }
+function suspendForBackground() { if (runtimeErrors.failed) return; invalidatePowerMenu(); backgroundSuspended = true; input.clear(); equipmentUI?.close(); if (mode === 'grenade-picker') setMode('paused'); else pauseGame(); }
 window.pauseGame = suspendForBackground;
 document.addEventListener('visibilitychange', () => { if (document.hidden) suspendForBackground(); else { progression.retry(); renderProgression(); } });
 window.addEventListener('focus', () => { progression.retry(); renderProgression(); });
@@ -232,7 +268,8 @@ function deploy(forceNew = false) {
     // Explicit foreground deployment authorizes a NEW solo round, not a
     // resumed/remote one. Background clicks retain the Resume requirement.
     if (!document.hidden && document.hasFocus()) backgroundSuspended = false;
-    const started = game.tryStart(selection.weaponId, { ...settings, ...selection });
+    const powers = {...pendingSoloPowers}; pendingSoloPowers = defaultSoloPowers();
+    const started = game.tryStart(selection.weaponId, { ...settings, ...selection }, powers);
     if (!started.ok) { showHome(); game.events.onToast(`Could not start this map: ${started.reason}`); return; }
   }
   else { const result = equipmentUI.confirmGun(); if (result && !result.ok) return; game.resume(); }
@@ -258,7 +295,7 @@ function updateSettings() {
   $('sensitivity').value = settings.sensitivity; $('control-size').value = settings.controlSize;
   $('bots').value = settings.bots; $('difficulty').value = settings.difficulty; $('sound').checked = settings.sound;
 }
-function openSettings() { settingsOrigin = mode; pauseGame(); $('settings-screen').hidden = false; updateSettings(); }
+function openSettings() { invalidatePowerMenu(); settingsOrigin = mode; pauseGame(); $('settings-screen').hidden = false; updateSettings(); }
 function closeSettings() { $('settings-screen').hidden = true; if (settingsOrigin === 'armory') showArmory(); }
 document.querySelectorAll('.settings-open').forEach(button => button.addEventListener('click', openSettings));
 $('close-settings').addEventListener('click', closeSettings); $('settings-done').addEventListener('click', closeSettings);
@@ -314,9 +351,10 @@ function onHud(current) {
   $('armour-count').textContent = Math.ceil(current.player.armour || 0);
   $('armour-bar').style.width = `${current.player.armour || 0}%`;
   $('hud-weapon').textContent = current.weapon.name;
-  $('ammo-count').textContent = current.weaponState.ammo;
-  $('reserve-count').textContent = current.weaponState.reserve;
-  $('reload-status').textContent = recovery ? 'GET READY · ATTACKS PAUSED' : current.weaponState.reloadRemaining > 0 ? `RELOADING ${current.weaponState.reloadRemaining.toFixed(1)}s` : current.weaponState.ammo === 0 ? 'TAP RELOAD' : '';
+  const unlimitedAmmo = !multiplayer?.isActive() && current.getSoloPowers?.()?.unlimitedAmmo;
+  $('ammo-count').textContent = unlimitedAmmo ? '∞' : current.weaponState.ammo;
+  $('reserve-count').textContent = unlimitedAmmo ? '∞' : current.weaponState.reserve;
+  $('reload-status').textContent = recovery ? 'GET READY · ATTACKS PAUSED' : unlimitedAmmo ? '' : current.weaponState.reloadRemaining > 0 ? `RELOADING ${current.weaponState.reloadRemaining.toFixed(1)}s` : current.weaponState.ammo === 0 ? 'TAP RELOAD' : '';
   $('hit-marker').style.opacity = current.hitFlash > 0 ? 1 : 0;
   $('damage-flash').style.opacity = Math.min(1, current.damageFlash * 4);
   $('scope-overlay').hidden = !(input.zoom && current.heldItem === 'gun' && current.weapon.classId === 'sniper');
@@ -336,13 +374,14 @@ try {
     onToast: message => { $('toast').textContent = message; toastUntil = performance.now() + 1900; },
     onFatal: showFatal,
   });
-  multiplayer = new MultiplayerUI({ getGame: () => game, getSettings: () => settings, getSelected: () => selected, getSelection: () => selection, onSkin: skinId => selectConfiguration({ ...selection, skinId }), onConfiguration: next => { selection = { ...validateSelection({ ...selection, ...next }), finishId: selection.finishId }; persist(); home.render(); renderProgression(); }, onRoomSettings: () => { if (mode === 'armory') renderArmorySession(); }, onRemoteStart: () => { if (backgroundSuspended || document.hidden) setMode('paused'); }, onHome: requestHome, onMode: setMode, onLoadout: showArmory, onToast: message => { $('toast').textContent = message; toastUntil = performance.now() + 1900; },
+  multiplayer = new MultiplayerUI({ getGame: () => game, getSettings: () => settings, getSelected: () => selected, getSelection: () => selection, onSkin: skinId => selectConfiguration({ ...selection, skinId }), onConfiguration: next => { selection = { ...validateSelection({ ...selection, ...next }), finishId: selection.finishId }; persist(); home.render(); renderProgression(); }, onRoomSettings: () => { if (mode === 'armory') renderArmorySession(); }, onRemoteStart: () => { invalidatePowerMenu(); resetPowerSession(); if (backgroundSuspended || document.hidden) setMode('paused'); }, onHome: requestHome, onMode: setMode, onLoadout: showArmory, onToast: message => { $('toast').textContent = message; toastUntil = performance.now() + 1900; },
     onProgressionRoom: (room, client) => { progression.room(room, client); renderProgression(); },
     onProgressionStop: () => progression.stop(),
     onResults: () => progressionUI?.renderResults(progressionSession.summary(), profileStore.view()),
   });
   multiplayer.client.onHideResult = result => multiplayer.arena?.receiveHideResult(result);
   equipmentUI = new EquipmentUI({ getView: equipmentView,
+    isUnlimitedAmmo: () => !multiplayer?.isActive() && game.getSoloPowers().unlimitedAmmo,
     canSelectInventory: () => mode === 'playing' && input.enabled && !backgroundSuspended && !document.hidden,
     onAction: action => multiplayer?.isActive() ? action.kind === 'equip-gun' && mode === 'armory'
       ? multiplayer.deploy({ equipWeaponId: action.weaponId, source: action.source }) : multiplayer.arena.requestEquipment(action) : game.requestEquipment(action),
@@ -355,6 +394,8 @@ try {
   });
   $('armory-cancel').addEventListener('click', () => { equipmentUI.close(); if (equipmentView().roundId) setMode('paused'); else if (multiplayer?.isConnected()) multiplayer.open(); else showHome(); });
   home = new HomeUI({ getSelection: () => selection, onSelection: selectConfiguration, onSolo: () => deploy(), onOnline: () => multiplayer.open(), onArmory: showArmory, onSettings: openSettings });
+  powersUI = createSoloPowersUI({document, pinGate:createSoloPowersPinGate(), getContext:powerContext, onApply:applyPowerSelection,
+    onOpen:() => input.clear(), onClose:() => input.clear()});
   progressionUI = createProgressionUI({ document, onEquip: patch => selectConfiguration({ ...selection, ...patch }) });
   renderProgression();
   preview = new WeaponPreview($('weapon-preview'));

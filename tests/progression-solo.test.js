@@ -49,6 +49,21 @@ test('solo run identity does not require newer globalThis or randomUUID APIs',()
   assert.match(first,/^[a-f0-9]{32}$/);assert.notEqual(first,second);
 });
 
+for(const fault of ['absent','getter','random'])test(`ordinary solo still starts and earns separate receipts with ${fault} crypto`,t=>{
+  const descriptor=Object.getOwnPropertyDescriptor(globalThis,'crypto');
+  t.after(()=>Object.defineProperty(globalThis,'crypto',descriptor));
+  Object.defineProperty(globalThis,'crypto',fault==='getter'
+    ? {configurable:true,get(){throw Error('crypto denied');}}
+    : {configurable:true,value:fault==='absent'?undefined:{getRandomValues(){throw Error('rng denied');}}});
+  t.mock.method(Date,'now',()=>1000);t.mock.method(Math,'random',()=>.5);
+  const {game,events,last}=arena(t,{bots:1});
+  const first=events[0].key;
+  game.damageActor('local',game.bots[0],100);assert.equal(last().earnedTotal,10);
+  game.quit();game.start('m4a1',{bots:1});
+  assert.notEqual(events.at(-1).key,first,'separate rounds do not reuse an XP receipt even at the same clock and random value');
+  assert.equal(last().earnedTotal,0);
+});
+
 for(const difficulty of ['easy','normal','hard'])test(`${difficulty} live kills credit once per life and natural finish precedes results`,t=>{
   const {game,events,last}=arena(t,{bots:1,difficulty});
   assert.equal(events[0]?.type,'start'); const bot=game.bots[0];

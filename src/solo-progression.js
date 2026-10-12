@@ -1,9 +1,19 @@
 import { emptyTally, awardTally, finishTally, validateTally, validXP } from './progression.js';
 import { validReceiptKey } from './profile-store.js';
 
+let fallbackRunSequence=0;
 export function newSoloRunId() {
-  const bytes=new Uint8Array(16); crypto.getRandomValues(bytes);
-  return Array.from(bytes,value=>value.toString(16).padStart(2,'0')).join('');
+  const bytes=new Uint8Array(16);
+  try {
+    crypto.getRandomValues(bytes);
+    return Array.from(bytes,value=>value.toString(16).padStart(2,'0')).join('');
+  } catch {
+    // Receipt IDs are local deduplication labels, not credentials. Ordinary
+    // play must remain available when Web Crypto is absent/denied. The secret
+    // PIN gate deliberately has NO such fallback and remains locked.
+    for(let i=0;i<bytes.length;i++)bytes[i]=Math.floor(Math.random()*256);
+    return `local-${Date.now().toString(36)}-${(++fallbackRunSequence).toString(36)}-${Array.from(bytes,value=>value.toString(16).padStart(2,'0')).join('')}`;
+  }
 }
 export function createSoloProgression({runId,modeId,onEvent=()=>{}}) {
   const key=JSON.stringify(['solo',runId]);
