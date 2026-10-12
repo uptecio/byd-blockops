@@ -2,7 +2,7 @@
 
 Date: 2026-10-12
 
-Status: gameplay design approved in conversation; this written specification is awaiting user review. Written-spec approval permits implementation planning, not coding. The written plan and its execution method must be reviewed before implementation.
+Status: written specification approved by the user on 2026-10-12. Approval permits implementation planning, not coding. The written plan and its execution method must be reviewed before implementation.
 
 Baseline: current `feat/offline-arena` checkout at `7a4c036`, including the existing uncommitted teammate-map work. Preserve all unrelated changes, saved player data, release artifacts and running games. This document does not authorize a public-server restart or deployment.
 
@@ -29,7 +29,7 @@ Use a separate local powers controller and PIN gate, with narrow integration int
 
 The earlier custom-match-rules discussion is a separate unfinished design: weapon restrictions, moon gravity and selectable match duration are not implemented by this feature. Preserve those decisions, but do not silently include them here. Co-op Zombies, online owner permissions, flying, extra loot, automatic aiming and progression multipliers are outside scope.
 
-The following implementation defaults complete the conversational design and are proposed for approval with this specification.
+The following implementation defaults complete the conversational design and were approved with this written specification.
 
 ## Hidden access and PIN
 
