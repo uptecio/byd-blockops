@@ -1,6 +1,6 @@
 # Solo secret powers verification
 
-Candidate: Block Ops **0.9.1**, Android version code **12**, network protocol **7**. Modern/legacy browser powers suites, exact APK packaging, Android emulator acceptance, segmented rooftop follow-up and the final full unit suite pass. Independent review is pending. This is not a physical-BYD compatibility claim or a live deployment.
+Candidate: Block Ops **0.9.1**, Android version code **12**, network protocol **7**. Modern/legacy browser powers suites, exact APK packaging, Android emulator acceptance, segmented rooftop follow-up and the final full unit suite pass. Independent whole-change review found no actionable issues. This is not a physical-BYD compatibility claim or a live deployment.
 
 ## Feature and access
 
@@ -12,7 +12,8 @@ Powers are solo-only, memory-only and reset when a round ends, the player confir
 
 | Check | Result and evidence |
 | --- | --- |
-| Full unit suite | Final gate: 1,301 passed, 0 failed/skipped; `task-6-tests.log`, 135,339 ms. Earlier complete run also passed1,301 in150,401 ms (`task-6-unit-full-second.log`). |
+| Full unit suite | Final committed-candidate gate: 1,301 passed, 0 failed/skipped; `final-suite.log`, 137,703 ms. Task6 gate also passed1,301 in135,339 ms (`task-6-tests.log`); earlier full run passed1,301 in150,401 ms (`task-6-unit-full-second.log`). |
+| Independent whole-change review | No Critical, Important or Minor findings, and no declined-to-judge items. Fresh reviewer checks: 181/181 focused tests, clean `git diff --check`, all247 source/test hashes matched. All five specified review-focus classes assessed. |
 | Home/Pause browser integration | Real held fire, cancellation, explicit Resume, native-pause callback, fatal callback, failed join, a genuine 15-kill round, earned skin, and persistent-browser reopening passed. |
 | Capability failures | Missing crypto, throwing crypto getter and throwing storage getter leave the secret gate locked while ordinary Solo starts. |
 | Touch layouts | All eight viewport/scale cases passed in modern and capability-masked legacy Chromium: 1280×720, 1024×600, 854×480 and keyboard-reduced 854×300; scales 0.8 and 1.3. Five actual taps, focus containment/wrapping, 44px targets, scrolling and touch slider tested. |
@@ -26,6 +27,10 @@ Powers are solo-only, memory-only and reset when a round ends, the player confir
 | Native Android | Full scenario passed on the third fresh owned AVD: signed upgrade retention, offline PIN/PBKDF2, all powers, native Back/background/explicit Resume, real assisted XP/records, relaunch and same-version replacement. |
 
 Initial evidence is under `artifacts/solo-powers-vs7OYB/`: `browser-fourth`, `task6-first/layout`, `task6-layout-legacy/layout`, `task6-arena-first/arena`, and `task6-online-first/online`. Final frozen-asset checks are recorded separately under `final-browser`; initial runs are not substituted for final acceptance.
+
+Task logs, final suite output, baseline and tested-working-tree diffs, the execution ledger and the independent review report are archived under `artifacts/solo-powers-vs7OYB/execution-evidence/`. This preserves the evidence while removing only this plan's active scratch workspace. The reviewed implementation range is `08b0a4394488f0e3092f25be4e5dc6e33662cf23..a861db6072493c329ee879647ee81d2a0e213daa`, supplemented by the retained dirty working-tree changes. `reviewed-working-tree.json` records all247 actual source/test files, not just committed files. Only verification documentation changed after the review; no runtime source, frozen asset or APK changed.
+
+The reviewer explicitly assessed delayed crypto/lifecycle cancellation, storage and crypto failures, ammo invariants, collision-constrained movement, and persistence/online isolation. No fix pass or deferred minors were required. The reviewer agreed that physical-BYD testing, the interrupted monolithic rooftop batch and the limited performance workload remain evidence boundaries, not demonstrated feature defects. Review approval does not authorize a merge or deployment.
 
 The final modern run completed all three powers scripts successfully in 806,688 ms (`final-browser/powers-modern.log`); legacy completed in 831,238 ms (`final-browser/powers-legacy.log`). Complete map/movement/Zombie evidence and raw frame rows are in each run's `arena/evidence.json`. Three warmed 30-second normal/5× pairs on each map gave median paired p95 ratios **1.021 for Courtyard / 0.989 for Harbor (modern)** and **1.016 / 1.006 (legacy)**, below the planned 1.25 investigation threshold. Median frame intervals were 16.6–16.8 ms. One legacy Harbor 5× trial had a 69 ms p95 versus its paired 18 ms baseline; the other two pairs were 17.8/17.8 and 17.8/17.9 ms. The raw outlier is retained, not discarded. These measurements describe this software-rendered desktop runner, not a vehicle head unit.
 
