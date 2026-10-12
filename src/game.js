@@ -29,6 +29,7 @@ import { damageVitals } from './vitals.js';
 import { startSupplyUse, cancelSupplyUse, advanceSupplyUse, isUsingSupply, chooseBotSupply } from './supplies.js';
 import { createHidingState, requestHide as transitionHide, exitHiding, releaseHiding, hidingContext, attackExit, hidingDropPosition } from './hiding.js';
 import { spotDamageTargets, raySpotHit } from './hiding-combat.js';
+import { defaultSoloPowers, normalizeSoloPowers, replenishPoweredMagazine } from './solo-powers.js';
 
 export function disposeModel(model) {
   if (!model) return;
@@ -94,11 +95,28 @@ export class ArenaGame {
     this.inventory = equipment.owned;
     this.weaponState = equipment.owned.get(equipment.activeGunId)
       ?? { weaponId: equipment.activeGunId, ammo: 0, reserve: 0, cooldown: 0, reloadRemaining: 0 };
+    if (equipment.owned.has(equipment.activeGunId) && this.getSoloPowers().unlimitedAmmo)
+      replenishPoweredMagazine(this.weaponState);
     if (this.weapon.id !== equipment.activeGunId || this.heldItem !== equipment.heldItem || this.presentedFinishId !== (this.player.finishId ?? 'standard'))
       this.presentHeldItem(equipment.activeGunId, equipment.heldItem);
     if (!isUsingSupply(equipment)) this.weaponModel.position.y = -.27;
   }
   getEquipmentView() { return equipmentDTO(this.player.equipment); }
+  getSoloPowers() {
+    if (!this.hasRound || !this.modeState || this.modeState.ended || this.settings?.progressionSource !== 'solo'
+      || this.soloPowersRoundId !== this.modeState) return defaultSoloPowers();
+    return {...this.soloPowers};
+  }
+  setSoloPowers(config, roundId = this.modeState) {
+    const normalized = normalizeSoloPowers(config);
+    if (!normalized || !this.hasRound || !this.modeState || this.modeState.ended
+      || roundId !== this.modeState || this.settings?.progressionSource !== 'solo')
+      return {ok:false, reason:'Powers require the same live solo round and valid settings.'};
+    this.soloPowers = normalized; this.soloPowersRoundId = roundId;
+    this.syncPlayerEquipment();
+    return {ok:true};
+  }
+  resetSoloPowers() { this.soloPowers = defaultSoloPowers(); this.soloPowersRoundId = null; }
   hidingOptions() { return { map: this.world.definition, world: this.world.spatial, active: this.active && this.hasRound && !this.modeState?.ended }; }
   getClimbView() { return climbHint({ ...this.player, y:this.player.jump }, this.world.spatial); }
   getHidingView() {
@@ -186,7 +204,8 @@ export class ArenaGame {
     this.scene.background = new THREE.Color(map.environment.sky);
     this.scene.fog = new THREE.Fog(map.environment.fog, 42, 95);
   }
-  start(id, settings = {}) {
+  start(id, settings = {}, powers = null) {
+    this.resetSoloPowers();
     this.soloProgression?.close(); this.soloProgression = null;
     this.zombieRuntime?.dispose(); this.zombieRuntime = null;
     this.settings = { sensitivity: 1, bots: 5, difficulty: 'normal', mapId: DEFAULT_MAP_ID, modeId: 'ffa', skinId: DEFAULT_SKIN_ID, finishId: 'standard', progressionSource: 'solo', ...settings };
@@ -198,6 +217,7 @@ export class ArenaGame {
       this.zombieRuntime = new ZombieRuntime(this);
       this.zombieRuntime.start(getWeapon(id).id, this.settings);
       this.beginProgression();
+      this.setSoloPowers(powers);
       return;
     }
     const ids = ['local', ...Array.from({ length: count }, (_, i) => `bot-${i}`)];
@@ -223,10 +243,11 @@ export class ArenaGame {
       startingGunIds: [this.player.equipment.startingGunId, ...this.bots.map(bot => bot.equipment.startingGunId)] });
     this.simulationTime = 0; this.gearEvents = []; this.pickupEvents = []; this.gearEventId = 0;
     this.beginProgression();
+    this.setSoloPowers(powers);
     this.refreshMatchView(); this.refreshGearView(); this.input.clear(); this.resume();
   }
-  tryStart(id, settings = {}) {
-    try { this.start(id, settings); return { ok: true }; }
+  tryStart(id, settings = {}, powers = null) {
+    try { this.start(id, settings, powers); return { ok: true }; }
     catch (error) { this.quit(); return { ok: false, reason: error.message }; }
   }
   beginProgression() {
@@ -287,6 +308,7 @@ export class ArenaGame {
   finishRound(actors) {
     if (!this.modeState.ended || this.endReported) return;
     this.soloProgression?.finish({ winnerId: this.modeState.winnerId, winnerTeamId: this.modeState.winnerTeamId, teamId: this.player.teamId });
+    this.resetSoloPowers();
     for (const actor of [this.player, ...this.bots]) if (actor.equipment) cancelSupplyUse(actor.equipment);
     this.clearSupplyCombat();
     this.refreshMatchView(actors); this.endReported = true; this.pause(); this.events.onEnd(this.match);
@@ -310,6 +332,7 @@ export class ArenaGame {
   resume() { if (this.hasRound && !this.match.ended) { this.active = true; this.lastFire = false; this.input.setEnabled(true); } }
   pause() { this.active = false; this.input.setEnabled(false); this.lastFire = false; }
   quit() {
+    this.resetSoloPowers();
     this.soloProgression?.close();
     for (const actor of [this.player, ...this.bots]) if (actor.equipment) cancelSupplyUse(actor.equipment);
     this.clearSupplyCombat();
@@ -389,7 +412,8 @@ export class ArenaGame {
       const sensitivity = .0026 * this.settings.sensitivity / (zoom ? Math.sqrt(this.weapon.zoom) : 1);
       this.yaw -= input.lookX * sensitivity;
       this.pitch = THREE.MathUtils.clamp(this.pitch - input.lookY * sensitivity, -1.25, 1.25);
-      const speed = humanMoveSpeed(this.weapon.classId, zoom);
+      const powers = this.getSoloPowers();
+      const speed = humanMoveSpeed(this.weapon.classId, zoom) * (powers.superSpeed ? powers.speedMultiplier : 1);
       const vx = (Math.cos(this.yaw) * input.x - Math.sin(this.yaw) * input.y) * speed;
       const vz = (-Math.sin(this.yaw) * input.x - Math.cos(this.yaw) * input.y) * speed;
       if (!wasHidden && !this.player.hiddenSpotId) {
@@ -403,13 +427,15 @@ export class ArenaGame {
         const result = this.requestEquipment({ kind: 'throw', grenadeType: this.player.equipment.selectedGrenade });
         if (!result.ok) this.events.onToast(result.reason);
       }
-      if (!isUsingSupply(this.player.equipment) && input.reload && this.player.equipment.heldItem === 'gun' && startReload(this.weaponState)) this.audio.reload();
+      if (!powers.unlimitedAmmo && !isUsingSupply(this.player.equipment) && input.reload && this.player.equipment.heldItem === 'gun' && startReload(this.weaponState)) this.audio.reload();
       this.placeCamera();
       const canAttack = !isUsingSupply(this.player.equipment) && (!this.zombieRuntime || this.zombieRuntime.canAttack());
       if (canAttack && input.fire && this.player.equipment.heldItem === 'knife') this.slash(playerActor, actors);
       else if (canAttack && input.fire && this.player.equipment.attackLockRemaining <= 0 && (this.weapon.automatic || input.firePressed)) {
+        if (powers.unlimitedAmmo) replenishPoweredMagazine(this.weaponState);
         if (tryFire(this.weaponState)) this.shoot(zoom, actors);
         else if (!this.lastFire && this.weaponState.ammo === 0) this.events.onToast(this.weaponState.reserve ? 'TAP RELOAD' : 'OUT OF AMMO · CHANGE LOADOUT');
+        if (this.getSoloPowers().unlimitedAmmo) replenishPoweredMagazine(this.weaponState);
       }
       this.lastFire = input.fire;
       const targetFov = zoom ? 75 / this.weapon.zoom : 75;
@@ -636,6 +662,7 @@ export class ArenaGame {
   damageActor(attackerId, victim, damage, actors) {
     if (this.modeState.ended || !victim || !this.isEnemy(attackerId, victim.id) || victim.health <= 0
       || (victim.dead ?? victim.respawn) > 0 || victim.protected > 0) return false;
+    if (victim === this.player && this.getSoloPowers().invincible) return false;
     const before = this.actorRecord(victim);
     const dropPosition = hidingDropPosition(this.hidingState, before, this.world.definition);
     const applied = damageVitals(victim, damage);
