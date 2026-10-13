@@ -40,3 +40,28 @@ test('mode incompatibility, forged totals and invalid session keys cannot enter 
     assert.equal(session.accept(key('r'),tally).creditedXP,0);
   assert.equal(store.view().lifetimeXP,0);
 });
+
+test('local range session accepts exact cumulative killing rewards and rejects malformed tallies',()=>{
+  const {store,session}=fixture();session.begin(key('range'),'range');
+  assert.deepEqual(session.summary().tally,{targetKills:0,precisionKills:0,earnedTotal:0});
+  const tally={targetKills:1,precisionKills:0,earnedTotal:10};
+  assert.equal(session.accept(key('range'),tally).creditedXP,10);
+  for(const invalid of [{...tally,earnedTotal:20},{...tally,completed:false},{...tally,[Symbol('bonus')]:0},emptyTally()])
+    assert.equal(session.accept(key('range'),invalid).creditedXP,0);
+  session.accept(key('range'),{targetKills:0,precisionKills:0,earnedTotal:0});
+  assert.deepEqual(session.summary().tally,tally);
+  assert.equal(session.accept(key('range'),{targetKills:2,precisionKills:1,earnedTotal:30}).creditedXP,20);
+  // Equal XP with regressing precision counts must also be read-only.
+  session.accept(key('range'),{targetKills:3,precisionKills:0,earnedTotal:30});
+  assert.deepEqual(session.summary().tally,{targetKills:2,precisionKills:1,earnedTotal:30});
+  session.end(key('range'));assert.equal(session.accept(key('range'),{targetKills:3,precisionKills:1,earnedTotal:40}).creditedXP,0);
+  assert.equal(store.view().lifetimeXP,30);
+});
+
+test('online receipt keys cannot activate range and normal sessions reject range fields',()=>{
+  const {store,session}=fixture();
+  assert.throws(()=>session.begin(JSON.stringify(['online','https://example.org','round','player']),'range'),RangeError);
+  session.begin(key('normal'),'ffa');
+  assert.equal(session.accept(key('normal'),{targetKills:1,precisionKills:0,earnedTotal:10}).creditedXP,0);
+  assert.equal(store.view().lifetimeXP,0);
+});
