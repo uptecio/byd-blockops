@@ -45,6 +45,9 @@ test('APK retains the existing release signer', async () => {
 });
 
 test('APK bundles the exact reviewed offline assets', async () => {
+  const {stdout: entries}=await run('unzip',['-Z1',apk]);
+  assert.deepEqual(entries.split(/\r?\n/).filter(name=>name.startsWith('assets/')&&!name.endsWith('/')).sort(),
+    ['assets/THREE-LICENSE.txt','assets/game.js','assets/index.html','assets/styles.css'],'exactly four offline assets are packaged');
   for (const name of ['index.html', 'game.js', 'styles.css', 'THREE-LICENSE.txt']) {
     const expected = await readFile(join(dist, name));
     assert.ok(expected.length > 0, `${name} must not be empty`);
@@ -52,6 +55,14 @@ test('APK bundles the exact reviewed offline assets', async () => {
     assert.deepEqual(stdout, expected, `${name} bundled bytes must match the tested DIST_DIR`);
     if(name==='index.html')assert.match(stdout.toString(),powers ? /v0\.9\.1 SOLO POWERS/ : baseline ? /v0\.8\.0 ROOFTOPS \+ HIDING/ : /v0\.9\.0 TALL ROOFS/,'visible release label matches package');
   }
+});
+
+test('APK retains the packaged local appassets origin', async () => {
+  const {stdout: entries}=await run('unzip',['-Z1',apk]);
+  const names=entries.split(/\r?\n/).filter(name=>/^classes\d*\.dex$/.test(name));
+  assert.ok(names.length,'native code is packaged');
+  const bytecode=await Promise.all(names.map(async name=>(await run('unzip',['-p',apk,name],{encoding:'buffer',maxBuffer:32*1024*1024})).stdout));
+  assert.ok(bytecode.some(dex=>dex.includes(Buffer.from('https://appassets.androidplatform.net/assets/index.html'))),'native entry points at the local packaged HTTPS index');
 });
 
 console.log(`APK SHA-256: ${createHash('sha256').update(await readFile(apk)).digest('hex')}`);
