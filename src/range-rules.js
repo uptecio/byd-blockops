@@ -3,6 +3,7 @@ import { RANGE_TARGETS } from './range-map.js';
 import { HEADSHOT_DAMAGE } from './gun-damage.js';
 import { MAX_XP } from './progression.js';
 import { rayBoxHit, solidBounds } from './spatial.js';
+import { hasOwn } from './has-own.js';
 
 export const RANGE_TARGET_DIMENSIONS = Object.freeze({
   dummy: Object.freeze({ halfWidth: .32, halfDepth: .32, minY: .05, maxY: 1.84, headAboveY: 1.48 }),
@@ -18,7 +19,7 @@ const increment = value => Math.min(MAX_XP, value + 1);
 const missed = () => ({ landed: false, killed: false, damage: 0, kill: null });
 
 function requireTarget(target) {
-  if (!target || !positiveId(target.id) || !Object.hasOwn(RANGE_TARGET_DIMENSIONS, target.kind)
+  if (!target || !positiveId(target.id) || !hasOwn(RANGE_TARGET_DIMENSIONS, target.kind)
     || !pointValid(target) || target.y < 0) fail();
 }
 

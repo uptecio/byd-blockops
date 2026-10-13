@@ -40,10 +40,11 @@ export function createHeadlessGame() {
 }
 
 export function cleanupGame(game) {
+  game.rangeRuntime?.dispose();
   game.zombieRuntime?.dispose();
   game.clearEffects();
   for (const bot of game.bots) disposeModel(bot.model);
   disposeModel(game.weaponModel);
-  game.objectives?.dispose(); game.world.dispose();
+  game.objectives?.dispose(); game.world?.dispose();
   game.gearView?.dispose();
 }

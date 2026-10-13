@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { createWorld, createWeaponModel } from './world.js';
+import { createWorld, createWorldFromDefinition, createWeaponModel } from './world.js';
 import { hasLineOfSight } from './collision.js';
 import { solidBounds } from './spatial.js';
 import { createBody, moveCharacter, humanMoveSpeed, clearClimb } from './character-movement.js';
@@ -24,6 +24,7 @@ import { GEAR_BALANCE } from './equipment-catalog.js';
 import { GearView, createKnifeModel } from './gear-view.js';
 import { hasOwn } from './has-own.js';
 import { ZombieRuntime } from './zombie-runtime.js';
+import { RangeRuntime } from './range-runtime.js';
 import { lootItemLabel } from './loot-labels.js';
 import { damageVitals } from './vitals.js';
 import { startSupplyUse, cancelSupplyUse, advanceSupplyUse, isUsingSupply, chooseBotSupply } from './supplies.js';
@@ -118,9 +119,9 @@ export class ArenaGame {
   }
   resetSoloPowers() { this.soloPowers = defaultSoloPowers(); this.soloPowersRoundId = null; }
   hidingOptions() { return { map: this.world.definition, world: this.world.spatial, active: this.active && this.hasRound && !this.modeState?.ended }; }
-  getClimbView() { return climbHint({ ...this.player, y:this.player.jump }, this.world.spatial); }
+  getClimbView() { return climbHint({ ...this.player, y:this.player.jump }, this.world?.spatial); }
   getHidingView() {
-    const context = this.hidingState ? hidingContext(this.hidingState, this.actorRecord(this.player), this.hidingOptions()) : { label: null, enabled: false, spotId: null };
+    const context = this.hidingState && this.world ? hidingContext(this.hidingState, this.actorRecord(this.player), this.hidingOptions()) : { label: null, enabled: false, spotId: null };
     return { ...context, hidden: !!this.player.hiddenSpotId, pending: false, reason: this.hidingReason ?? null };
   }
   requestHide(action) {
@@ -157,6 +158,7 @@ export class ArenaGame {
   requestEquipment(action) {
     if (!this.hasRound || this.modeState.ended || this.player.health <= 0 || this.player.dead > 0)
       return { ok: false, reason: 'Cannot change equipment while inactive' };
+    if (this.rangeRuntime) return this.rangeRuntime.requestEquipment(action);
     const result = this.applyEquipmentAction(this.getActors()[0], action);
     if (result.ok) this.syncPlayerEquipment();
     return result;
@@ -189,25 +191,34 @@ export class ArenaGame {
     return throwGrenade(this.gearCombatState, actor, action.grenadeType, { solids: this.world.solids });
   }
   loadMap(mapId) {
-    const map = getMap(mapId);
+    this.loadWorldDefinition(getMap(mapId));
+  }
+  loadWorldDefinition(map, { practice = false } = {}) {
     Object.assign(this.player,clearClimb(this.player)); this.input.clear();
     for (const bot of this.bots) disposeModel(bot.model);
-    this.bots = []; this.clearEffects(); this.objectives?.dispose();
-    this.gearView?.dispose(); this.gearView = new GearView(THREE, this.scene);
+    this.bots = []; this.clearEffects(); this.objectives?.dispose(); this.objectives = null;
+    this.gearView?.dispose(); this.gearView = null;
     this.gearWorld = { loot: [], projectiles: [], smokes: [] };
     this.lootState = null; this.gearCombatState = createGearCombatState();
     this.hidingState = createHidingState(); this.player.hiddenSpotId = null; this.hidingReason = null;
-    this.navigation?.clearCache(); this.world?.dispose();
-    this.world = createWorld(THREE, this.scene, map.id);
-    this.navigation = createNavigation(map, { radius: BOT_RADIUS });
-    this.objectives = new ObjectiveView(THREE, this.scene, map);
+    this.navigation?.clearCache(); this.navigation = null;
+    this.world?.dispose(); this.world = null;
+    this.world = createWorldFromDefinition(THREE, this.scene, map);
+    if (!practice) {
+      this.gearView = new GearView(THREE, this.scene);
+      this.navigation = createNavigation(map, { radius: BOT_RADIUS });
+      this.objectives = new ObjectiveView(THREE, this.scene, map);
+    }
     this.scene.background = new THREE.Color(map.environment.sky);
     this.scene.fog = new THREE.Fog(map.environment.fog, 42, 95);
   }
   start(id, settings = {}, powers = null) {
+    if (this.rangeRuntime) this.quit();
+    this.rangeRuntime = null;
     this.resetSoloPowers();
     this.soloProgression?.close(); this.soloProgression = null;
     this.zombieRuntime?.dispose(); this.zombieRuntime = null;
+    if (settings.modeId === 'range' || settings.mapId === 'shooting-range') throw new RangeError('Practice requires a local range session');
     this.settings = { sensitivity: 1, bots: 5, difficulty: 'normal', mapId: DEFAULT_MAP_ID, modeId: 'ffa', skinId: DEFAULT_SKIN_ID, finishId: 'standard', progressionSource: 'solo', ...settings };
     const count = Math.max(0, Math.min(8, Math.trunc(this.settings.bots) || 0)); // zero reserved for online adapter
     getSkin(this.settings.skinId);
@@ -248,6 +259,27 @@ export class ArenaGame {
   }
   tryStart(id, settings = {}, powers = null) {
     try { this.start(id, settings, powers); return { ok: true }; }
+    catch (error) { this.quit(); return { ok: false, reason: error.message }; }
+  }
+  startRange(id, settings = {}, powers = null) {
+    this.quit();
+    const rangeSettings = { sensitivity: 1, skinId: DEFAULT_SKIN_ID, finishId: 'standard', progressionSource: 'solo', ...settings };
+    if (rangeSettings.progressionSource !== 'solo') throw new RangeError('Practice is only available offline');
+    if (getWeapon(id).id !== id) throw new RangeError('Unknown range gun');
+    getSkin(rangeSettings.skinId); getGunFinish(rangeSettings.finishId);
+    this.settings = { ...rangeSettings, modeId: 'range', mapId: 'shooting-range', bots: 0 };
+    this.rangeRuntime = new RangeRuntime(this);
+    try {
+      this.rangeRuntime.start(id, this.settings);
+      this.setSoloPowers(powers);
+      this.resume();
+    } catch (error) {
+      this.quit();
+      throw error;
+    }
+  }
+  tryStartRange(id, settings = {}, powers = null) {
+    try { this.startRange(id, settings, powers); return { ok: true }; }
     catch (error) { this.quit(); return { ok: false, reason: error.message }; }
   }
   beginProgression() {
@@ -298,6 +330,7 @@ export class ArenaGame {
     return [this.actorRecord(this.player), ...(this.zombieRuntime ? this.zombieRuntime.actors() : this.bots.map(bot => this.actorRecord(bot)))];
   }
   refreshMatchView(actors = this.getActors()) {
+    if (this.rangeRuntime) { this.rangeRuntime.refreshView(); return; }
     if (this.zombieRuntime) { this.zombieRuntime.refreshView(); return; }
     this.matchView = { ...getModeSnapshot(this.modeState), players: actors.map(actor => ({ id: actor.id, name: actor.name, teamId: actor.teamId,
       kills: this.modeState.stats[actor.id].kills, deaths: this.modeState.stats[actor.id].deaths, skinId: actor.skinId })) };
@@ -306,6 +339,7 @@ export class ArenaGame {
   }
   getMatchView() { return this.matchView; }
   finishRound(actors) {
+    if (this.rangeRuntime || this.modeState?.kind === 'range') return;
     if (!this.modeState.ended || this.endReported) return;
     this.soloProgression?.finish({ winnerId: this.modeState.winnerId, winnerTeamId: this.modeState.winnerTeamId, teamId: this.player.teamId });
     this.resetSoloPowers();
@@ -332,11 +366,17 @@ export class ArenaGame {
   resume() { if (this.hasRound && !this.match.ended) { this.active = true; this.lastFire = false; this.input.setEnabled(true); } }
   pause() { this.active = false; this.input.setEnabled(false); this.lastFire = false; }
   quit() {
-    this.resetSoloPowers();
+    try { this.rangeRuntime?.dispose(); }
+    finally {
+      this.rangeRuntime = null;
+      this.resetSoloPowers();
+      this.pause(); this.hasRound = false;
+    }
     this.soloProgression?.close();
+    this.soloProgression = null;
     for (const actor of [this.player, ...this.bots]) if (actor.equipment) cancelSupplyUse(actor.equipment);
     this.clearSupplyCombat();
-    this.pause(); this.hasRound = false; this.gearView?.clear();
+    this.gearView?.clear();
     Object.assign(this.player,clearClimb(this.player));
     for(const bot of this.bots) if(bot.body) Object.assign(bot.body,clearClimb(bot.body));
     this.hidingState = createHidingState(); this.player.hiddenSpotId = null;
@@ -355,14 +395,15 @@ export class ArenaGame {
     this.time += dt;
     if (this.active) {
       this.gearEvents = []; this.pickupEvents = [];
-      this.simulate(this.zombieRuntime ? dt : Math.min(dt, this.modeState.timeLeft));
-      if (!this.zombieRuntime) {
+      if (this.rangeRuntime) this.rangeRuntime.update(dt);
+      else this.simulate(this.zombieRuntime ? dt : Math.min(dt, this.modeState.timeLeft));
+      if (!this.zombieRuntime && !this.rangeRuntime) {
         const events = tickMode(this.modeState, dt, this.getActors());
         this.soloProgression?.objectives(events);
       }
       this.refreshMatchView(); this.finishRound();
     }
-    if (this.hasRound) this.refreshGearView(this.active ? dt : 0);
+    if (this.hasRound && !this.rangeRuntime) this.refreshGearView(this.active ? dt : 0);
     this.hudTimer -= dt;
     if (this.hudTimer <= 0) { this.events.onHud(this); this.hudTimer = .045; }
     this.renderer.render(this.scene, this.camera);
@@ -400,53 +441,7 @@ export class ArenaGame {
     const wasHidden = !!this.player.hiddenSpotId;
     if (this.player.dead <= 0) this.exposeAttack(this.actorRecord(this.player), input.throwPressed ? { ...input, kind: 'throw' } : input);
     const actors = this.getActors(), playerActor = actors[0];
-    if (this.player.dead <= 0) {
-      if (input.knifePressed) {
-        const wasUsing = isUsingSupply(this.player.equipment);
-        const result = this.requestEquipment({ kind: 'held-item', heldItem: this.player.equipment.heldItem === 'knife' ? 'gun' : 'knife' });
-        if (wasUsing && result.ok) input.fire = input.firePressed = input.reload = input.throwPressed = false;
-        if (!result.ok) this.events.onToast(result.reason);
-        this.input.zoom = false;
-      }
-      const zoom = input.zoom && this.player.equipment.heldItem === 'gun';
-      const sensitivity = .0026 * this.settings.sensitivity / (zoom ? Math.sqrt(this.weapon.zoom) : 1);
-      this.yaw -= input.lookX * sensitivity;
-      this.pitch = THREE.MathUtils.clamp(this.pitch - input.lookY * sensitivity, -1.25, 1.25);
-      const powers = this.getSoloPowers();
-      const speed = humanMoveSpeed(this.weapon.classId, zoom) * (powers.superSpeed ? powers.speedMultiplier : 1);
-      const vx = (Math.cos(this.yaw) * input.x - Math.sin(this.yaw) * input.y) * speed;
-      const vz = (-Math.sin(this.yaw) * input.x - Math.cos(this.yaw) * input.y) * speed;
-      if (!wasHidden && !this.player.hiddenSpotId) {
-        const moved = moveCharacter({ x: this.player.x, y: this.player.jump, z: this.player.z, velocityY: this.player.velocityY,
-          grounded: this.player.grounded, supportId: this.player.supportId, ladderId:this.player.ladderId,
-          ladderDistance:this.player.ladderDistance,ladderBlockedId:this.player.ladderBlockedId }, { vx, vz, jump: input.jump,climb:input.y }, dt, { world: this.world.spatial, radius: PLAYER_RADIUS });
-        Object.assign(this.player, moved.body, { jump: moved.body.y });
-      }
-      Object.assign(playerActor, { x: this.player.x, y: this.player.jump, z: this.player.z, yaw: this.yaw, pitch: this.pitch });
-      if (input.throwPressed) {
-        const result = this.requestEquipment({ kind: 'throw', grenadeType: this.player.equipment.selectedGrenade });
-        if (!result.ok) this.events.onToast(result.reason);
-      }
-      if (!powers.unlimitedAmmo && !isUsingSupply(this.player.equipment) && input.reload && this.player.equipment.heldItem === 'gun' && startReload(this.weaponState)) this.audio.reload();
-      this.placeCamera();
-      const canAttack = !isUsingSupply(this.player.equipment) && (!this.zombieRuntime || this.zombieRuntime.canAttack());
-      if (canAttack && input.fire && this.player.equipment.heldItem === 'knife') this.slash(playerActor, actors);
-      else if (canAttack && input.fire && this.player.equipment.attackLockRemaining <= 0 && (this.weapon.automatic || input.firePressed)) {
-        if (powers.unlimitedAmmo) replenishPoweredMagazine(this.weaponState);
-        if (tryFire(this.weaponState)) this.shoot(zoom, actors);
-        else if (!this.lastFire && this.weaponState.ammo === 0) this.events.onToast(this.weaponState.reserve ? 'TAP RELOAD' : 'OUT OF AMMO · CHANGE LOADOUT');
-        if (this.getSoloPowers().unlimitedAmmo) replenishPoweredMagazine(this.weaponState);
-      }
-      this.lastFire = input.fire;
-      const targetFov = zoom ? 75 / this.weapon.zoom : 75;
-      this.camera.fov += (targetFov - this.camera.fov) * Math.min(1, dt * 14); this.camera.updateProjectionMatrix();
-      this.weaponModel.visible = !this.player.hiddenSpotId && !(this.heldItem === 'gun' && zoom && this.weapon.classId === 'sniper');
-      const reload = this.heldItem === 'gun' && this.weaponState.reloadRemaining > 0;
-      this.weaponModel.position.set(zoom ? .08 : .28, -.27 - (isUsingSupply(this.player.equipment) ? .24 : reload ? .17 : 0) + Math.sin(this.time * 10) * Math.hypot(input.x, input.y) * .012, -.5 + this.recoil * .7);
-      this.weaponModel.rotation.z = reload ? Math.sin(this.time * 6) * .15 - .3 : 0;
-      this.weaponModel.rotation.x = this.heldItem === 'knife'
-        ? -Math.sin(Math.min(1, (GEAR_BALANCE.knife.interval - this.player.equipment.meleeRemaining) / .2) * Math.PI) * .75 : 0;
-    }
+    this.stepPlayerControls(dt, input, actors, { wasHidden });
     for (const actor of actors) if (this.actorEntity(actor.id).health <= 0) actor.alive = false;
     this.recoil *= Math.exp(-dt * 13);
     if (this.zombieRuntime) this.zombieRuntime.updateEnemies(dt, actors);
@@ -482,14 +477,7 @@ export class ArenaGame {
       for (const event of pickups) if (event.playerId === 'local') this.audio.pickup?.();
       for (const event of pickups) if (event.playerId === 'local') this.events.onToast(`PICKED UP ${lootItemLabel(event.item)}`);
     }
-    this.shotFlash = Math.max(0, this.shotFlash - dt); this.muzzle.visible = this.heldItem === 'gun' && this.shotFlash > 0 && this.weaponModel.visible;
-    this.hitFlash = Math.max(0, this.hitFlash - dt); this.damageFlash = Math.max(0, this.damageFlash - dt);
-    this.effects = this.effects.filter(effect => {
-      effect.life -= dt;
-      if (effect.life <= 0) { effect.line.removeFromParent(); effect.line.geometry.dispose(); effect.line.material.dispose(); return false; }
-      effect.line.material.opacity = effect.life / .12;
-      return true;
-    });
+    this.stepCombatFeedback(dt);
     this.zombieRuntime?.finishStep();
     for (const { actor, equipment, use } of pendingUses) {
       if (actor.equipment !== equipment || equipment.supplyUse !== use) continue;
@@ -501,6 +489,66 @@ export class ArenaGame {
       if (actor.id === this.player.id && result.status === 'completed') this.audio.supplyComplete?.(result.supplyType);
       if (actor.id !== this.player.id && actor.bar) actor.bar.scale.x = actor.health / 100;
     }
+  }
+  stepPlayerControls(dt, input, actors, { allowGear = true, wasHidden = false } = {}) {
+    const playerActor = actors[0];
+    if (this.player.dead <= 0) {
+      if (allowGear && input.knifePressed) {
+        const wasUsing = isUsingSupply(this.player.equipment);
+        const result = this.requestEquipment({ kind: 'held-item', heldItem: this.player.equipment.heldItem === 'knife' ? 'gun' : 'knife' });
+        if (wasUsing && result.ok) input.fire = input.firePressed = input.reload = input.throwPressed = false;
+        if (!result.ok) this.events.onToast(result.reason);
+        this.input.zoom = false;
+      }
+      const zoom = input.zoom && this.player.equipment.heldItem === 'gun';
+      const sensitivity = .0026 * this.settings.sensitivity / (zoom ? Math.sqrt(this.weapon.zoom) : 1);
+      this.yaw -= input.lookX * sensitivity;
+      this.pitch = THREE.MathUtils.clamp(this.pitch - input.lookY * sensitivity, -1.25, 1.25);
+      const powers = this.getSoloPowers();
+      const speed = humanMoveSpeed(this.weapon.classId, zoom) * (powers.superSpeed ? powers.speedMultiplier : 1);
+      const vx = (Math.cos(this.yaw) * input.x - Math.sin(this.yaw) * input.y) * speed;
+      const vz = (-Math.sin(this.yaw) * input.x - Math.cos(this.yaw) * input.y) * speed;
+      if (!wasHidden && !this.player.hiddenSpotId) {
+        const moved = moveCharacter({ x: this.player.x, y: this.player.jump, z: this.player.z, velocityY: this.player.velocityY,
+          grounded: this.player.grounded, supportId: this.player.supportId, ladderId:this.player.ladderId,
+          ladderDistance:this.player.ladderDistance,ladderBlockedId:this.player.ladderBlockedId }, { vx, vz, jump: input.jump,climb:input.y }, dt, { world: this.world.spatial, radius: PLAYER_RADIUS });
+        Object.assign(this.player, moved.body, { jump: moved.body.y });
+      }
+      Object.assign(playerActor, { x: this.player.x, y: this.player.jump, z: this.player.z, yaw: this.yaw, pitch: this.pitch });
+      if (allowGear && input.throwPressed) {
+        const result = this.requestEquipment({ kind: 'throw', grenadeType: this.player.equipment.selectedGrenade });
+        if (!result.ok) this.events.onToast(result.reason);
+      }
+      if (!powers.unlimitedAmmo && !isUsingSupply(this.player.equipment) && input.reload && this.player.equipment.heldItem === 'gun' && startReload(this.weaponState)) this.audio.reload();
+      this.placeCamera();
+      const canAttack = !isUsingSupply(this.player.equipment) && (!this.zombieRuntime || this.zombieRuntime.canAttack());
+      if (allowGear && canAttack && input.fire && this.player.equipment.heldItem === 'knife') this.slash(playerActor, actors);
+      else if (canAttack && input.fire && this.player.equipment.attackLockRemaining <= 0 && (this.weapon.automatic || input.firePressed)) {
+        if (powers.unlimitedAmmo) replenishPoweredMagazine(this.weaponState);
+        if (tryFire(this.weaponState)) this.shoot(zoom, actors);
+        else if (!this.lastFire && this.weaponState.ammo === 0) this.events.onToast(this.weaponState.reserve ? 'TAP RELOAD' : 'OUT OF AMMO · CHANGE LOADOUT');
+        if (this.getSoloPowers().unlimitedAmmo) replenishPoweredMagazine(this.weaponState);
+      }
+      this.lastFire = input.fire;
+      const targetFov = zoom ? 75 / this.weapon.zoom : 75;
+      this.camera.fov += (targetFov - this.camera.fov) * Math.min(1, dt * 14); this.camera.updateProjectionMatrix();
+      this.weaponModel.visible = !this.player.hiddenSpotId && !(this.heldItem === 'gun' && zoom && this.weapon.classId === 'sniper');
+      const reload = this.heldItem === 'gun' && this.weaponState.reloadRemaining > 0;
+      this.weaponModel.position.set(zoom ? .08 : .28, -.27 - (isUsingSupply(this.player.equipment) ? .24 : reload ? .17 : 0) + Math.sin(this.time * 10) * Math.hypot(input.x, input.y) * .012, -.5 + this.recoil * .7);
+      this.weaponModel.rotation.z = reload ? Math.sin(this.time * 6) * .15 - .3 : 0;
+      this.weaponModel.rotation.x = this.heldItem === 'knife'
+        ? -Math.sin(Math.min(1, (GEAR_BALANCE.knife.interval - this.player.equipment.meleeRemaining) / .2) * Math.PI) * .75 : 0;
+    }
+  }
+  stepCombatFeedback(dt) {
+    this.shotFlash = Math.max(0, this.shotFlash - dt); this.muzzle.visible = this.heldItem === 'gun' && this.shotFlash > 0 && this.weaponModel.visible;
+    this.hitFlash = Math.max(0, this.hitFlash - dt); this.damageFlash = Math.max(0, this.damageFlash - dt);
+    this.effects = this.effects.filter(effect => {
+      effect.life -= dt;
+      if (effect.life <= 0) { effect.line.removeFromParent(); effect.line.geometry.dispose(); effect.line.material.dispose(); return false; }
+      effect.line.material.opacity = effect.life / .12;
+      return true;
+    });
   }
   presentGearEvents(events) {
     for (const event of events) {
@@ -530,6 +578,7 @@ export class ArenaGame {
   }
   actorEntity(id) { return id === this.player.id ? this.player : this.bots.find(bot => bot.id === id); }
   isEnemy(sourceId, targetId) {
+    if (this.rangeRuntime || this.modeState?.kind === 'range') return false;
     return this.zombieRuntime ? this.zombieRuntime.isEnemy(sourceId, targetId) : areEnemies(this.modeState, sourceId, targetId);
   }
   slash(actor, actors = this.getActors()) {
@@ -707,6 +756,7 @@ export class ArenaGame {
     this.camera.updateMatrixWorld(true);
     const origin = this.camera.getWorldPosition(new THREE.Vector3());
     let landed = false, killed = false;
+    this.rangeRuntime?.beginShot();
     for (let pellet = 0; pellet < this.weapon.pellets; pellet++) {
       if (this.modeState.ended) break;
       const spread = this.weapon.spread * (zoom ? .35 : 1);
@@ -714,25 +764,31 @@ export class ArenaGame {
       const ray = new THREE.Ray(origin, direction);
       let closest = this.weapon.range, victim = null, hitPoint = null;
       let proxyHit = false;
-      for (const bot of this.bots) {
-        if (bot.hiddenSpotId || bot.health <= 0 || bot.respawn > 0 || bot.protected > 0 || !this.isEnemy('local', bot.id)) continue;
-        const p = bot.body ?? bot.model.position;
-        const box = new THREE.Box3(new THREE.Vector3(p.x - .32, p.y + .05, p.z - .32), new THREE.Vector3(p.x + .32, p.y + 1.84, p.z + .32));
-        const hit = ray.intersectBox(box, new THREE.Vector3());
-        if (!hit) continue;
-        const distance = origin.distanceTo(hit);
-        if (distance < closest && hasLineOfSight(origin, hit, this.world.solids)) { closest = distance; victim = bot; hitPoint = hit; }
-      }
-      const eligible = (actors ?? this.getActors()).filter(actor => actor.protectedRemaining <= 0 && this.isEnemy('local', actor.id));
-      const proxy = raySpotHit(origin, direction, this.weapon.range, spotDamageTargets(this.hidingState, eligible, this.world.definition), this.world.spatial);
-      if (proxy && proxy.distance < closest) {
-        victim = this.actorEntity(proxy.actorId); closest = proxy.distance;
-        hitPoint = new THREE.Vector3(proxy.point.x, proxy.point.y, proxy.point.z); proxyHit = true;
-      }
-      if (victim) {
-        const falloff = this.weapon.classId === 'shotgun' || this.weapon.classId === 'smg' ? Math.max(.35, 1 - closest / this.weapon.range * .6) : 1;
-        landed = this.damageActor('local', victim, proxyHit ? this.weapon.damage * falloff : gunHitDamage(this.weapon.damage * falloff, hitPoint.y, (victim.body ?? victim.model.position).y), actors) || landed;
-        if (victim.health <= 0) { killed = true; this.events.onToast(`+1 ELIMINATION · ${this.match.kills}`); }
+      if (this.rangeRuntime) {
+        const hit = this.rangeRuntime.resolvePellet({ origin, direction, weapon: this.weapon });
+        landed = hit.landed || landed; killed = hit.killed || killed;
+        hitPoint = hit.hitPoint;
+      } else {
+        for (const bot of this.bots) {
+          if (bot.hiddenSpotId || bot.health <= 0 || bot.respawn > 0 || bot.protected > 0 || !this.isEnemy('local', bot.id)) continue;
+          const p = bot.body ?? bot.model.position;
+          const box = new THREE.Box3(new THREE.Vector3(p.x - .32, p.y + .05, p.z - .32), new THREE.Vector3(p.x + .32, p.y + 1.84, p.z + .32));
+          const hit = ray.intersectBox(box, new THREE.Vector3());
+          if (!hit) continue;
+          const distance = origin.distanceTo(hit);
+          if (distance < closest && hasLineOfSight(origin, hit, this.world.solids)) { closest = distance; victim = bot; hitPoint = hit; }
+        }
+        const eligible = (actors ?? this.getActors()).filter(actor => actor.protectedRemaining <= 0 && this.isEnemy('local', actor.id));
+        const proxy = raySpotHit(origin, direction, this.weapon.range, spotDamageTargets(this.hidingState, eligible, this.world.definition), this.world.spatial);
+        if (proxy && proxy.distance < closest) {
+          victim = this.actorEntity(proxy.actorId); closest = proxy.distance;
+          hitPoint = new THREE.Vector3(proxy.point.x, proxy.point.y, proxy.point.z); proxyHit = true;
+        }
+        if (victim) {
+          const falloff = this.weapon.classId === 'shotgun' || this.weapon.classId === 'smg' ? Math.max(.35, 1 - closest / this.weapon.range * .6) : 1;
+          landed = this.damageActor('local', victim, proxyHit ? this.weapon.damage * falloff : gunHitDamage(this.weapon.damage * falloff, hitPoint.y, (victim.body ?? victim.model.position).y), actors) || landed;
+          if (victim.health <= 0) { killed = true; this.events.onToast(`+1 ELIMINATION · ${this.match.kills}`); }
+        }
       }
       if (pellet === 0) {
         const end = hitPoint || origin.clone().addScaledVector(direction, Math.min(35, this.weapon.range));
@@ -747,6 +803,7 @@ export class ArenaGame {
         this.tracer(new THREE.Vector3(.26, -.2, -.85).applyMatrix4(this.camera.matrixWorld), end, '#fff2a8');
       }
     }
+    this.rangeRuntime?.finishShot();
     if (landed) { this.hitFlash = .18; killed ? this.audio.kill() : this.audio.hit(); }
     this.recoil = Math.min(.13, this.recoil + this.weapon.recoil * (zoom ? .65 : 1));
   }
