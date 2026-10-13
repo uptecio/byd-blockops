@@ -5,8 +5,8 @@ const $ = id => document.getElementById(id);
 const types = { frag: 'Explosive', smoke: 'Smoke', flash: 'Flash' };
 
 export class EquipmentUI {
-  constructor({ getView, onAction, onPicker, onToast, canSelectInventory = () => false, isUnlimitedAmmo = () => false }) {
-    Object.assign(this, { getView, onAction, onPicker, onToast, canSelectInventory, isUnlimitedAmmo });
+  constructor({ getView, onAction, onPicker, onToast, canSelectInventory = () => false, isUnlimitedAmmo = () => false, isUnlimitedReserve = () => false }) {
+    Object.assign(this, { getView, onAction, onPicker, onToast, canSelectInventory, isUnlimitedAmmo, isUnlimitedReserve });
     this.pendingSelection = null; this.tab = 'armory';
     this.inventoryEntries = new Map(); this.inventoryGesture = null;
     const inventory = $('inventory-slots');
@@ -111,7 +111,7 @@ export class EquipmentUI {
   renderInventory(view) {
     const inventory = $('inventory-slots'); if (!inventory) return;
     const items = (view.owned || []).map(gun => ({ key: `gun:${gun.weaponId}`, kind: 'gun', id: gun.weaponId,
-      name: getWeapon(gun.weaponId).name, count: this.isUnlimitedAmmo() ? '∞' : `${gun.ammo} / ${gun.reserve}`, held: view.heldItem === 'gun' && view.activeGunId === gun.weaponId }));
+      name: getWeapon(gun.weaponId).name, count: this.isUnlimitedAmmo() ? '∞' : `${gun.ammo} / ${this.isUnlimitedReserve() ? '∞' : gun.reserve}`, held: view.heldItem === 'gun' && view.activeGunId === gun.weaponId }));
     if (view.knife) items.push({ key: 'knife', kind: 'knife', name: 'Knife', count: 'x1', held: view.heldItem === 'knife' });
     for (const id of Object.keys(types)) if (view.grenades?.[id] > 0)
       items.push({ key: `grenade:${id}`, kind: 'grenade', id, name: types[id], count: `x${view.grenades[id]}`, throwSelected: view.selectedGrenade === id });
@@ -153,6 +153,9 @@ export class EquipmentUI {
   render() {
     const view = this.getView(), pending = this.currentSelection(view), owned = view.owned || [];
     this.renderInventory(view);
+    const practice = view.roundId?.kind === 'range';
+    for (const id of ['knife-button', 'grenade-type-button', 'throw-button']) $(id).hidden = practice;
+    if ($('loot-inventory')) $('loot-inventory').hidden = practice;
     const alive = view.alive !== false, knife = view.heldItem === 'knife', use = alive && view.roundId ? view.supplyUse : null;
     $('supply-use-status').hidden = !use;
     $('supply-use-label').textContent = use ? `${use.type === 'health' ? 'HEALING' : 'ADDING ARMOUR'} · ${use.remaining.toFixed(1)}s · TAP PACK TO CANCEL` : '';
@@ -185,14 +188,14 @@ export class EquipmentUI {
     $('carried-guns').hidden = this.tab !== 'carried' || !view.roundId;
     $('armory-guns').hidden = this.tab === 'carried' && !!view.roundId;
     document.querySelectorAll('[data-equipment-tab]').forEach(button => button.setAttribute('aria-pressed', button.dataset.equipmentTab === this.tab));
-    const unlimitedAmmo = this.isUnlimitedAmmo();
-    const carriedSignature = JSON.stringify([owned, view.activeGunId, pending?.weaponId, alive, unlimitedAmmo]);
+    const unlimitedAmmo = this.isUnlimitedAmmo(), unlimitedReserve = this.isUnlimitedReserve();
+    const carriedSignature = JSON.stringify([owned, view.activeGunId, pending?.weaponId, alive, unlimitedAmmo, unlimitedReserve]);
     if (carriedSignature !== this.carriedSignature) {
       this.carriedSignature = carriedSignature;
       $('carried-guns').textContent = '';
       $('carried-guns').append(...owned.map(gun => {
         const button = document.createElement('button'); button.className = 'carried-gun secondary'; button.dataset.carriedWeapon = gun.weaponId;
-        button.textContent = `${getWeapon(gun.weaponId).name} · ${unlimitedAmmo ? '∞' : `${gun.ammo} / ${gun.reserve}`}${gun.weaponId === view.activeGunId ? ' · ACTIVE' : ''}`;
+        button.textContent = `${getWeapon(gun.weaponId).name} · ${unlimitedAmmo ? '∞' : `${gun.ammo} / ${unlimitedReserve ? '∞' : gun.reserve}`}${gun.weaponId === view.activeGunId ? ' · ACTIVE' : ''}`;
         button.disabled = !alive; button.setAttribute('aria-pressed', pending?.weaponId === gun.weaponId); return button;
       }));
     }
@@ -203,7 +206,7 @@ export class EquipmentUI {
       const carried = owned.find(gun => gun.weaponId === button.dataset.weapon);
       button.setAttribute('aria-disabled', unavailable); button.title = unavailable ? 'Find this gun as loot' : carried ? 'Owned · ammunition preserved' : 'Armory · fresh supply';
       if (unavailable) button.querySelector('.weapon-type').textContent = 'Find this gun as loot';
-      else if (carried) button.querySelector('.weapon-type').textContent = `CARRIED · ${unlimitedAmmo ? '∞' : `${carried.ammo} / ${carried.reserve}`}`;
+      else if (carried) button.querySelector('.weapon-type').textContent = `CARRIED · ${unlimitedAmmo ? '∞' : `${carried.ammo} / ${unlimitedReserve ? '∞' : carried.reserve}`}`;
       else {
         const gun = getWeapon(button.dataset.weapon);
         button.querySelector('.weapon-type').textContent = `${gun.automatic ? 'AUTOMATIC' : 'SEMI / SINGLE'} · ${gun.magazine} ROUNDS`;

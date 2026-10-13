@@ -43,6 +43,7 @@ test('appearance timing follows live mode and displays current look separately f
   ui.render(store.view(),{...context,live:true});assert.match($('appearance-timing').textContent,/Next respawn/);
   assert.match($('appearance-timing').textContent,/Ranger/);assert.match($('appearance-timing').textContent,/Crimson Ninja/);
   ui.render(store.view(),{...context,live:true,modeId:'zombies'});assert.match($('appearance-timing').textContent,/Next run/);
+  ui.render(store.view(),{...context,live:true,modeId:'range'});assert.match($('appearance-timing').textContent,/Next visit/);
   ui.render(store.view(),context);assert.match($('appearance-timing').textContent,/Equipped/);
   assert.equal($('armory-skin').value,'crimson-ninja');assert.equal($('room-skin').value,'crimson-ninja');
 });

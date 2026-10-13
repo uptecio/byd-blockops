@@ -3,6 +3,21 @@ import { getMode } from './modes.js';
 const $ = id => document.getElementById(id);
 export function renderMatchHud(view, ownId) {
   if (!view) return;
+  const practice = !!view.range;
+  document.querySelector('.score-panel').hidden = practice;
+  $('timer').hidden = practice;
+  if ($('range-stats')) $('range-stats').hidden = !practice;
+  if (practice) {
+    $('hud-mode').textContent = 'Shooting Range';
+    for (const [id, value] of [['range-kills', view.range.targetKills], ['range-xp', view.range.earnedXP],
+      ['range-accuracy', `${view.range.accuracy}% (${view.range.shotsHit}/${view.range.shotsFired})`]]) {
+      if ($(id)) $(id).textContent = value;
+    }
+    document.querySelector('.score-panel').classList.toggle('zombie-score', false);
+    document.querySelector('.score-panel').classList.toggle('team-score', false);
+    $('objective-status').textContent = ''; $('objective-status').hidden = true;
+    return;
+  }
   const zombies = view.modeId === 'zombies';
   document.querySelector('.score-panel').classList.toggle('zombie-score', zombies);
   if (zombies) {

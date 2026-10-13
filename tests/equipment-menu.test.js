@@ -4,6 +4,7 @@ import { MultiplayerUI } from '../src/multiplayer-ui.js';
 import { RoomManager } from '../server/rooms.js';
 import { createHeadlessGame, cleanupGame } from './helpers/game-fixture.js';
 import { createInputFixture } from './helpers/input-fixture.js';
+import { WEAPONS } from '../src/weapons.js';
 
 class Element extends EventTarget {
   constructor() { super(); this.value = ''; this.hidden = false; this.dataset = {}; this.children = []; this.classList = { toggle() {} }; }
@@ -164,13 +165,13 @@ test('real online input queues knife and one throw, while T immediately sends ne
   assert.equal(sent.filter(packet => packet.type === 'input').every(packet => !packet.fire && !packet.firePressed && !packet.reload && !packet.jump), true);
 });
 
-async function equipmentFixture(t) {
+async function equipmentFixture(t, options = {}) {
   const dom = createInputFixture(); t.after(dom.restore);
   const game = createHeadlessGame(); t.after(() => cleanupGame(game)); game.start('m4a1', { bots: 1 }); game.pause();
   const { EquipmentUI } = await import('../src/equipment-ui.js');
   const messages = [];
   const ui = new EquipmentUI({ getView: () => ({ ...game.getEquipmentView(), lifeId: game.player.lifeId, roundId: game.modeState, alive: game.player.health > 0 }),
-    onAction: action => game.requestEquipment(action), onPicker: () => { game.pause(); dom.input.clear(); }, onToast: message => messages.push(message) });
+    onAction: action => game.requestEquipment(action), onPicker: () => { game.pause(); dom.input.clear(); }, onToast: message => messages.push(message), ...options });
   return { ...dom, game, ui, messages };
 }
 test('preview then cancellation and plain Return to Match never equip a gun', async t => {
@@ -208,4 +209,24 @@ test('grenade picker clears combat, selects without throwing and requires explic
 test('an empty grenade picker focuses its enabled Return button', async t => {
   const { ui } = await equipmentFixture(t); const resume = document.getElementById('grenade-picker-resume'); ui.openPicker();
   assert.equal(document.activeElement, resume);
+});
+
+test('practice offers all 29 guns with finite magazines, infinity reserves and ordinary reload', async t => {
+  const { game, ui, buttons } = await equipmentFixture(t, {isUnlimitedReserve:()=>true});
+  const create = document.createElement;
+  document.createElement = () => ({ getContext: () => ({clearRect(){},fillRect(){},fillText(){}}) });
+  try { assert.equal(game.tryStartRange('m4a1').ok,true); } finally { document.createElement=create; }
+  ui.isUnlimitedAmmo = () => game.getSoloPowers().unlimitedAmmo;
+  for (const gun of WEAPONS) {
+    ui.previewGun(gun.id); assert.equal(ui.confirmGun().ok,true,gun.name);
+  }
+  ui.previewGun('m4a1'); assert.equal(ui.confirmGun().ok,true); ui.render();
+  assert.equal(game.player.equipment.activeGunId,'m4a1');
+  assert.equal(buttons.get('reload-button').disabled,false);
+  assert.match(buttons.get('carried-guns').children.find(b=>b.dataset.carriedWeapon==='m4a1').textContent,/30 \/ ∞/);
+  assert.equal(buttons.get('knife-button').hidden,true); assert.equal(buttons.get('grenade-type-button').hidden,true); assert.equal(buttons.get('throw-button').hidden,true);
+  game.setSoloPowers({invincible:false,unlimitedAmmo:true,superSpeed:false,speedMultiplier:2},game.modeState);ui.render();
+  assert.equal(buttons.get('reload-button').disabled,true);
+  game.quit();game.start('m4a1',{bots:0});ui.isUnlimitedReserve=()=>false;ui.render();
+  assert.equal(buttons.get('knife-button').hidden,false);assert.equal(buttons.get('grenade-type-button').hidden,false);assert.equal(buttons.get('throw-button').hidden,false);
 });

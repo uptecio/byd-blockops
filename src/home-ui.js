@@ -16,7 +16,7 @@ export function validateSelection(raw = {}, legacyWeaponId) {
   };
 }
 export class HomeUI {
-  constructor({ getSelection, onSelection, onSolo, onOnline, onArmory, onSettings }) {
+  constructor({ getSelection, onSelection, onSolo, onRange, onOnline, onArmory, onSettings }) {
     this.getSelection = getSelection;
     this.preview = new CharacterPreview($('character-preview'));
     $('map-grid').innerHTML = MAPS.map(map => `<button class="map-card" data-map="${map.id}" aria-pressed="false"><canvas aria-label="${map.name} map layout"></canvas><span>${map.name}</span></button>`).join('');
@@ -26,6 +26,7 @@ export class HomeUI {
       $(id).addEventListener('click', event => { const button = event.target.closest(`[${attribute}]`); if (button) onSelection({ ...getSelection(), [key]: button.getAttribute(attribute) }); });
     }
     for (const [id, action] of [['home-solo', onSolo], ['home-online', onOnline], ['home-armory', onArmory], ['home-settings', onSettings]]) $(id).addEventListener('click', action);
+    if (onRange) $('home-range')?.addEventListener('click', onRange);
     this.render();
   }
   render() {

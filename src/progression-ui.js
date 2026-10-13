@@ -71,7 +71,7 @@ export function createProgressionUI({ document, onEquip }) {
       const desired = `${getSkin(view.skinId).name} / ${getGunFinish(view.finishId).name}`;
       const current = `${getSkin(context.currentSkinId || view.skinId).name} / ${getGunFinish(context.currentFinishId || view.finishId).name}`;
       $('appearance-timing').textContent = context.live
-        ? `${context.modeId === 'zombies' ? 'Next run' : 'Next respawn'} · Selected: ${desired} · Wearing: ${current}` : `Equipped: ${desired}`;
+        ? `${context.modeId === 'range' ? 'Next visit' : context.modeId === 'zombies' ? 'Next run' : 'Next respawn'} · Selected: ${desired} · Wearing: ${current}` : `Equipped: ${desired}`;
       for (const id of ['progression-save-status', 'armory-save-status', 'progression-live-save-status']) {
         const node = $(id); node.textContent = saveCopy(view); node.dataset.saveStatus = view.saveStatus;
         node.hidden = id === 'progression-live-save-status' && (!context.live || view.saveStatus === 'saved');

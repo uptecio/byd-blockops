@@ -109,12 +109,17 @@ function setMode(next) {
   document.querySelector('.pause-dialog h2').textContent = online ? 'MATCH STILL LIVE' : 'GAME PAUSED';
   document.querySelector('.pause-dialog .eyebrow').textContent = online ? 'CONTROLS PAUSED' : 'TAKE YOUR TIME';
   document.querySelector('.pause-dialog p').textContent = online ? 'Your controls are paused. The match continues and other players can still move and shoot.' : 'Your round is right where you left it.';
-  $('quit-button').textContent = online ? 'Leave room & return Home' : 'End round & return Home';
+  const practice = !online && game?.hasRound && !game.match.ended && game.modeState?.kind === 'range';
+  if (practice) document.querySelector('.pause-dialog p').textContent = 'Practice is paused. Targets and earned XP are right where you left them.';
+  $('quit-button').textContent = online ? 'Leave room & return Home' : practice ? 'End practice & return Home' : 'End round & return Home';
   input.clear();
   if (next !== 'playing' && game) { if (online) multiplayer.pause(); else game.pause(); }
   renderProgression();
 }
-function showHome() { progression.retry(); setMode('home'); home.render(); renderProgression(); }
+function showHome() {
+  selected = getWeapon(selection.weaponId); activeClass = selected.classId;
+  renderSelected(); progression.retry(); setMode('home'); home.render(); renderProgression();
+}
 function invalidatePowerMenu() { powersScreenToken = {}; powersUI?.invalidate(); }
 function resetPowerSession() { pendingSoloPowers = defaultSoloPowers(); game?.resetSoloPowers(); }
 function powerContext() {
@@ -147,8 +152,9 @@ function requestHome(after = showHome) {
   const origin = mode, token = sessionToken();
   setMode('confirm-home');
   confirmation = { origin, token, after };
-  $('confirm-home-title').textContent = connected ? 'LEAVE THIS ROOM?' : 'END THIS ROUND?';
-  $('confirm-home-message').textContent = connected ? 'The shared match continues. Host ownership transfers when needed.' : 'Your current solo round will end. Your selections are saved.';
+  const practice = !connected && game?.modeState?.kind === 'range';
+  $('confirm-home-title').textContent = connected ? 'LEAVE THIS ROOM?' : practice ? 'END PRACTICE?' : 'END THIS ROUND?';
+  $('confirm-home-message').textContent = connected ? 'The shared match continues. Host ownership transfers when needed.' : practice ? 'Practice will end. You keep earned XP and return to your normal match selections.' : 'Your current solo round will end. Your selections are saved.';
   $('confirm-home-screen').hidden = false;
   $('cancel-home').textContent = origin === 'playing' ? 'KEEP PLAYING' : 'GO BACK';
   $('cancel-home').focus({ preventScroll: true });
@@ -245,17 +251,39 @@ function showArmory() {
   renderArmorySession();
 }
 function renderArmorySession() {
+  if (game?.hasRound && !game.match.ended && game.modeState?.kind === 'range' && !multiplayer?.isConnected()) {
+    $('armory-map').textContent = 'SHOOTING RANGE';
+    $('armory-mode').textContent = 'PRACTICE · ALL 29 GUNS';
+    $('session-target').textContent = 'TARGET PRACTICE';
+    if ($('session-target-label')) $('session-target-label').textContent = 'EARN XP';
+    $('session-duration').textContent = 'UNTIMED';
+    $('session-duration-label').textContent = 'TAKE YOUR TIME';
+    $('bot-count-label').textContent = 'NO ENEMIES';
+    $('play-button').innerHTML = equipmentUI?.currentSelection() ? 'EQUIP & RETURN <span>↗</span>' : 'RETURN TO PRACTICE <span>↗</span>';
+    return;
+  }
   const mapId = multiplayer?.isConnected() ? multiplayer.room.mapId : selection.mapId;
   const modeId = multiplayer?.isConnected() ? multiplayer.room.modeId : selection.modeId;
   const zombies = modeId === 'zombies', modeInfo = getSoloMode(modeId);
   $('armory-map').textContent = getMap(mapId).name.toUpperCase();
   $('armory-mode').textContent = `${modeInfo.name.toUpperCase()} · ${multiplayer?.isConnected() ? 'ONLINE FRIENDS' : zombies ? 'SOLO ONLY' : 'SOLO VS BOTS'}`;
   $('session-target').textContent = zombies ? 'SURVIVE WAVES' : `${modeInfo.scoreLimit} ${modeId === 'ctf' ? 'CAPTURES' : modeId === 'tdm' ? 'TEAM KILLS' : 'ELIMINATIONS'}`;
+  if ($('session-target-label')) $('session-target-label').textContent = 'TO WIN';
   $('session-duration').textContent = zombies ? 'ENDLESS' : '3 MIN';
   $('session-duration-label').textContent = zombies ? 'WAVE SURVIVAL' : 'QUICK ROUNDS';
   $('bot-count-label').textContent = zombies ? 'WALKERS + RUNNERS' : `${settings.bots} BOT${settings.bots === 1 ? '' : 'S'}`;
   $('play-button').innerHTML = multiplayer && multiplayer.isConnected() ? (multiplayer.room.phase === 'playing' ? 'RETURN TO MATCH <span>↗</span>' : 'BACK TO ROOM <span>↗</span>') : game && game.hasRound && !game.match.ended ? 'RETURN TO MATCH <span>↗</span>' : 'DEPLOY <span>↗</span>';
   if (equipmentUI?.currentSelection()) $('play-button').innerHTML = 'EQUIP & RETURN <span>↗</span>';
+}
+function deployRange() {
+  if (!game || mode !== 'home' || runtimeErrors.failed || document.hidden || !document.hasFocus()
+    || (game.hasRound && !game.match.ended) || multiplayer?.isConnected() || multiplayer?.busy) return;
+  // An explicit foreground Home action has the same background reset as solo deployment.
+  backgroundSuspended = false; audio.unlock();
+  const powers = { ...pendingSoloPowers }; pendingSoloPowers = defaultSoloPowers();
+  const started = game.tryStartRange(selection.weaponId, { ...settings, ...selection }, powers);
+  if (!started.ok) { showHome(); game.events.onToast(`Could not start Shooting Range: ${started.reason}`); return; }
+  setMode('playing'); game.events.onHud(game); document.activeElement.blur();
 }
 function deploy(forceNew = false) {
   if (!game || runtimeErrors.failed) return;
@@ -353,7 +381,7 @@ function onHud(current) {
   $('hud-weapon').textContent = current.weapon.name;
   const unlimitedAmmo = !multiplayer?.isActive() && current.getSoloPowers?.()?.unlimitedAmmo;
   $('ammo-count').textContent = unlimitedAmmo ? '∞' : current.weaponState.ammo;
-  $('reserve-count').textContent = unlimitedAmmo ? '∞' : current.weaponState.reserve;
+  $('reserve-count').textContent = unlimitedAmmo || (!multiplayer?.isActive() && current.getMatchView()?.range) ? '∞' : current.weaponState.reserve;
   $('reload-status').textContent = recovery ? 'GET READY · ATTACKS PAUSED' : unlimitedAmmo ? '' : current.weaponState.reloadRemaining > 0 ? `RELOADING ${current.weaponState.reloadRemaining.toFixed(1)}s` : current.weaponState.ammo === 0 ? 'TAP RELOAD' : '';
   $('hit-marker').style.opacity = current.hitFlash > 0 ? 1 : 0;
   $('damage-flash').style.opacity = Math.min(1, current.damageFlash * 4);
@@ -382,6 +410,7 @@ try {
   multiplayer.client.onHideResult = result => multiplayer.arena?.receiveHideResult(result);
   equipmentUI = new EquipmentUI({ getView: equipmentView,
     isUnlimitedAmmo: () => !multiplayer?.isActive() && game.getSoloPowers().unlimitedAmmo,
+    isUnlimitedReserve: () => !multiplayer?.isActive() && game.modeState?.kind === 'range',
     canSelectInventory: () => mode === 'playing' && input.enabled && !backgroundSuspended && !document.hidden,
     onAction: action => multiplayer?.isActive() ? action.kind === 'equip-gun' && mode === 'armory'
       ? multiplayer.deploy({ equipWeaponId: action.weaponId, source: action.source }) : multiplayer.arena.requestEquipment(action) : game.requestEquipment(action),
@@ -393,7 +422,7 @@ try {
     audio.unlock(); if (multiplayer?.isActive()) multiplayer.resume(); else game.resume(); setMode('playing');
   });
   $('armory-cancel').addEventListener('click', () => { equipmentUI.close(); if (equipmentView().roundId) setMode('paused'); else if (multiplayer?.isConnected()) multiplayer.open(); else showHome(); });
-  home = new HomeUI({ getSelection: () => selection, onSelection: selectConfiguration, onSolo: () => deploy(), onOnline: () => multiplayer.open(), onArmory: showArmory, onSettings: openSettings });
+  home = new HomeUI({ getSelection: () => selection, onSelection: selectConfiguration, onSolo: () => deploy(), onRange: deployRange, onOnline: () => multiplayer.open(), onArmory: showArmory, onSettings: openSettings });
   powersUI = createSoloPowersUI({document, pinGate:createSoloPowersPinGate(), getContext:powerContext, onApply:applyPowerSelection,
     onOpen:() => input.clear(), onClose:() => input.clear()});
   progressionUI = createProgressionUI({ document, onEquip: patch => selectConfiguration({ ...selection, ...patch }) });
