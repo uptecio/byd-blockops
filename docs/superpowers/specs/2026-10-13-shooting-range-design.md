@@ -2,7 +2,7 @@
 
 Date: 2026-10-13
 
-Status: gameplay choices agreed in conversation; written specification awaiting user review. This document is not an implementation or a live update.
+Status: written specification approved by the user on 2026-10-13. Approval permits implementation planning; the written plan and execution method still require review before coding. This document is not an implementation or a live update.
 
 Baseline: the current `feat/offline-arena` checkout, including the existing Minigun and teammate-map changes. Preserve unrelated work, player saves, release artifacts and running games. This specification does not authorize a public deployment or server restart.
 
