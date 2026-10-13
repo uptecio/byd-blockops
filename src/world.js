@@ -22,37 +22,48 @@ function blocks(THREE, group) {
 
 export function createWorld(THREE, scene, mapId = DEFAULT_MAP_ID) {
   // Validate before attaching anything, so an unsupported map cannot leak a world.
-  const definition = getMap(mapId);
+  return createWorldFromDefinition(THREE, scene, getMap(mapId));
+}
+
+export function createWorldFromDefinition(THREE, scene, definition) {
   const spatial = createSpatialWorld(definition);
+  if (!Array.isArray(definition.blocks) || definition.blocks.some(block => !block
+    || ![block.x, block.y, block.z, block.w, block.h, block.d].every(Number.isFinite)
+    || block.w <= 0 || block.h <= 0 || block.d <= 0)) throw new RangeError('Invalid world blocks');
   const arena = new THREE.Group();
   arena.name = definition.name;
   const botGroup = new THREE.Group();
   botGroup.name = 'Bots';
-  scene.add(arena, botGroup);
-  const { box, geometry, materials } = blocks(THREE, arena);
-  for (const block of definition.blocks) {
-    box(block.x, block.y, block.z, block.w, block.h, block.d, block.colour);
-  }
-  return {
-    mapId: definition.id, definition, spatial,
-    solids: spatial.solids, spawns: definition.spawns, playerSpawn: definition.playerSpawn, botGroup,
-    dispose() {
-      scene.remove(arena, botGroup);
-      geometry.dispose();
-      for (const material of materials.values()) material.dispose();
-      const disposedGeometry = new Set();
-      const disposedMaterial = new Set();
-      botGroup.traverse(object => {
-        if (object.geometry && !disposedGeometry.has(object.geometry)) {
-          disposedGeometry.add(object.geometry);
-          object.geometry.dispose();
-        }
-        for (const material of object.material ? [].concat(object.material) : []) {
-          if (!disposedMaterial.has(material)) { disposedMaterial.add(material); material.dispose(); }
-        }
-      });
-    },
+  let builder, disposed = false;
+  const dispose = () => {
+    if (disposed) return;
+    disposed = true;
+    arena.removeFromParent(); botGroup.removeFromParent();
+    const resources = new Set(builder ? [builder.geometry, ...builder.materials.values()] : []);
+    const groups = [];
+    for (const root of [arena, botGroup]) root.traverse(object => {
+      if (object.geometry) resources.add(object.geometry);
+      for (const material of object.material ? [].concat(object.material) : []) resources.add(material);
+      if (object.isGroup) groups.push(object);
+    });
+    for (const resource of resources) resource.dispose();
+    for (const group of groups.reverse()) group.clear();
   };
+  try {
+    builder = blocks(THREE, arena);
+    for (const block of definition.blocks) {
+      builder.box(block.x, block.y, block.z, block.w, block.h, block.d, block.colour);
+    }
+    scene.add(arena, botGroup);
+    return {
+      mapId: definition.id, definition, spatial,
+      solids: spatial.solids, spawns: definition.spawns, playerSpawn: definition.playerSpawn, botGroup,
+      dispose,
+    };
+  } catch (error) {
+    dispose();
+    throw error;
+  }
 }
 
 export function createBotModel(THREE, colour = '#ef896c') {
