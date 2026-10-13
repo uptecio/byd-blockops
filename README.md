@@ -1,6 +1,6 @@
 # Block Ops — solo + online arena
 
-A playable Android prototype for the BYD Shark 6: a colourful original block-style first-person arena with eight maps, eight unlocked character skins, three match modes, offline bots, internet rooms for 2–8 real players, touchscreen controls, and 28 unlocked guns across seven classes. Every gun starts with 500 total rounds. Maps and skins are bundled for offline play. No account, ads, downloaded game assets or vehicle integration.
+A playable Android prototype for the BYD Shark 6: a colourful original block-style first-person arena with eight maps, eight free character skins plus XP rewards, three match modes, offline bots, internet rooms for 2–8 real players, touchscreen controls, and 29 unlocked guns across seven classes. Every gun starts with 500 total rounds in normal matches. Maps and skins are bundled for offline play. No account, ads, downloaded game assets or vehicle integration.
 
 ## Try it
 
@@ -14,7 +14,11 @@ Start at **Home**: preview your character, select a map, match mode and skin, th
 
 To swap during a round, tap **Loadout**, select a gun, and return to the match. Menus pause solo combat only. **Home** asks before ending a solo round or leaving an online room; Cancel returns to your previous screen and clears held controls. Pause resumes the same round. Each gun retains its own ammo within a round, including when switching away and back. New rounds and respawning replenish ammunition.
 
-Every gun starts with **500 rounds total**, including its magazine. Magazine sizes remain distinct: the M4A1 starts with 30 loaded + 470 reserve, the AWP with 5 + 495, and the MG42 with 100 + 400. Reloading transfers ammunition from reserve; it does not add ammunition. Switching guns preserves each gun's remaining supply.
+Tap **Shooting Range** on Home for untimed solo practice with all 29 guns, including the Minigun. Loadout changes only your practice gun; returning Home restores your normal map, mode and gun. Magazines and reloads behave normally with unlimited reserve ammunition. Targets have 100 health and respawn after five active seconds; menus and background pauses stop that clock. Each visit starts with fresh targets and statistics, without enemies or a completion bonus.
+
+A normal target kill earns 10 XP; a dummy headshot or bullseye centre kill earns 20 XP total. Practice XP unlocks the same cosmetics as normal play (level 2 at 150 lifetime XP), and earned XP and equipped cosmetics save on the device. If storage fails, the visible save status reports temporary or unsaved progress while existing saved data stays intact. The existing PIN gate and Solo Powers also work in practice; powers reset when leaving or reopening the game, while your PIN remains saved. Practice is unavailable in online rooms.
+
+In normal matches, every gun starts with **500 rounds total**, including its magazine. Magazine sizes remain distinct: the M4A1 starts with 30 loaded + 470 reserve, the AWP with 5 + 495, and the MG42 with 100 + 400. Reloading transfers ammunition from reserve; it does not add ammunition. Switching guns preserves each gun's remaining supply.
 
 Touch controls: left joystick moves; drag the arena to aim; hold Fire for automatic guns, tap for single-shot guns; drag on Fire to aim while shooting. Separate Aim, Jump and Reload buttons. Aim magnifies the view, with a scope for sniper rifles. Bots respawn; the player respawns after 2.5 seconds with brief protection.
 
@@ -44,7 +48,7 @@ Online play uses **protocol 2**. All players must reload the current browser gam
 | Shotgun | M870, SPAS-12, AA-12, Double Barrel |
 | Sniper | AWP, Scout, Barrett .50, L96 |
 | Marksman | SKS, MK14, SVD, FAL |
-| LMG | M249, PKM, RPK, MG42 |
+| LMG | M249, PKM, RPK, MG42, Minigun |
 | Sidearm | G17, M1911, Desert Eagle, Revolver |
 
 Models are original stylised interpretations; statistics are fictional game balance values. This project is not affiliated with BYD, Poxel.io or weapon manufacturers.

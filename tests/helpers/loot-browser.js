@@ -125,10 +125,11 @@ export function observer(f, index) {
   };
 }
 
-export async function onlinePair(f) {
+export async function onlinePair(f, { navigate = true } = {}) {
   for (let i = 0; i < 2; i++) {
     const page = f.pages[i];
-    await page.goto(f.base); await page.locator('#home-online').click();
+    if (navigate) await page.goto(f.base);
+    await page.locator('#home-online').click();
     await page.locator('#player-name').fill(`LootPeer${i}`);
     await page.locator('.server-settings').evaluate(element => { element.open = true; });
     await page.locator('#server-address').fill(f.base);

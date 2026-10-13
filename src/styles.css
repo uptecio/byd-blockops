@@ -9,6 +9,7 @@ h1{font-size:48px}.loadout-panel h2{font-size:36px}.online-heading h2{font-size:
 /* Home and bundled selectors */
 /* Practice feedback stays below the top HUD, away from aim and fire buttons. */
 #home-range{grid-column:1/-1;min-height:44px;white-space:nowrap}
+@media(min-width:651px){.home-screen .home-deploy>div{grid-template-columns:repeat(3,1fr)}.home-screen #home-range{grid-column:auto}}
 #range-stats{position:absolute;top:116px;top:calc(116px + env(safe-area-inset-top,0px));left:22px;left:calc(22px + env(safe-area-inset-left,0px));display:flex;flex-wrap:wrap;gap:8px 18px;padding:10px 14px;max-width:calc(100% - 44px);border:1px solid #98e2ff77;border-radius:10px;background:#101d32ed;z-index:6;pointer-events:none;font-size:9px;letter-spacing:.4px;color:#abc4d6}
 #range-stats strong{display:block;font-size:14px;color:#dafa58;margin-top:3px;white-space:nowrap}
 @media(max-width:650px){#range-stats{left:14px;padding:8px 10px;gap:8px 14px}#range-stats strong{font-size:12px}}

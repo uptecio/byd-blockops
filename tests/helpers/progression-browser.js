@@ -6,13 +6,13 @@ import { startServer } from '../../server/server.mjs';
 import { emulateLegacyWebView } from './legacy-webview.js';
 import { walkSolo } from './loot-browser.js';
 
-export async function persistentFixture({legacy=false,viewport={width:1200,height:700},artifactDir='artifacts/xp-progression-browser'}={}) {
+export async function persistentFixture({legacy=false,viewport={width:1200,height:700},artifactDir='artifacts/xp-progression-browser',fullChromium=false}={}) {
   await mkdir(artifactDir,{recursive:true});
   const userDataDir=await mkdtemp(join(resolve(artifactDir),'profile-'));
   const server=await startServer({port:0,distDir:process.env.DIST_DIR||'dist'}),origin=`http://127.0.0.1:${server.port}`;
   const errors=[];let context,page;
   async function launch() {
-    context=await chromium.launchPersistentContext(userDataDir,{headless:true,viewport,hasTouch:true,args:['--no-sandbox','--use-gl=angle','--use-angle=swiftshader','--enable-unsafe-swiftshader']});
+    context=await chromium.launchPersistentContext(userDataDir,{headless:true,...(fullChromium?{executablePath:chromium.executablePath()}:{}),viewport,hasTouch:true,args:['--no-sandbox','--use-gl=angle','--use-angle=swiftshader','--enable-unsafe-swiftshader']});
     if(legacy)await emulateLegacyWebView(context);
     await context.addInitScript(()=>{
       const native=requestAnimationFrame.bind(window);let previous;
