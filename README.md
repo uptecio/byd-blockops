@@ -14,6 +14,34 @@ Install over an existing copy signed with the same certificate to retain saved p
 
 Transfer the APK using an installation method supported by your vehicle. Whether a particular Shark 6 firmware allows APK installation needs to be checked on that vehicle. This app has not been tested on a physical BYD head unit. Play while parked; the app does not detect the vehicle's motion.
 
+## Screenshots
+
+Actual v0.10.0 browser screenshots captured with Playwright. These show the game UI, not a physical BYD compatibility test.
+
+### Home and character selection
+
+Choose from eight arenas, select a mode and skin, and track saved XP.
+
+![Block Ops Home with Shadow Ninja, eight map previews, game modes and XP progress](docs/screenshots/home.png)
+
+### Solo arena
+
+Sunlit Courtyard with offline bots, ground loot, the numbered inventory and touchscreen controls.
+
+![First-person solo gameplay in Sunlit Courtyard with an M4A1, bots, loot and touch controls](docs/screenshots/solo-arena.png)
+
+### Shooting Range
+
+Practice against targets with unlimited reserve ammo and visible accuracy and XP statistics.
+
+![Shooting Range with close and distant targets, practice statistics and unlimited reserve ammunition](docs/screenshots/shooting-range.png)
+
+### Minigun loadout
+
+The Armory offers 29 guns across seven classes, with weapon previews and stats.
+
+![Armory with the LMG class selected and the Minigun model, magazine size and weapon statistics](docs/screenshots/minigun-loadout.png)
+
 ## Try it
 
 Start at **Home**: preview your character, select a map, match mode and skin, then tap **Solo** or **Online Friends**. **Armory** offers weapon classes and loadouts; **Settings** adjusts controls and bots. Home choices, gun and settings save on the device. All skins have identical movement, health and hitboxes; team markers remain visible regardless of skin.
