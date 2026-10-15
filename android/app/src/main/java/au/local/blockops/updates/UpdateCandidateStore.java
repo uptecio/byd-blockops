@@ -5,6 +5,10 @@ import java.net.URI;
 import java.nio.file.Files;
 import java.nio.file.StandardCopyOption;
 import java.security.MessageDigest;
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
 import java.util.Properties;
 import static au.local.blockops.updates.UpdateModel.*;
 
@@ -13,7 +17,7 @@ public final class UpdateCandidateStore implements UpdatePorts.CandidateStore {
     private final File directory, metadata;
     private final HttpsUpdateTransport transport;
     private long generation;
-    private UpdateCancellation active;
+    private final Map<Long, UpdateCancellation> incomplete = new HashMap<>();
 
     public UpdateCandidateStore(File directory, HttpsUpdateTransport transport) {
         this.directory = java.util.Objects.requireNonNull(directory);
@@ -26,13 +30,19 @@ public final class UpdateCandidateStore implements UpdatePorts.CandidateStore {
         validateRelease(release);
         token.check();
         final long operation;
+        final List<UpdateCancellation> superseded;
         File partial = null, complete = null, metadataPartial = null;
         boolean promoted = false;
         synchronized (this) {
             operation = ++generation;
-            active = token;
+            superseded = new ArrayList<>(incomplete.values());
+            incomplete.put(operation, token);
         }
         try {
+            // Mark and close prior work before opening this generation's connection. Closing can block,
+            // so retain every token and let later generations invalidate this waiting operation too.
+            for (UpdateCancellation previous : superseded) previous.cancel();
+            token.check();
             ensureDirectory();
             if (directory.getUsableSpace() < release.asset.size + UpdatePolicy.MAX_METADATA_BYTES) {
                 throw new UpdatePorts.Failure("storage_full", "There is not enough space for the update.");
@@ -68,7 +78,6 @@ public final class UpdateCandidateStore implements UpdatePorts.CandidateStore {
                     Files.move(metadataPartial.toPath(), metadata.toPath(), StandardCopyOption.ATOMIC_MOVE,
                             StandardCopyOption.REPLACE_EXISTING);
                     promoted = true;
-                    active = null;
                     pruneCompleteExcept(complete);
                     return new Candidate(complete, release);
                 }
@@ -80,7 +89,7 @@ public final class UpdateCandidateStore implements UpdatePorts.CandidateStore {
             deleteOwned(partial);
             deleteOwned(metadataPartial);
             if (!promoted) deleteOwned(complete);
-            synchronized (this) { if (operation == generation) active = null; }
+            synchronized (this) { incomplete.remove(operation); }
         }
     }
 
@@ -127,30 +136,37 @@ public final class UpdateCandidateStore implements UpdatePorts.CandidateStore {
     }
 
     @Override public void deletePartial() throws UpdatePorts.Failure {
-        UpdateCancellation pending;
-        File[] files;
-        synchronized (this) {
-            ++generation;
-            pending = active;
-            active = null;
-            // Snapshot before closing the old socket: teardown can block while a newer download starts.
-            files = directory.listFiles();
-        }
-        if (pending != null) pending.cancel();
-        if (files == null) return;
-        for (File file : files) {
-            String name = file.getName();
-            if ((name.startsWith("transfer-") || name.startsWith("metadata-")) && name.endsWith(".part")) {
-                if (!file.delete() && file.exists()) throw storageFailure();
-            }
-        }
+        cleanup(false);
     }
 
     @Override public void forget() throws UpdatePorts.Failure {
-        deletePartial();
-        synchronized (this) {
-            if (!metadata.delete() && metadata.exists()) throw storageFailure();
-            pruneCompleteExcept(null);
+        cleanup(true);
+    }
+
+    private void cleanup(boolean forgetComplete) throws UpdatePorts.Failure {
+        List<UpdateCancellation> pending = new ArrayList<>();
+        File[] files = null;
+        try {
+            synchronized (this) {
+                ++generation;
+                // Superseded generations still own sockets until their download finally block runs.
+                pending.addAll(incomplete.values());
+                files = directory.listFiles();
+                // Complete-file deletion belongs to this generation, before teardown releases newer work.
+                if (forgetComplete) {
+                    if (!metadata.delete() && metadata.exists()) throw storageFailure();
+                    pruneCompleteExcept(null);
+                }
+            }
+        } finally {
+            // Socket teardown can block. Never hold the store monitor, or discover newer files, here.
+            for (UpdateCancellation token : pending) token.cancel();
+            if (files != null) for (File file : files) {
+                String name = file.getName();
+                if ((name.startsWith("transfer-") || name.startsWith("metadata-")) && name.endsWith(".part")) {
+                    if (!file.delete() && file.exists()) throw storageFailure();
+                }
+            }
         }
     }
 

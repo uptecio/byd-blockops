@@ -25,6 +25,9 @@ public final class UpdaterTransferTest {
         redirectLimits(); boundedRead(); cancelClosesConnection(); truncatedAndOversizedDownload();
         deadlinesAndTls(); retryDeadlines(); privatePromotion(); metadataAndDiskFailure(); staleTransferCannotReplaceFile();
         cleanupCannotDeleteNewTransfer();
+        delayedForgetPreservesNewCandidate();
+        supersededTransfersRemainCancellable();
+        supersedingDuringDelayedTeardown();
         System.out.println("PASS transfer");
     }
     // A sixth follow, implicit follow, unsafe hop, auth header, or leaked query must fail here.
@@ -298,6 +301,120 @@ public final class UpdaterTransferTest {
             assert !newer.isAlive() && newResult.get() == null : newResult.get();
             assert oldResult.get() instanceof UpdatePorts.Failure && store.load().release.id == 2;
         } finally { cancelResume.countDown(); oldResume.countDown(); newResume.countDown(); remove(directory); }
+    }
+    // Once forget captures the old generation, its delayed teardown cannot erase a later promotion.
+    private static void delayedForgetPreservesNewCandidate() throws Exception {
+        Path directory = Files.createTempDirectory("updater-forget-race-");
+        CountDownLatch reading = new CountDownLatch(1), readResume = new CountDownLatch(1);
+        CountDownLatch cancelling = new CountDownLatch(1), cancelResume = new CountDownLatch(1);
+        Thread old = null, forgetting = null;
+        try {
+            Connection initial = connection(200, ABC), blocked = connection(200, ABC), fast = connection(200, ABC);
+            blocked.beforeRead = () -> { reading.countDown(); await(readResume); };
+            blocked.onDisconnect = () -> { cancelling.countDown(); await(cancelResume); readResume.countDown(); };
+            AtomicInteger opens = new AtomicInteger();
+            UpdateCandidateStore store = new UpdateCandidateStore(directory.toFile(), new HttpsUpdateTransport(url -> {
+                int index = opens.getAndIncrement(); return index == 0 ? initial : index == 1 ? blocked : fast;
+            }, new Clock()));
+            store.download(release(1, ABC_SHA), new UpdateCancellation(), (n, t) -> {});
+            AtomicReference<Throwable> oldResult = new AtomicReference<>(), forgetResult = new AtomicReference<>();
+            old = new Thread(() -> { try { store.download(release(2, ABC_SHA), new UpdateCancellation(), (n, t) -> {}); }
+                catch (Throwable failure) { oldResult.set(failure); } });
+            old.start(); assert reading.await(5, TimeUnit.SECONDS);
+            forgetting = new Thread(() -> { try { store.forget(); } catch (Throwable failure) { forgetResult.set(failure); } });
+            forgetting.start(); assert cancelling.await(5, TimeUnit.SECONDS);
+            Candidate newer = store.download(release(3, ABC_SHA), new UpdateCancellation(), (n, t) -> {});
+            assert store.load().release.id == 3 && newer.file.isFile();
+            cancelResume.countDown(); forgetting.join(5000); old.join(5000);
+            assert !forgetting.isAlive() && !old.isAlive() && forgetResult.get() == null : forgetResult.get();
+            assert oldResult.get() instanceof UpdatePorts.Failure;
+            assert newer.file.isFile() : "Old forget deleted the newer successful APK";
+            Candidate loaded = store.load();
+            assert loaded != null && loaded.release.id == 3 : "Old forget deleted newer metadata";
+            assertNoPartials(directory);
+        } finally {
+            cancelResume.countDown(); readResume.countDown();
+            if (old != null) old.join(5000);
+            if (forgetting != null) forgetting.join(5000);
+            remove(directory);
+        }
+    }
+    // Superseding closes each old transfer before opening new work; cleanup retains all ownership.
+    private static void supersededTransfersRemainCancellable() throws Exception {
+        Path directory = Files.createTempDirectory("updater-superseded-race-");
+        CountDownLatch reading = new CountDownLatch(1), otherReading = new CountDownLatch(1);
+        CountDownLatch readResume = new CountDownLatch(1), otherResume = new CountDownLatch(1);
+        Thread old = null, other = null;
+        try {
+            Connection blocked = connection(200, ABC), alsoBlocked = connection(200, ABC), fast = connection(200, ABC);
+            blocked.beforeRead = () -> { reading.countDown(); await(readResume); };
+            blocked.onDisconnect = readResume::countDown;
+            alsoBlocked.beforeRead = () -> { otherReading.countDown(); await(otherResume); };
+            alsoBlocked.onDisconnect = otherResume::countDown;
+            AtomicInteger opens = new AtomicInteger(), oldProgress = new AtomicInteger();
+            UpdateCandidateStore store = new UpdateCandidateStore(directory.toFile(), new HttpsUpdateTransport(url -> {
+                int index = opens.getAndIncrement(); return index == 0 ? blocked : index == 1 ? alsoBlocked : fast;
+            }, new Clock()));
+            AtomicReference<Throwable> oldResult = new AtomicReference<>(), otherResult = new AtomicReference<>();
+            old = new Thread(() -> { try { store.download(release(1, ABC_SHA), new UpdateCancellation(),
+                    (n, t) -> oldProgress.incrementAndGet()); } catch (Throwable failure) { oldResult.set(failure); } });
+            other = new Thread(() -> { try { store.download(release(2, ABC_SHA), new UpdateCancellation(),
+                    (n, t) -> oldProgress.incrementAndGet()); } catch (Throwable failure) { otherResult.set(failure); } });
+            old.start(); assert reading.await(5, TimeUnit.SECONDS);
+            other.start(); assert otherReading.await(5, TimeUnit.SECONDS);
+            assert blocked.disconnected && blocked.closed : "Superseding did not promptly close the old connection";
+            Candidate newer = store.download(release(3, ABC_SHA), new UpdateCancellation(), (n, t) -> {});
+            assert alsoBlocked.disconnected && alsoBlocked.closed : "The newest transfer left its predecessor connected";
+            store.deletePartial();
+            assert blocked.disconnected && blocked.closed : "Foreground cleanup lost the superseded connection";
+            assert alsoBlocked.disconnected && alsoBlocked.closed : "Foreground cleanup lost another superseded connection";
+            old.join(5000); other.join(5000);
+            assert !old.isAlive() && oldResult.get() instanceof UpdatePorts.Failure;
+            assert !other.isAlive() && otherResult.get() instanceof UpdatePorts.Failure;
+            assert ((UpdatePorts.Failure) oldResult.get()).code.equals("cancelled");
+            assert ((UpdatePorts.Failure) otherResult.get()).code.equals("cancelled");
+            assert oldProgress.get() == 0 && newer.file.isFile() && store.load().release.id == 3;
+            assertNoPartials(directory);
+        } finally {
+            readResume.countDown(); otherResume.countDown();
+            if (old != null) old.join(5000);
+            if (other != null) other.join(5000);
+            remove(directory);
+        }
+    }
+    // A waiting superseder must itself be cancellable and must never open a late connection.
+    private static void supersedingDuringDelayedTeardown() throws Exception {
+        Path directory = Files.createTempDirectory("updater-superseding-teardown-");
+        CountDownLatch reading = new CountDownLatch(1), readResume = new CountDownLatch(1);
+        CountDownLatch closing = new CountDownLatch(1), closeResume = new CountDownLatch(1);
+        Thread old = null, waiting = null;
+        try {
+            Connection blocked = connection(200, ABC), fast = connection(200, ABC);
+            blocked.beforeRead = () -> { reading.countDown(); await(readResume); };
+            blocked.onDisconnect = () -> { closing.countDown(); await(closeResume); readResume.countDown(); };
+            AtomicInteger opens = new AtomicInteger();
+            UpdateCandidateStore store = new UpdateCandidateStore(directory.toFile(), new HttpsUpdateTransport(
+                    url -> opens.getAndIncrement() == 0 ? blocked : fast, new Clock()));
+            AtomicReference<Throwable> oldResult = new AtomicReference<>(), waitingResult = new AtomicReference<>();
+            old = new Thread(() -> { try { store.download(release(1, ABC_SHA), new UpdateCancellation(), (n, t) -> {}); }
+                catch (Throwable failure) { oldResult.set(failure); } });
+            old.start(); assert reading.await(5, TimeUnit.SECONDS);
+            waiting = new Thread(() -> { try { store.download(release(2, ABC_SHA), new UpdateCancellation(), (n, t) -> {}); }
+                catch (Throwable failure) { waitingResult.set(failure); } });
+            waiting.start(); assert closing.await(5, TimeUnit.SECONDS);
+            Candidate newer = store.download(release(3, ABC_SHA), new UpdateCancellation(), (n, t) -> {});
+            closeResume.countDown(); waiting.join(5000); old.join(5000);
+            assert !waiting.isAlive() && !old.isAlive() && opens.get() == 2 : "Waiting superseder opened a late connection";
+            assert oldResult.get() instanceof UpdatePorts.Failure && waitingResult.get() instanceof UpdatePorts.Failure;
+            assert ((UpdatePorts.Failure) waitingResult.get()).code.equals("cancelled");
+            assert newer.file.isFile() && store.load().release.id == 3;
+            assertNoPartials(directory);
+        } finally {
+            closeResume.countDown(); readResume.countDown();
+            if (old != null) old.join(5000);
+            if (waiting != null) waiting.join(5000);
+            remove(directory);
+        }
     }
     private static Release release(long id, String sha) {
         return new Release(id, "v0.12.0", new Version(0, 12, 0),
