@@ -12,7 +12,9 @@ android {
         targetSdk 36
         versionCode 14
         versionName '0.10.0'
+        testInstrumentationRunner 'au.local.blockops.updates.UpdaterInstrumentation'
     }
+    sourceSets.androidTest.assets.srcDir layout.buildDirectory.dir('updater-test-assets')
     compileOptions {
         sourceCompatibility JavaVersion.VERSION_17
         targetCompatibility JavaVersion.VERSION_17
