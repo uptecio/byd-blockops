@@ -39,7 +39,8 @@
     "test:progression:android": "node android/tests/progression-smoke.mjs",
     "test:progression:android:online": "node android/tests/progression-online-smoke.mjs",
     "apk": "npm run build && bash scripts/build-apk.sh",
-    "test:apk": "node android/tests/package-smoke.mjs"
+    "test:apk": "node android/tests/package-smoke.mjs",
+    "test:updates:native": "node android/tests/updater-jvm.mjs policy"
   },
   "dependencies": {
     "three": "0.160.1",
