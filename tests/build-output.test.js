@@ -39,7 +39,7 @@ test('isolated build and preview serve staged assets while live dist is preserve
   const stageRoot = join(scratch, staged);
   assert.ok((await readFile(`${stageRoot}/game.js`, 'utf8')).length > 10000);
   const page = await readFile(`${stageRoot}/index.html`, 'utf8');
-  assert.match(page, /v0\.9\.1 SOLO POWERS/); assert.match(page, /id="climb-hint"/);
+  assert.match(page, /v0\.10\.0 · SHOOTING RANGE/); assert.match(page, /id="climb-hint"/);
   const server = spawn(process.execPath, [resolve('scripts/serve.mjs')], { cwd: scratch, env: { ...process.env, DIST_DIR: staged, PORT: '0' } });
   try {
     const address = await new Promise((resolve, reject) => {
@@ -50,6 +50,23 @@ test('isolated build and preview serve staged assets while live dist is preserve
     assert.equal(await (await fetch(`${address}/game.js`)).text(), await readFile(`${stageRoot}/game.js`, 'utf8'));
     assert.deepEqual(await optionalFiles('dist'), before);
   } finally { server.kill(); await new Promise(resolve => server.on('close', resolve)); }
+});
+
+// Catch a missing candidate selector, unknown selectors and ambiguous migration
+// requests before any SDK/artifact lookup. No APK or device mutation is needed.
+test('package release selectors reject ambiguity and recognize shooting range', async () => {
+  for (const [selection,pattern] of [
+    [{ANDROID_PACKAGE_RELEASE:'unknown-release'}, /Unknown ANDROID_PACKAGE_RELEASE/],
+    [{ANDROID_PACKAGE_RELEASE:'shooting-range',ANDROID_PACKAGE_BASELINE:'1'}, /Conflicting package selectors/],
+    [{ANDROID_PACKAGE_RELEASE:'solo-powers',ANDROID_PACKAGE_BASELINE:'1'}, /Conflicting package selectors/],
+    [{ANDROID_PACKAGE_RELEASE:'minigun',ANDROID_PACKAGE_BASELINE:'1'}, /Conflicting package selectors/],
+  ]) {
+    const {ANDROID_PACKAGE_RELEASE,ANDROID_PACKAGE_BASELINE,...env}=process.env;
+    const child=spawn(process.execPath,[resolve('android/tests/package-smoke.mjs')],{env:{...env,...selection}});
+    let output='';child.stdout.on('data',data=>{output+=data;});child.stderr.on('data',data=>{output+=data;});
+    const exit=await new Promise(resolve=>child.on('close',resolve));
+    assert.notEqual(exit,0);assert.match(output,pattern);
+  }
 });
 
 test('build-output validation succeeds in a checkout without generated dist', async context => {

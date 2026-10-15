@@ -17,9 +17,9 @@ const f=await nativeProgressionFixture({artifactDir:dir,serverOrigin:server});
 const browser=await chromium.launch({headless:true,args:['--no-sandbox','--use-gl=angle','--use-angle=swiftshader','--enable-unsafe-swiftshader']});
 const context=await browser.newContext({viewport:{width:1200,height:700},hasTouch:true}),peer=await context.newPage(),packets=[],errors=[];
 peer.on('pageerror',e=>errors.push(e.message));peer.on('websocket',s=>s.on('framereceived',frame=>packets.push(JSON.parse(String(frame.payload)))));
-const evidence={server,errors:[]},map=MAPS[0],spot=map.hideSpots[0];let page,peerView,nativeView,a,b,originalError,nativeId;
+const evidence={server,errors:[]},map=MAPS[0],spot=map.hideSpots.find(s=>s.id==='courtyard:annex:1:hide'),roof=map.traversal.roofs.find(r=>r.id==='courtyard:annex:1:position');let page,peerView,nativeView,a,b,originalError,nativeId;
 try {
-  page=await f.attach();assert.deepEqual(await f.version(),{code:10,name:'0.8.0'});evidence.beforeProfile=await readProfile(page);
+  page=await f.attach();assert.deepEqual(await f.version(),{code:11,name:'0.9.0'});evidence.beforeProfile=await readProfile(page);
   await peer.goto(server);await peer.waitForSelector('body[data-mode="home"]');
   await peer.locator('#home-armory').click();await peer.locator('[data-class="sidearm"]').click();await peer.locator('[data-weapon="g17"]').click();await peer.locator('#armory-home').click();
   for(const [p,name]of [[peer,'Rooftop Browser'],[page,'Rooftop Android']]) {
@@ -36,12 +36,12 @@ try {
   await until(()=>a.player&&b.player,'authoritative native snapshots');nativeId=a.id;
   assert.equal(a.player.teamId,'blue');nativeView=await observeGame(page);peerView=await observeGame(peer);
   const walk=(p,view,points)=>followRoute(p,async()=>({...view.player}),points,{map,online:true,speed:humanMoveSpeed(getWeapon(view.player.weaponId).classId),timeout:90000});
-  await walk(page,a,[{...map.bases.red,y:0},map.traversal.roofs[0].point]);
-  assert.equal(a.player.supportId,map.traversal.roofs[0].supportId);assert.equal(a.player.y,2.2);
-  assert.equal(b.room.players.find(p=>p.id===nativeId).y,2.2,'independent peer receives native elevation');
+  await walk(page,a,[{...map.bases.red,y:0},roof.point]);
+  assert.equal(a.player.supportId,roof.supportId);assert.equal(a.player.y,roof.point.y);
+  assert.equal(b.room.players.find(p=>p.id===nativeId).y,roof.point.y,'independent peer receives native elevation');
   assert.equal(a.room.flags.red.carrierId,nativeId);await page.screenshot({path:`${dir}/native-roof-flag.png`});
-  const center=map.traversal.shelters[0].point,out=SIDES[spot.facing],doorway={x:center.x+out.x*3,y:0,z:center.z+out.z*3};
-  await walk(page,a,[{...doorway,direct:true},spot.entry]);await walk(peer,b,[spot.entry]);
+  const center=map.traversal.shelters.find(s=>s.id==='courtyard:annex:1').point,out=SIDES[spot.facing],doorway={x:center.x+out.x*3,y:0,z:center.z+out.z*3};
+  await walk(page,a,[doorway,spot.entry]);await walk(peer,b,[spot.entry]);
   console.log(`NATIVE SETUP: ${a.room.timeLeft.toFixed(1)} seconds remain`);
   await page.locator('#hide-button').click();await until(()=>a.player.hiddenSpotId===spot.id,'native flag carrier hidden');
   await until(async()=>{const s=await peerView.read();return s.models.some(m=>!m.visible&&m.labelVisible===false)&&s.flags.red===false;},'browser sees concealed native avatar, label and flag');

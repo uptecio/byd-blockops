@@ -8,9 +8,9 @@ import { MOVEMENT } from '../src/character-movement.js';
 
 const map = MAPS[0], spot = map.hideSpots[0];
 const action = () => ({ type: 'hide-action', seq: 1, roundId: 'round-1', lifeId: 1, kind: 'enter', spotId: spot.id });
-const result = () => ({ type: 'hide-result', protocol: 7, seq: 1, roundId: 'round-1', lifeId: 1, ok: true, reason: null, hiddenSpotId: spot.id });
-test('protocol7 hide action/result enforce exact plain identities and map membership', () => {
-  assert.equal(PROTOCOL_VERSION, 7); assert.equal(validHideAction(action(), map), true); assert.equal(validHideResult(result(), map), true);
+const result = () => ({ type: 'hide-result', protocol: PROTOCOL_VERSION, seq: 1, roundId: 'round-1', lifeId: 1, ok: true, reason: null, hiddenSpotId: spot.id });
+test('current protocol hide action/result enforce exact plain identities and map membership', () => {
+  assert.equal(validHideAction(action(), map), true); assert.equal(validHideResult(result(), map), true);
   assert.equal(validHideAction({ ...action(), kind: 'exit' }, map), true);
   for (const change of [{ seq: 0 }, { seq: NaN }, { lifeId: -1 }, { seq: 1.2 }, { seq: Number.MAX_SAFE_INTEGER + 1 }, { roundId: '' }, { roundId: null },
     { spotId: MAPS[1].hideSpots[0].id }, { x: 1 }, { y: 3 }, { health: 100 }, { kind: 'teleport' }, { type: 'input' }]) assert.equal(validHideAction({ ...action(), ...change }, map), false);

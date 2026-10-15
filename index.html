@@ -18,7 +18,7 @@
         <span class="eyebrow">READY WHEN YOU ARE</span><h1 id="home-skin-name">Ranger</h1><span id="home-team" class="home-team">COSMETICS ONLY · ALL GUNS FREE</span>
         <div id="home-progression" aria-label="XP progression"></div><div id="progression-save-status" class="save-status" role="status" aria-live="polite"></div>
         <div class="character-stage"><div class="preview-ring"></div><canvas id="character-preview" aria-label="Selected character model"></canvas></div>
-        <div class="character-loadout"><span class="eyebrow">EQUIPPED</span><strong id="home-weapon-name">M4A1</strong><button id="home-armory" class="secondary">ARMORY · 28 GUNS ↗</button></div>
+        <div class="character-loadout"><span class="eyebrow">EQUIPPED</span><strong id="home-weapon-name">M4A1</strong><button id="home-armory" class="secondary">ARMORY · 29 GUNS ↗</button></div>
       </section>
       <section class="home-options" aria-label="Match configuration">
         <div class="selector-heading"><h2>CHOOSE YOUR MAP</h2><span>8 ORIGINAL ARENAS</span></div><div id="map-grid" class="map-grid" aria-label="Maps"></div>
@@ -35,7 +35,7 @@
     </header>
     <main class="armory-layout">
       <div class="arsenal">
-        <div class="eyebrow"><span class="tiny-square"></span> THE ARSENAL <span class="muted">/ 28 WEAPONS</span></div>
+        <div class="eyebrow"><span class="tiny-square"></span> THE ARSENAL <span class="muted">/ 29 WEAPONS</span></div>
         <h1>YOUR GAME.<br><span>YOUR LOADOUT.</span></h1>
         <p class="intro">Pick your class. Find your favourite. Own the arena.</p>
         <div id="equipment-tabs" class="equipment-tabs" aria-label="Equipment views" hidden><button data-equipment-tab="armory" aria-pressed="true">ARMORY</button><button data-equipment-tab="carried" aria-pressed="false">CARRIED GUNS</button></div>
@@ -62,11 +62,11 @@
         <div class="loadout-footer"><div><span class="map-dot"></span><strong id="armory-map">COURTYARD</strong><small id="armory-mode">FREE-FOR-ALL · SOLO VS BOTS</small></div><button id="play-button" class="primary">DEPLOY <span>↗</span></button></div>
       </section>
     </main>
-    <footer class="app-footer"><span>BUILT FOR A GOOD BREAK. <b>PLAY WHILE PARKED.</b></span><span>TOUCH CONTROLS <span class="footer-divider">/</span> v0.9.1 SOLO POWERS</span></footer>
+    <footer class="app-footer"><span>BUILT FOR A GOOD BREAK. <b>PLAY WHILE PARKED.</b></span><span>TOUCH CONTROLS <span class="footer-divider">/</span> v0.10.0 · SHOOTING RANGE</span></footer>
   </section>
   <section id="online-screen" class="screen online-screen" hidden>
     <div class="online-shell">
-      <header class="online-heading"><div><span class="eyebrow">BLOCK OPS / MULTIPLAYER</span><h2>BETTER WITH FRIENDS.</h2><p>Real players. Your room. All 28 weapons unlocked.</p></div><button id="online-back" class="secondary" aria-label="Return Home">HOME</button></header>
+      <header class="online-heading"><div><span class="eyebrow">BLOCK OPS / MULTIPLAYER</span><h2>BETTER WITH FRIENDS.</h2><p>Real players. Your room. All 29 weapons unlocked.</p></div><button id="online-back" class="secondary" aria-label="Return Home">HOME</button></header>
       <div id="online-setup">
         <label class="online-label" for="player-name">YOUR CALLSIGN</label><input id="player-name" class="online-input" maxlength="16" placeholder="Player name" autocomplete="off" value="Ranger">
         <div class="join-options"><div class="join-option"><span class="eyebrow">BRING THE SQUAD</span><h3>Create a room</h3><p>Get a code to share. You choose when the match starts.</p><button id="create-room" class="primary">CREATE ROOM <span>↗</span></button></div><div class="join-option"><span class="eyebrow">GOT AN INVITE?</span><h3>Join your friends</h3><input id="room-code-input" class="online-input code-input" maxlength="6" placeholder="ROOM CODE" autocomplete="off" autocapitalize="characters" aria-label="Six-character room code"><button id="join-room" class="secondary">JOIN ROOM</button></div></div>
@@ -92,6 +92,7 @@
       <div id="supply-use-status" hidden><span id="supply-use-label"></span><div class="supply-use-track"><i id="supply-use-progress" role="progressbar" aria-label="Supply use progress" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"></i></div></div>
     </section>
     <div id="objective-status" class="objective-status" hidden></div>
+    <button id="teammate-map-button" type="button" aria-label="Open teammate map" aria-haspopup="dialog" aria-expanded="false" aria-controls="teammate-map-screen" hidden><canvas id="teammate-minimap" width="144" height="144" aria-label="You and your teammates"></canvas><span>TEAM MAP ↗</span></button>
     <div id="online-scoreboard" class="online-scoreboard" hidden aria-label="Live leaderboard"></div>
     <div id="reticle"><i></i><i></i><i></i><i></i></div><div id="hit-marker">×</div><div id="damage-flash"></div>
     <div id="scope-overlay" hidden><div></div></div>
@@ -106,6 +107,7 @@
   <div id="toast" role="status" aria-live="polite"></div>
   <div id="progression-toast" role="status" aria-live="polite"></div>
   <div id="progression-live-save-status" class="save-status" role="status" aria-live="polite" hidden></div>
+  <section id="teammate-map-screen" class="modal-screen" role="dialog" aria-modal="true" aria-labelledby="teammate-map-title" aria-describedby="teammate-map-notice" hidden><div class="dialog teammate-map-dialog"><div class="dialog-heading"><h2 id="teammate-map-title">TEAM MAP</h2><button id="teammate-map-close" type="button" class="secondary">CLOSE</button></div><p id="teammate-map-notice"></p><canvas id="teammate-map-large" width="600" height="600" aria-label="You and your teammates"></canvas><p class="teammate-map-legend"><span>▲ You</span> · <span>● Teammates</span> · No enemies shown</p></div></section>
   <section id="grenade-picker" class="modal-screen" role="dialog" aria-modal="true" aria-labelledby="grenade-picker-title" hidden><div class="dialog"><div class="dialog-heading"><h2 id="grenade-picker-title">GRENADE TYPE</h2><button id="grenade-picker-close" class="icon-button" aria-label="Close grenade picker">×</button></div><p>Select a carried type. Use Throw when you return to the match.</p><div id="grenade-options"></div><button id="grenade-picker-resume" class="primary">RETURN TO MATCH ↗</button></div></section>
   <section id="pause-screen" class="modal-screen" hidden><div class="dialog pause-dialog"><button id="pause-secret-logo" type="button" class="brand-mark secret-logo" aria-label="Block Ops logo" hidden>B<span>O</span></button><span class="eyebrow">TAKE YOUR TIME</span><h2>GAME PAUSED</h2><p>Your round is right where you left it.</p><button id="resume-button" class="primary">BACK TO THE ACTION <span>↗</span></button><button id="pause-loadout" class="secondary">CHANGE LOADOUT</button><button class="secondary settings-open">SETTINGS</button><button id="pause-home" class="secondary">HOME</button><button id="quit-button" class="text-button">End round & return Home</button></div></section>
   <section id="solo-powers-screen" class="modal-screen" role="dialog" aria-modal="true" aria-labelledby="solo-powers-title" aria-describedby="solo-powers-status" hidden>

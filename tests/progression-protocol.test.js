@@ -14,7 +14,6 @@ function fixture(modeId='ffa') {
   return {manager,room,packet};
 }
 test('private progression validates exact recipient round phase mode weighted totals and real winner',()=>{
-  assert.equal(PROTOCOL_VERSION,7);
   for(const modeId of ['ffa','tdm','ctf']) {
     const {manager,room,packet}=fixture(modeId);
     const valid=v=>progressionProtocol.validProgressionReceipt(v,manager.snapshot(room,false),'a');

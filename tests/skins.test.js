@@ -16,7 +16,9 @@ test('optional knife preserves the complete existing gun anatomy and every skin/
   for (const skinId of ids) for (const teamId of [null, 'red', 'blue']) for (const weapon of WEAPONS) {
     const gun = createAvatarModel(THREE, { skinId, teamId, weaponId: weapon.id, heldItem: 'gun' });
     const rows = []; gun.traverse(o => rows.push([o.name, o.position.toArray(), o.scale.toArray(), o.rotation.toArray(), o.material?.color?.getHexString(), o.userData]));
-    signatures.push(rows);
+    // Keep the original 28-weapon golden unchanged; new weapons still undergo
+    // the per-model anatomy, hitbox and knife-equivalence checks above/below.
+    if (weapon.id !== 'minigun') signatures.push(rows);
     const knife = createAvatarModel(THREE, { skinId, teamId, weaponId: weapon.id, heldItem: 'knife' });
     assert.equal(knife.userData.hitbox, AVATAR_HITBOX);
     assert.equal(knife.getObjectByName('weapon').children[0].name, 'Knife');
@@ -102,7 +104,7 @@ test('all avatars stand on the ground with a face and selected gun pointing alon
   }
 });
 
-test('avatar attachment renders the selected model for all 28 weapons', () => {
+test('avatar attachment renders the selected model for all 29 weapons', () => {
   for (const weapon of WEAPONS) {
     const model = createAvatarModel(THREE, { skinId: 'ranger', weaponId: weapon.id });
     const attachment = model.getObjectByName('weapon');

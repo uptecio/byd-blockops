@@ -19,6 +19,7 @@ import { createProgressionUI } from './progression-ui.js';
 import { getGunFinish } from './cosmetics.js';
 import { HidingUI } from './hiding-ui.js';
 import { renderClimbHint } from './climb-presentation.js';
+import { teammateMapState, drawTeammateMap } from './teammate-map.js';
 import { defaultSoloPowers, normalizeSoloPowers } from './solo-powers.js';
 import { createSoloPowersPinGate } from './solo-powers-pin.js';
 import { createSoloPowersUI } from './solo-powers-ui.js';
@@ -26,6 +27,7 @@ import { createSoloPowersUI } from './solo-powers-ui.js';
 const $ = id => document.getElementById(id);
 let mode = 'home', settingsOrigin = 'home', game, preview, home, multiplayer, equipmentUI, audio, input, toastUntil = 0, confirmation = null;
 let backgroundSuspended = false, frameRequest = null;
+let mapSession = null, mapUpdateAt = 0;
 let progressionUI;
 let powersUI, pendingSoloPowers = defaultSoloPowers(), powersScreenToken = {};
 const hidingUI = new HidingUI({ button: $('hide-button'), status: $('hiding-status') });
@@ -100,7 +102,10 @@ function setMode(next) {
   $('home-screen').hidden = next !== 'home';
   $('armory').hidden = next !== 'armory';
   $('online-screen').hidden = next !== 'lobby';
-  $('game-ui').hidden = !['playing', 'paused', 'results', 'confirm-home', 'grenade-picker'].includes(next);
+  $('game-ui').hidden = !['playing', 'paused', 'results', 'confirm-home', 'grenade-picker', 'team-map'].includes(next);
+  $('teammate-map-screen').hidden = next !== 'team-map';
+  $('teammate-map-button').setAttribute('aria-expanded', String(next === 'team-map'));
+  if (next !== 'team-map') mapSession = null;
   $('pause-screen').hidden = next !== 'paused';
   $('pause-secret-logo').hidden = next !== 'paused' || multiplayer?.isConnected() || multiplayer?.busy
     || !game?.hasRound || game.modeState?.ended || game.settings.progressionSource !== 'solo';
@@ -114,8 +119,53 @@ function setMode(next) {
   $('quit-button').textContent = online ? 'Leave room & return Home' : practice ? 'End practice & return Home' : 'End round & return Home';
   input.clear();
   if (next !== 'playing' && game) { if (online) multiplayer.pause(); else game.pause(); }
+  renderTeamMap();
   renderProgression();
 }
+function renderTeamMap() {
+  if (game?.hasRound && !game.match.ended && game.modeState?.kind === 'range' && !multiplayer?.isActive()) {
+    mapSession = null;
+    $('game-ui').dataset.teamMap = 'false';
+    $('teammate-map-button').hidden = true; $('teammate-map-screen').hidden = true;
+    return;
+  }
+  const online = multiplayer?.isActive(), room = online ? multiplayer.room : null;
+  const live = online ? room?.phase === 'playing' : game?.hasRound && !game.match.ended;
+  if (mode === 'team-map' && mapSession !== sessionToken()) { setMode('paused'); return; }
+  const actors = live ? online ? room.players.map(actor => ({ ...actor,
+    yaw: actor.id === multiplayer.client.id ? game.yaw : actor.yaw,
+    alive: actor.health > 0 && actor.respawnRemaining <= 0,
+  })) : game.getActors() : [];
+  const state = teammateMapState({ mapId: room?.mapId || game?.settings.mapId,
+    modeId: room?.modeId || game?.settings.modeId, selfId: online ? multiplayer.client.id : 'local', actors });
+  $('game-ui').dataset.teamMap = String(state.visible);
+  $('teammate-map-button').hidden = !state.visible;
+  if (!state.visible || !['playing', 'team-map'].includes(mode)) return;
+  drawTeammateMap($('teammate-minimap'), state);
+  if (mode === 'team-map') {
+    $('teammate-map-title').textContent = getMap(state.mapId).name;
+    $('teammate-map-notice').textContent = online ? 'ONLINE LIVE · You can still be attacked.' : 'SOLO PAUSED · Take your time.';
+    const names = state.markers.filter(marker => marker.kind === 'teammate').map(marker => marker.name);
+    $('teammate-map-large').setAttribute('aria-label', `Teammates: ${names.join(', ') || 'none alive'}. You are the yellow arrow.`);
+    drawTeammateMap($('teammate-map-large'), state, { names: true });
+  }
+}
+$('teammate-map-button').addEventListener('click', () => {
+  if (mode !== 'playing' || backgroundSuspended || document.hidden || runtimeErrors.failed || $('teammate-map-button').hidden) return;
+  mapSession = sessionToken(); setMode('team-map');
+  $('teammate-map-close').focus({ preventScroll: true });
+});
+$('teammate-map-close').addEventListener('click', () => {
+  if (mode !== 'team-map' || runtimeErrors.failed || mapSession !== sessionToken()) return;
+  if (backgroundSuspended || document.hidden) { suspendForBackground(); return; }
+  if (multiplayer?.isActive()) { if (multiplayer.room.phase !== 'playing') return; multiplayer.resume(); }
+  else { if (!game.hasRound || game.match.ended) return; game.resume(); }
+  audio.unlock(); setMode('playing'); document.activeElement.blur();
+});
+// The map has one action; keep keyboard focus inside it until Close or Escape.
+$('teammate-map-screen').addEventListener('keydown', event => {
+  if (event.key === 'Tab') { event.preventDefault(); $('teammate-map-close').focus(); }
+});
 function showHome() {
   selected = getWeapon(selection.weaponId); activeClass = selected.classId;
   renderSelected(); progression.retry(); setMode('home'); home.render(); renderProgression();
@@ -199,7 +249,7 @@ function selectConfiguration(next) {
 }
 function pauseGame() {
   if (powersUI?.isOpen()) { invalidatePowerMenu(); input.clear(); return; }
-  if (mode === 'grenade-picker') { setMode('paused'); $('resume-button').focus({ preventScroll: true }); return; }
+  if (mode === 'grenade-picker' || mode === 'team-map') { setMode('paused'); $('resume-button').focus({ preventScroll: true }); return; }
   if (mode === 'playing') { setMode('paused'); $('resume-button').focus({ preventScroll: true }); }
 }
 function suspendForBackground() { if (runtimeErrors.failed) return; invalidatePowerMenu(); backgroundSuspended = true; input.clear(); equipmentUI?.close(); if (mode === 'grenade-picker') setMode('paused'); else pauseGame(); }
@@ -210,6 +260,7 @@ window.addEventListener('blur', suspendForBackground);
 
 function silhouette(weapon) {
   const colour = '#' + weapon.colour.toString(16).padStart(6, '0');
+  if (weapon.id === 'minigun') return `<svg viewBox="0 0 240 80" aria-hidden="true"><g transform="rotate(-8 120 40)"><path d="M30 26H115V54H30Z" fill="#84929b"/><path d="M34 27H111V37H34Z" fill="${colour}"/><path d="M44 54H85V74H44Z" fill="#495b69"/><path d="M55 15H104V27H96V22H63V27H55Z" fill="#a8bdc7"/><path d="M109 25H215V32H109ZM109 37H215V44H109ZM109 49H215V56H109Z" fill="#596a78"/><path d="M120 22H134V60H120ZM192 22H207V60H192Z" fill="${colour}"/><path d="M13 30H30V51H13Z" fill="#495b69"/></g></svg>`;
   const pistol = weapon.classId === 'sidearm', bullpup = ['famas', 'p90', 'vector'].includes(weapon.id);
   const heavy = weapon.classId === 'lmg';
   const barrel = ['sniper', 'marksman', 'shotgun'].includes(weapon.classId) ? 200 : pistol ? 125 : 174;
@@ -435,6 +486,7 @@ try {
     if (!document.hidden) {
       if (multiplayer && multiplayer.isActive()) multiplayer.update(dt);
       else if (mode === 'playing') game.update(dt);
+      if (now >= mapUpdateAt && (mode === 'playing' || mode === 'team-map')) { renderTeamMap(); mapUpdateAt = now + 100; }
       if (mode === 'armory' && $('settings-screen').hidden) preview.render(now / 1000);
       if (mode === 'armory' || mode === 'grenade-picker') {
         equipmentUI.render();

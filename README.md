@@ -2,13 +2,19 @@
 
 A playable Android prototype for the BYD Shark 6: a colourful original block-style first-person arena with eight maps, eight free character skins plus XP rewards, three match modes, offline bots, internet rooms for 2–8 real players, touchscreen controls, and 29 unlocked guns across seven classes. Every gun starts with 500 total rounds in normal matches. Maps and skins are bundled for offline play. No account, ads, downloaded game assets or vehicle integration.
 
-## Try it
+## Download v0.10.0 — Shooting Range
 
-The built APK is `artifacts/block-ops-debug.apk` (v0.3.0, Android version code 3). It is signed with an Android **debug** certificate for personal testing. Android 8.0 or later and a WebGL-capable Android System WebView are required. It contains no native CPU-specific libraries. The only Android permission is INTERNET, for optional multiplayer.
+Download the [Android APK](https://github.com/uptecio/byd-blockops/releases/download/v0.10.0/block-ops-v0.10.0-shooting-range.apk) from the [v0.10.0 release](https://github.com/uptecio/byd-blockops/releases/tag/v0.10.0). This version includes the Shooting Range, Minigun, loot inventory, saved XP/cosmetics, Zombies, rooftop access and teammate map. Release downloads are separate from the source repository; local build output and private reference photos are not committed.
 
-Verified release APK SHA-256: `f675052600bad71d41e58b87a3ffe6b55f7158d3f7cafbe434ff93b56c3b1b8f`.
+The APK is version **0.10.0**, Android version code **14**, using multiplayer protocol **8**. It is signed with the existing Android **debug** certificate for personal testing. Android 8.0 or later and a WebGL-capable Android System WebView are required. It contains no native CPU-specific libraries. The only Android permission is INTERNET, for optional multiplayer.
+
+APK SHA-256: `e208ef6fd6fdefb0cc6ea1e49eb31d4e0deff2956f3299252e86c51ae7a6385b`.
+
+Install over an existing copy signed with the same certificate to retain saved progress; do not uninstall first. Updates are currently manual: an in-game update button is **not yet implemented**. Android emulator checks passed, but physical BYD compatibility remains unverified. A newly created PIN may not survive an immediate force-stop before its storage write completes.
 
 Transfer the APK using an installation method supported by your vehicle. Whether a particular Shark 6 firmware allows APK installation needs to be checked on that vehicle. This app has not been tested on a physical BYD head unit. Play while parked; the app does not detect the vehicle's motion.
+
+## Try it
 
 Start at **Home**: preview your character, select a map, match mode and skin, then tap **Solo** or **Online Friends**. **Armory** offers weapon classes and loadouts; **Settings** adjusts controls and bots. Home choices, gun and settings save on the device. All skins have identical movement, health and hitboxes; team markers remain visible regardless of skin.
 
@@ -26,7 +32,7 @@ Settings include sensitivity, control size, sound, bot count (1–8) and difficu
 
 ## Play with friends over the internet
 
-Prototype browser link: https://heat-graphic-pubmed-culture.trycloudflare.com
+Use the address of a running multiplayer server. Temporary links recorded in older release notes may have expired; GitHub Releases hosts downloads, not a running game server. Publishing this release does not update or restart an existing live browser server.
 
 1. Open **Online Friends**, enter a callsign, then **Create Room**.
 2. Use **Copy Invite Link**, or share the six-character room code.
@@ -35,9 +41,9 @@ Prototype browser link: https://heat-graphic-pubmed-culture.trycloudflare.com
 
 The host chooses the map/mode outside active rounds; guests see the authoritative choices. Skins can be requested in a room and take effect at the next spawn. No fake players or bots are added to online rooms. Friends can join an ongoing match. If the host disconnects, hosting transfers to the next player. Leaving and rejoining creates a new player; scores are not recovered. Anyone with the room code can join: this is a small friends-only prototype, not an authenticated competitive service.
 
-Online play uses **protocol 2**. All players must reload the current browser game or install the v0.3 APK, and the server must also support version 2. Old clients are rejected with an update message. The public link serves the verified v0.3 release; real public browser multiplayer and Android emulator online checks passed on 2026-10-02.
+Online play uses **protocol 8**. All clients and the server must support the same protocol; incompatible clients are rejected with an update message. Run the server from this release's source to match this APK.
 
-**The current internet link is temporary.** This computer's Node server and Cloudflare tunnel must remain running and connected. Stopping/restarting the tunnel can change the URL. The APK includes this address; **Online Friends → Server settings** lets you replace it without reinstalling. Solo mode keeps working without the server or internet. Stable always-on hosting has not been configured.
+**Cloudflare quick-tunnel links are temporary.** The Node server and Cloudflare tunnel must remain running and connected. Stopping/restarting the tunnel can change the URL. The APK includes the build-time server address; **Online Friends → Server settings** lets you replace it without reinstalling. Solo mode keeps working without the server or internet. Stable always-on hosting has not been configured.
 
 ## Weapons
 
@@ -96,6 +102,8 @@ Only the built game assets, WebSocket endpoint and health endpoint are served—
 For permanent hosting, deploy this Node server behind HTTPS with WebSocket upgrade support and a stable domain. Set `HOST=0.0.0.0` and optionally `PORT` for your hosting platform. A Dockerfile is provided (`docker build -f server/Dockerfile -t block-ops .` after building web assets). No paid service or hosting account is created by this project.
 
 The APK's default server comes from `game-server.json`. Override it when building with `GAME_SERVER_URL=https://your-server.example npm run apk`. Public browser invite links use the server that served the page. No secret keys are needed or bundled.
+
+The v0.10.0 APK uses the default address in `game-server.json`. That temporary address is not guaranteed to remain available; supply your own live server URL when building or in Server settings.
 
 ## Build the APK
 

@@ -9,3 +9,13 @@ artifacts/
 .superpowers/
 .tools/
 *.log
+# Playwright CLI output (may contain credentials)
+.playwright-cli/
+# Installed local assistant tooling
+/.agents/skills/
+/.claude/skills/
+/.playwright/
+/skills-lock.json
+# Private camera reference originals (keep on this computer)
+/docs/IMG_5580.JPG
+/docs/IMG_5581.JPG

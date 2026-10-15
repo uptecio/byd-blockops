@@ -104,6 +104,23 @@ export function createWeaponModel(THREE, weapon, { finishId = 'standard' } = {})
   const steel = palette?.steel ?? '#334554';
   const black = '#21313e';
   const light = palette?.light ?? '#758792';
+  if (id === 'minigun') {
+    // A fixed six-barrel cluster keeps the heavy silhouette cheap in every view.
+    box(0, 0, -0.13, 0.24, 0.22, 0.34, steel);
+    box(0, 0.07, -0.13, 0.245, 0.085, 0.28, colour);
+    box(0, -0.17, 0, 0.1, 0.2, 0.12, black);
+    box(0, -0.025, 0.16, 0.13, 0.13, 0.2, colour);
+    box(0, -0.04, 0.26, 0.17, 0.19, 0.04, black);
+    box(0.115, -0.14, -0.12, 0.24, 0.24, 0.2, colour);
+    box(0.115, -0.14, -0.225, 0.245, 0.19, 0.025, light);
+    for (const z of [-0.23, -0.04]) box(0, 0.16, z, 0.04, 0.1, 0.04, steel);
+    box(0, 0.225, -0.135, 0.06, 0.04, 0.23, black);
+    for (const z of [-0.32, -0.65]) box(0, 0.015, z, 0.25, 0.22, 0.045, light);
+    for (const [x, y] of [[-0.055, 0.09], [0.055, 0.09], [-0.09, 0.015], [0.09, 0.015], [-0.055, -0.06], [0.055, -0.06]]) {
+      box(x, y, -0.535, 0.045, 0.045, 0.46, black);
+    }
+    return group;
+  }
   const sidearm = /sidearm|pistol|handgun/.test(classId);
   const sniper = /sniper/.test(classId);
   const marksman = /marksman|dmr/.test(classId);

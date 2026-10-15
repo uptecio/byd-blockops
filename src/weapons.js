@@ -46,6 +46,7 @@ export const WEAPONS = [
   weapon('m1911', 'M1911', 'sidearm', 34, 8, 0.26, 1.5, 0.018, 1, 45, false, 0xd6b393, 0.034, 1.35),
   weapon('deagle', 'Desert Eagle', 'sidearm', 55, 7, 0.4, 1.8, 0.023, 1, 55, false, 0xe9c879, 0.063, 1.4),
   weapon('revolver', 'Revolver', 'sidearm', 60, 6, 0.48, 2.4, 0.012, 1, 60, false, 0xc0cbd4, 0.057, 1.5),
+  weapon('minigun', 'Minigun', 'lmg', 12, 200, 1 / 30, 5.5, 0.065, 1, 55, true, 0xa9b9c3, 0.016, 1.2),
 ];
 
 const weaponsById = new Map(WEAPONS.map(item => [item.id, item]));

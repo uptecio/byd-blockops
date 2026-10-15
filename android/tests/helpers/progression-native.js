@@ -105,6 +105,13 @@ export async function nativeProgressionFixture({artifactDir,serverOrigin}={}) {
   }
   return {
     attach,packets,
+    async identity(){
+      const properties={};
+      for(const name of ['ro.build.fingerprint','ro.build.version.release','ro.build.version.sdk','ro.product.model','ro.hardware.egl','ro.opengles.version'])properties[name]=(await shell('getprop',name)).stdout.trim();
+      return {serial,avd,properties,webview:(await shell('dumpsys','webviewupdate')).stdout,
+        display:(await shell('wm','size')).stdout,density:(await shell('wm','density')).stdout,
+        wifi:(await shell('settings','get','global','wifi_on')).stdout.trim(),mobileData:(await shell('settings','get','global','mobile_data')).stdout.trim()};
+    },
     async version(){const text=(await shell('dumpsys','package','au.local.blockops')).stdout;return {code:Number(/versionCode=(\d+)/.exec(text)?.[1]),name:/versionName=(\S+)/.exec(text)?.[1]};},
     async install(apk){await detach();await shell('am','force-stop','au.local.blockops');await command('install','-r',resolve(apk));},
     async relaunch(){await detach();await shell('am','force-stop','au.local.blockops');return attach();},

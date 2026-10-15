@@ -116,7 +116,7 @@ test('original gun needs loot after the first replacement and resets next life',
 });
 
 test('every catalog gun can start a life and be carried without ammo refill', () => {
-  assert.equal(WEAPONS.length, 28);
+  assert.equal(WEAPONS.length, 29);
   for (const gun of WEAPONS) {
     const e = createEquipment(gun.id);
     assert.equal(e.owned.get(gun.id).ammo + e.owned.get(gun.id).reserve, 500);
@@ -132,7 +132,7 @@ test('every catalog gun can start a life and be carried without ammo refill', ()
     if (gun.id === 'ak47') pickupEquipment(e, { kind: 'gun', weaponId: 'ak47', ammo: 30, reserve: 470 });
     else assert.equal(equipGun(e, gun.id, { source: 'armory' }).ok, true);
   }
-  assert.equal(e.owned.size, 28);
+  assert.equal(e.owned.size, 29);
 });
 
 test('invalid IDs and invalid equip sources never fall back or partially mutate', () => {

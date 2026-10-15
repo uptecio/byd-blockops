@@ -38,7 +38,7 @@ async function moveNative(page, observed, x, z){
 }
 let page,observingPeer,nativeId,originalError;
 try {
-  page=await f.attach();await page.evaluate(observeModels);await peer.addInitScript(observeModels);
+  page=await f.attach();assert.deepEqual(await f.version(),{code:11,name:'0.9.0'});await page.evaluate(observeModels);await peer.addInitScript(observeModels);
   const original=await readProfile(page);assert.ok(original.lifetimeXP>=350,'Run actual offline earning gate before online cosmetic gate');
   await page.locator('[data-map="courtyard"]').click();await page.locator('[data-mode-id="ffa"]').click();
   await page.locator('[data-skin="crimson-ninja"]').click();await page.locator('#home-armory').click();

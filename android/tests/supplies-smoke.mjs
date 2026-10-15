@@ -93,7 +93,7 @@ try {
   await reload();
   await wait(s => s.mode === 'home' && !s.hidden && !s.fatal);
   assert.equal(await evaluate('document.querySelectorAll("[data-mode-id]").length'), 4);
-  assert.match(await evaluate('document.querySelector("#armory .app-footer").textContent'), /v0\.7\.0 XP \+ COSMETICS/);
+  assert.match(await evaluate('document.querySelector("#armory .app-footer").textContent'), /v0\.9\.0 TALL ROOFS/);
   // Passive observations only. No game state, visibility or progression overrides.
   await evaluate(`(() => {
     window.__nativeSeconds=0; window.__nativeDraws=0;window.__nativeUseDuration=null;

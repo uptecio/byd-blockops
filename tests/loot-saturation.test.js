@@ -28,7 +28,7 @@ test('eight real sockets bound saturated inventories/packets and disconnect a st
         const world = packet.room.gear;
         if (world && (world.loot.length > 68 || world.projectiles.length > 32 || world.smokes.length + world.projectiles.filter(p => p.grenadeType === 'smoke').length > 16)) failures.push('entity bound exceeded');
         if (data.length >= 65536) failures.push(`packet bound exceeded: ${data.length}`);
-        if (packet.equipment?.equipment.owned.length > 28) failures.push('inventory bound exceeded');
+        if (packet.equipment?.equipment.owned.length > 29) failures.push('inventory bound exceeded');
       }
     });
     await new Promise((resolve, reject) => { client.socket.once('open', resolve); client.socket.once('error', reject); });
@@ -40,7 +40,7 @@ test('eight real sockets bound saturated inventories/packets and disconnect a st
   await until(() => clients.every(client => client.latest?.room.phase === 'playing'), 'saturation room starts');
   const action = (client, weaponId) => client.send({ type: 'equipment-action', lifeId: client.latest.equipment.lifeId, seq: ++client.sequence, kind: 'equip-gun', weaponId, source: 'armory' });
   for (const gun of WEAPONS.filter(gun => gun.id !== 'm4a1')) for (const client of clients) action(client, gun.id);
-  await until(() => clients.every(client => client.latest.equipment.equipment.owned.length === 27), 'all peers carry every non-starting catalog gun');
+  await until(() => clients.every(client => client.latest.equipment.equipment.owned.length === 28), 'all peers carry every non-starting catalog gun');
   assert.ok(clients.every(client => client.latest.room.players.length === 8));
   const host = clients[0];
   // Real inputs follow the end lane to the redistributed original gun.
@@ -54,8 +54,8 @@ test('eight real sockets bound saturated inventories/packets and disconnect a st
     }
   }
   host.send({ type: 'input', lifeId: host.latest.equipment.lifeId, x: 0, y: 0, yaw: 0, pitch: 0 });
-  await until(() => host.latest.equipment.equipment.owned.length === 28, 'real socket movement recovers original gun and saturates all28 inventory entries');
-  assert.equal(host.latest.equipment.equipment.activeGunId, 'revolver', 'collecting original gun never automatically equips it');
+  await until(() => host.latest.equipment.equipment.owned.length === 29, 'real socket movement recovers original gun and saturates all29 inventory entries');
+  assert.equal(host.latest.equipment.equipment.activeGunId, 'minigun', 'collecting original gun never automatically equips it');
   const typical = [...bytes].sort((a, b) => a - b)[Math.floor(bytes.length / 2)];
   const stalled = clients[7];
   // Stop only this owned peer's TCP reads. The server's actual send buffer and

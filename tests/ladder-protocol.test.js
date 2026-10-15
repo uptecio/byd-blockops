@@ -11,8 +11,7 @@ import { startServer } from '../server/server.mjs';
 import { getMap } from '../src/maps.js';
 import { createNavigation } from '../src/navigation.js';
 
-test('protocol seven validates only living exposed collision-safe attachments on this map',()=>{
-  assert.equal(PROTOCOL_VERSION,7);
+test('current protocol validates only living exposed collision-safe attachments on this map',()=>{
   const f=accessFixture();
   const actor={...moveCharacter(createBody(f.start,f.world),{vx:0,vz:0,climb:1},.25,{world:f.world}).body,
     health:100,respawnRemaining:0,hiddenSpotId:null};

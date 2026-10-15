@@ -2,13 +2,13 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { WEAPON_CLASSES, WEAPONS, getWeapon, createWeaponState, tickWeapon, tryFire, startReload } from '../src/weapons.js';
 
-test('armory contains four usable unique weapons for each of seven classes', () => {
+test('armory contains 29 unique weapons with the minigun as a fifth LMG', () => {
   assert.deepEqual(WEAPON_CLASSES.map(item => item.id), ['assault', 'smg', 'shotgun', 'sniper', 'marksman', 'lmg', 'sidearm']);
-  assert.equal(WEAPONS.length, 28);
-  assert.equal(new Set(WEAPONS.map(item => item.id)).size, 28);
+  assert.equal(WEAPONS.length, 29);
+  assert.equal(new Set(WEAPONS.map(item => item.id)).size, 29);
   for (const category of WEAPON_CLASSES) {
     assert.ok(category.label && category.description);
-    assert.equal(WEAPONS.filter(item => item.classId === category.id).length, 4);
+    assert.equal(WEAPONS.filter(item => item.classId === category.id).length, category.id === 'lmg' ? 5 : 4);
   }
   for (const weapon of WEAPONS) {
     assert.equal(getWeapon(weapon.id), weapon);
@@ -123,8 +123,8 @@ test('invalid delta times do not poison timers or advance a reload', () => {
   }
 });
 
-test('all 28 weapons start with 500 total rounds and conserve them through repeated fire and reloads', () => {
-  assert.equal(WEAPONS.length, 28);
+test('all 29 weapons start with 500 total rounds and conserve them through repeated fire and reloads', () => {
+  assert.equal(WEAPONS.length, 29);
   for (const weapon of WEAPONS) {
     const state = createWeaponState(weapon.id);
     assert.equal(state.ammo, weapon.magazine, `${weapon.id} starts with a full magazine`);

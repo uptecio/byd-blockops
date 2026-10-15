@@ -191,7 +191,7 @@ test('a server that never welcomes times out and closes its connection', async c
   } finally { globalThis.WebSocket = original; context.mock.timers.reset(); }
 });
 
-test('protocol 7 requests forward selected create options and only approved join fields', async () => {
+test('current protocol requests forward selected create options and only approved join fields', async () => {
   const original = globalThis.WebSocket; globalThis.WebSocket = Socket;
   try {
     for (const [request, expected] of [
@@ -229,7 +229,7 @@ test('old servers and version rejection require an update before any gameplay ca
   } finally { globalThis.WebSocket = original; }
 });
 
-test('invalid protocol 7 updates preserve the last valid room including objectives', async () => {
+test('invalid current-protocol updates preserve the last valid room including objectives', async () => {
   const original = globalThis.WebSocket; globalThis.WebSocket = Socket;
   try {
     const errors = [];
