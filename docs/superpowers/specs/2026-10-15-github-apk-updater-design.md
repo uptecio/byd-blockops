@@ -1,12 +1,12 @@
 # Block Ops GitHub APK updater design
 
-Status: proposed design for user review. No updater implementation is included in this document.
+Status: approved by the user on 2026-10-15. Implementation awaits review of the implementation plan and selection of its execution method.
 
 ## Outcome
 
 Players can update the installed Android game without finding an APK in a browser. Home checks the public `uptecio/byd-blockops` GitHub repository, announces a newer stable release, and offers an update flow with download progress and Android installation confirmation. Updates retain existing XP, cosmetics, settings, records and PIN by replacing the installed app without uninstalling it.
 
-The user approved automatic Home checks, downloads only after choosing Update, and using GitHub Releases as the download source. This design also proposes a manual Check for Updates control, a Later option, foreground-only downloads and Android-only updater controls. These defaults are part of the review, not additional previously confirmed requirements.
+The user approved automatic Home checks, downloads only after choosing Update, and using GitHub Releases as the download source. Approval of this written design also covers a manual Check for Updates control, a Later option, foreground-only downloads and Android-only updater controls.
 
 Existing copies need one manual installation of the updater-enabled APK. Future APKs must retain the package identity and signing key. The vehicle must permit third-party installation; the app will not bypass BYD or Android restrictions.
 
