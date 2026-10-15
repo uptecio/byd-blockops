@@ -10,6 +10,11 @@ const suites = {
     sources: ['UpdateModel', 'UpdatePolicy', 'UpdatePorts', 'UpdateCancellation'],
     test: 'UpdaterPolicyTest',
   },
+  transfer: {
+    sources: ['UpdateModel', 'UpdatePolicy', 'UpdatePorts', 'UpdateCancellation',
+      'HttpsUpdateTransport', 'UpdateCandidateStore'],
+    test: 'UpdaterTransferTest',
+  },
 };
 const suite = suites[process.argv[2] ?? 'policy'];
 if (!suite) throw new Error('Unknown updater JVM suite');
