@@ -2,7 +2,27 @@
 
 This is a local candidate, not a published release. The published download remains v0.10.0. No GitHub release, push, live server restart or physical BYD test was performed as part of this verification.
 
-## Package
+## Corrected final-review candidate
+
+The corrected local APK remains `au.local.blockops` v0.11.0/code15, minSdk26/targetSdk36 and multiplayer protocol8. Its SHA-256 is `cc4bcc2da360996972542e274caa13665abe91f278b46747b06c17c58935e872`; the original signer remains `6b2d84eb4133168fec0850ed710acffa01d8399b75c8410621b2d0ce9881cb49`. Same-production-source code16 fixture SHA-256 is `bd7bb7a94daf8828e61858e8e1069416b5d0d67bd1c4fbd1a39f24a20cf19734`. Neither is published.
+
+Final-review fixes connect automatic foreground Home checks, restore Later recovery before submission and for pending sessions, remove owned process-death partials, explain successful checks and add native summary/progress/reopen text. Snapshot fields and the three-command JavaScript bridge are unchanged. Native bridge tests now observe callback completion; host cancellation checks require exact states, zero bytes and no sessions.
+
+The corrected build passed 1,504 npm tests with no failures/skips, all fifteen browser/JVM regression groups without retries, four package checks and lint with zero errors/seven advisories. The real controller-to-JavaScript test now requires JDK17 for `npm test`; it does not add an app runtime dependency. Inherited namespace/Gradle diagnostics remain distinct from updater legacy-API notes and lint advisories; no warnings are suppressed.
+
+Fresh API36 earned/persisted genuine data on exact14, retained all five saves through manual corrected15 and completed the same app-originating sealed session to exact16 with the original signer. The first host conservatively stopped on an empty transient Play Protect hierarchy. A strictly admitted continuation observed actual authorized Scan app, “This app looks safe,” normal Install, process replacement and exact retention/powers-off postchecks. There is no uninterrupted original download-to-end claim and no protection bypass.
+
+New native controller/dialog/lifecycle/cleanup cases passed on retained16. The strengthened foreign-page bridge test exposed different behavior for test-only native data-page injection: API36 returned main-frame HTTP403 and destroyed the view; Chrome69 completed that document. Separate preserved diagnostic runs established both callback sequences. The updater rejected the actual nonlocal URL on both. The portable test asserts that rejection, then uses real Activity.finish/onDestroy for the stale-view gate, without changing product guards. Portable native regression and exact-byte/five-save postchecks passed on both26 and36. After36's normal reboot, its original successful session was absent from current historical records; final attribution uses the preserved pre-reboot successful-session evidence, not a claim that the original record persists. Product bytes did not change; original, diagnostic and revised test APKs remain separately hashed.
+
+Fresh API26 captured immutable14's real Chrome69 startup failure after ordinary visible GOT IT dismissal; one authorized same-byte14 refresh preceded all earned gameplay. Manual corrected15 reached Home and earned/persisted genuine data. One subsequent host passed the negative, interruption, permission, recovery and connected TLS cases and observed the real app-originating15→16 replacement with exact five-save retention and original signer. No Play Protect prompt appeared on26. Earned14→15 retention is not claimed; direct staged readback remains unavailable under the image's SELinux policy, with actual write/fsync/ownership and pulled installed-byte proof retained. Physical BYD/head-unit testing remains unperformed.
+
+New evidence is under `artifacts/updater-final-fix/`; full report: `.superpowers/sdd/2026-10-15-github-apk-updater/final-fix-report.md`. Frozen source manifest SHA-256 is `4cf7b17c393decc560830ff75264a8cc8b1ddc0e4a55e0ba36b9a9d8d74fd141`; the exact three-file host/test supplement and final instrumentation manifest are recorded separately. Corrected `game.js` SHA-256 is `dec6b181583fa3446f78a1baae08f6b2d748892087f4f5389c6d1d2b7fefa8e5`; the other three asset hashes below are unchanged.
+
+## Historical Task7 evidence — superseded candidate
+
+The following records describe the previous SHA91f44e8b candidate only. They are retained as history and are not acceptance evidence for the corrected bytes above.
+
+### Package
 
 `block-ops-v0.11.0-github-updater.apk`: package `au.local.blockops`, version 0.11.0, Android code 15, minSdk 26, targetSdk 36, multiplayer protocol 8.
 
@@ -19,7 +39,7 @@ Original signer SHA-256: `6b2d84eb4133168fec0850ed710acffa01d8399b75c8410621b2d0
 
 The final release-script APK is frozen and explicitly bound to the native acceptance manifest. Regenerated code-16 fixture SHA-256 is `ebea05ffc11f90cec731bc7f0990c3efc387d764f983dfb36262143c7d0c5a49`. Independent source comparison confirms identical Java, manifest and build inputs, except the fixture's explicit version 0.11.1/code16. Its packaged game assets equal the final candidate. The fixture is for testing and is not a published update.
 
-## Automated verification
+### Automated verification
 
 The final full JavaScript suite passed 1,502 tests, with no failures or skips, including fifteen focused tests for conservative native security-screen observation. All three updater JVM suites passed. Package smoke passed its four checks. Browser regression groups passed without retries: updater UI/layout (including 915×412 and legacy runtime cases), Home, touch, WebView startup/layout, runtime-error recovery, progression/layout/modes/online, Shooting Range/layout/online, and multiplayer. These ran against the exact packaged assets.
 
@@ -27,7 +47,7 @@ Required Android lint initially found four NewApi errors where a supplied SDK te
 
 Warnings are not treated as a pristine build: inherited manifest/orientation/backup, JavaScript-enabling and text-resource advisories remain; updater storage-space and dialog-text advisories also remain. The inherited Gradle namespace syntax warning and updater legacy signature/version deprecation notes are recorded separately. No warnings were suppressed and no new lint baseline was created.
 
-## Evidence boundaries
+### Evidence boundaries
 
 On the fresh API36 device, immutable published14 earned genuine Shooting Range XP, a cosmetic, a Zombie record and a private PIN-backed save. Manual installation of the exact final15 preserved all five save strings; the app-originating original-signer15→16 replacement also preserved them exactly. The pulled installed16 matches the regenerated fixture hash and original signer. Real permission denial/grant, Android cancellation and explicit Retry, sealed-session process-death recovery without double commit, unrelated-session preservation, rejected candidates and connected TLS cases passed. Actual archive/installed-identity checks passed on36.
 

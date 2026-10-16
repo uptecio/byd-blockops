@@ -28,8 +28,11 @@ export function createUpdateUI({ window, document }) {
   function render() {
     panel.hidden = !eligible || disposed;
     check.hidden = false; check.disabled = !!state && busy.includes(state.phase);
-    open.hidden = !state || state.dismissed || ['idle', 'current'].includes(state.phase);
-    status.textContent = state && !state.dismissed ? `${state.availableVersion ? `v${state.availableVersion} · ` : ''}${state.message}` : 'Optional app updates';
+    const pending = state?.phase === 'installing';
+    open.hidden = !state || (state.dismissed && !pending) || ['idle', 'current'].includes(state.phase);
+    status.textContent = state && (!state.dismissed || pending)
+      ? `${state.message} · Installed: v${state.installedVersion}${state.availableVersion ? ` · Available: v${state.availableVersion}` : ''}`
+      : 'Optional app updates';
   }
   function refresh() {
     if (disposed) return;

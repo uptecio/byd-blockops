@@ -5,7 +5,7 @@ import {resolve,join,dirname} from 'node:path';
 import {execFile} from 'node:child_process';
 import {promisify} from 'node:util';
 import {nativeProgressionFixture} from './helpers/progression-native.js';
-import {playProtectState,updaterNativeFixture} from './helpers/updater-native.js';
+import {playProtectState,transferStopped,updaterNativeFixture} from './helpers/updater-native.js';
 import {setupSolo,goHome,readProfile,visibleZombie,dragAim} from '../../tests/helpers/progression-browser.js';
 import {choosePowers} from '../../tests/helpers/solo-powers-browser.js';
 import {enterRange,observeRange,fireRangeKill} from '../../tests/helpers/range-browser.js';
@@ -26,7 +26,7 @@ for(const fixture of [manifest.baseline,manifest.candidate,...Object.values(mani
 const testSignature=(await run(join(tools,'apksigner'),['verify','--print-certs',manifest.instrumentation])).stdout;assert.ok(testSignature.includes('6b2d84eb4133168fec0850ed710acffa01d8399b75c8410621b2d0ce9881cb49'));
 if(manifest.instrumentationIdentity)assert.equal(hash(await readFile(manifest.instrumentation)),manifest.instrumentationIdentity.sha256);
 const native=await updaterNativeFixture({artifactDir,serial:process.env.ANDROID_TEST_SERIAL,avd:process.env.ANDROID_TEST_AVD});
-const rawFixture=await nativeProgressionFixture({artifactDir,networkMode:'preserve'});
+const rawFixture=await nativeProgressionFixture({artifactDir,networkMode:'preserve',preserveImmersiveHelp:true});
 const f={...rawFixture,async attach(){return native.gamePage(await rawFixture.attach());},async relaunch(){return native.gamePage(await rawFixture.relaunch());}};
 const keys=['block-ops-v1','block-ops-progression-v1','block-ops-progression-v1-backup','block-ops-zombies-v1','block-ops-solo-powers-pin-v1'];
 const saves=page=>page.evaluate(keys=>{const result={};keys.forEach(key=>result[key]=localStorage.getItem(key));return result;},keys);
@@ -75,12 +75,19 @@ async function negativeCases(){
     await native.screenshot(`negative-${fixture}-${mode}`);await record(`negative-${fixture}-${mode}`,status);console.log(`PASS negative ${fixture}/${mode}: ${status.message}`);
   }
   for(const action of ['cancel','background']){
-    await native.instrument('valid','slow',{reset:true});page=await f.attach();await openUpdate();await native.button('Download');
+    await native.instrument('valid','slow',{reset:true});
+    page=await f.attach();
+    const before=await saves(page);
+    await openUpdate();await native.button('Download');
     await native.until(async()=>(await native.status()).downloaded>0,'real store receives delayed scripted bytes');
     if(action==='cancel')await native.button('Cancel');else await f.background();
-    await native.until(async()=>!['checking','downloading','verifying'].includes((await native.status()).phase),`${action} cancels transfer`);
-    const status=await native.status();assert.deepEqual(status.sessions,[]);await record(`transfer-${action}`,status);console.log(`PASS foreground transfer ${action}`);
+    await native.until(async()=>transferStopped(await native.status(),action),`${action} cancels transfer`);
+    const status=await native.status();
+    assert.ok(transferStopped(status,action),'Exact transfer outcome, zero bytes and no owned session');
+    await record(`transfer-${action}`,status);
+    console.log(`PASS foreground transfer ${action}`);
     if(action==='background')await f.foreground();
+    assert.deepEqual(await saves(page),before,'Transfer interruption preserves all five saves');
   }
   await native.instrument('valid','recreate',{reset:true});page=await f.attach();await openUpdate();await native.button('Download');
   await native.until(async()=>(await native.status()).phase==='ready','transfer survives real Activity recreation',90000);
@@ -122,6 +129,15 @@ async function submissionRecovery(before){
   await record('death-after-submission',submitted);await native.instrument('valid','deathAtSubmission');page=await f.attach();
   const recovered=await native.status();assert.notEqual(recovered.pid,submitted.pid);assert.equal(recovered.phase,'installing');assert.equal(recovered.ownedSession,submitted.ownedSession);assert.deepEqual(recovered.sessions.sort(),submitted.sessions.sort(),'Restart never creates a second installer session');
   await record('recovered-owned-session',recovered);
+  await page.locator('#update-open').click();await native.button('Later');
+  await page.waitForSelector('#update-open:not([hidden])');
+  await page.locator('#home-settings').click();
+  await page.locator('#settings-done').click();
+  await page.waitForSelector('#update-open:not([hidden])');
+  const afterLater=await native.status();
+  assert.equal(afterLater.ownedSession,submitted.ownedSession);
+  assert.deepEqual(afterLater.sessions.sort(),submitted.sessions.sort(),'Later/Home reentry must not recommit');
+  await record('pending-later-home-recovery',afterLater);
   await page.locator('#update-open').click();await native.button('Cancel pending install');
   await native.until(async()=>{const s=await native.status();return s.phase==='ready'&&s.sessions.length===1&&s.sessions[0]===sentinel;},'cancel removes only updater-owned session');
   await record('process-recovery',await native.status());assert.deepEqual(await saves(page),before);
@@ -170,15 +186,26 @@ try {
   if(!observeNative16&&!continuePending)await native.mutate('install','-r','-t',manifest.instrumentation);
   if(continuePending){
     for(const key of ['ANDROID_PREVIOUS_APP_PID','ANDROID_SUBMITTED_SESSION','ANDROID_PENDING_EVIDENCE_PATH','ANDROID_RETAINED_SAVE_PATH'])assert.ok(process.env[key],`Explicit ${key} required for pending continuation`);
-    assert.match(process.env.ANDROID_PREVIOUS_APP_PID,/^\d+$/);assert.match(process.env.ANDROID_SUBMITTED_SESSION,/^\d+$/);
-    const prior=dirname(resolve(process.env.ANDROID_PENDING_EVIDENCE_PATH));assert.notEqual(prior,artifactDir,'Preserve original submission evidence');
+    assert.match(process.env.ANDROID_PREVIOUS_APP_PID,/^\d+$/);
+    assert.match(process.env.ANDROID_SUBMITTED_SESSION,/^\d+$/);
+    const prior=dirname(resolve(process.env.ANDROID_PENDING_EVIDENCE_PATH));
+    assert.notEqual(prior,artifactDir,'Preserve original submission evidence');
     const submission=JSON.parse(await readFile(process.env.ANDROID_PENDING_EVIDENCE_PATH,'utf8'));
-    assert.equal(String(submission.pid),process.env.ANDROID_PREVIOUS_APP_PID);assert.equal(String(submission.ownedSession),process.env.ANDROID_SUBMITTED_SESSION);assert.equal(submission.phase,'installing');assert.equal(submission.ownedSealed,true);assert.deepEqual(submission.sessions,[submission.ownedSession]);
+    assert.equal(String(submission.pid),process.env.ANDROID_PREVIOUS_APP_PID);
+    assert.equal(String(submission.ownedSession),process.env.ANDROID_SUBMITTED_SESSION);
+    assert.equal(submission.phase,'installing');
+    assert.equal(submission.ownedSealed,true);
+    assert.deepEqual(submission.sessions,[submission.ownedSession]);
     assert.deepEqual(JSON.parse(await readFile(join(prior,'fixture-identities.json'),'utf8')),manifest,'Continuation uses original exact bound fixture manifest');
-    const checkpoint=await readFile(process.env.ANDROID_RETAINED_SAVE_PATH);assert.equal(hash(checkpoint),hash(await readFile(join(prior,'retained15.json'))),'Explicit checkpoint is the original genuine retained save');const retained=JSON.parse(checkpoint);
-    assert.deepEqual(await native.version(),{code:15,name:'0.11.0'});assert.equal((await native.command('shell','pidof','au.local.blockops')).stdout.trim(),process.env.ANDROID_PREVIOUS_APP_PID,'Original submitted app process remains');
-    const packageDump=(await native.command('shell','dumpsys','package')).stdout;await record('pending-current-package',{packageDump});
-    const active=packageDump.split('Active install sessions:')[1]?.split(/Finalized install sessions:|Historical install sessions:/)[0];assert.ok(active!==undefined);
+    const checkpoint=await readFile(process.env.ANDROID_RETAINED_SAVE_PATH);
+    assert.equal(hash(checkpoint),hash(await readFile(join(prior,'retained15.json'))),'Explicit checkpoint is the original genuine retained save');
+    const retained=JSON.parse(checkpoint);
+    assert.deepEqual(await native.version(),{code:15,name:'0.11.0'});
+    assert.equal((await native.command('shell','pidof','au.local.blockops')).stdout.trim(),process.env.ANDROID_PREVIOUS_APP_PID,'Original submitted app process remains');
+    const packageDump=(await native.command('shell','dumpsys','package')).stdout;
+    await record('pending-current-package',{packageDump});
+    const active=packageDump.split('Active install sessions:')[1]?.split(/Finalized install sessions:|Historical install sessions:/)[0];
+    assert.ok(active!==undefined);
     assert.deepEqual([...active.matchAll(/Session (\d+):/g)].map(match=>Number(match[1])),[submission.ownedSession],'Exactly the original owned session, no duplicate/new session');
     for(const field of ['mOriginalInstallerPackageName=au.local.blockops ','installerPackageName=au.local.blockops ','appPackageName=au.local.blockops ','mCommitted=true ','mSealed=true ','mPermissionsManuallyAccepted=true ','mDestroyed=false ','mFinalStatus=0 '])assert.ok(active.includes(field),`Current original session requires ${field}`);
     await installedBytes(manifest.candidate,'pending15');
@@ -188,10 +215,17 @@ try {
     if(process.env.ANDROID_COMPLETED_SCAN_ARTIFACTS){
       const scanDir=resolve(process.env.ANDROID_COMPLETED_SCAN_ARTIFACTS);
       assert.deepEqual(JSON.parse(await readFile(join(scanDir,'fixture-identities.json'),'utf8')),manifest);
-      const admission=JSON.parse(await readFile(join(scanDir,'pending-continuation-admission.json'),'utf8'));assert.equal(admission.pid,submission.pid);assert.equal(admission.sessionId,submission.ownedSession);assert.equal(admission.checkpointSha256,hash(checkpoint));
-      const observations=(await readFile(join(scanDir,'play-protect-observations.jsonl'),'utf8')).trim().split('\n').map(JSON.parse),actions=(await readFile(join(scanDir,'native-actions.jsonl'),'utf8')).trim().split('\n').map(JSON.parse);
-      assert.deepEqual(actions.map(action=>action.text),['Scan app'],'Prior observer performed only the authorized scan');assert.ok(observations.some(item=>item.state==='scanning'));assert.equal(playProtectState(observations.at(-1).xml,observations.at(-1).focus),'safe','Prior actual scan completed safely');
-      await record('prior-safe-scan-provenance',{scanDir,sessionId:submission.ownedSession,scanAt:actions[0].at,safeAt:observations.at(-1).at,scanObserverInterrupted:true});previousSafeScan=true;
+      const admission=JSON.parse(await readFile(join(scanDir,'pending-continuation-admission.json'),'utf8'));
+      assert.equal(admission.pid,submission.pid);
+      assert.equal(admission.sessionId,submission.ownedSession);
+      assert.equal(admission.checkpointSha256,hash(checkpoint));
+      const observations=(await readFile(join(scanDir,'play-protect-observations.jsonl'),'utf8')).trim().split('\n').map(JSON.parse);
+      const actions=(await readFile(join(scanDir,'native-actions.jsonl'),'utf8')).trim().split('\n').map(JSON.parse);
+      assert.deepEqual(actions.map(action=>action.text),['Scan app'],'Prior observer performed only the authorized scan');
+      assert.ok(observations.some(item=>item.state==='scanning'));
+      assert.equal(playProtectState(observations.at(-1).xml,observations.at(-1).focus),'safe','Prior actual scan completed safely');
+      await record('prior-safe-scan-provenance',{scanDir,sessionId:submission.ownedSession,scanAt:actions[0].at,safeAt:observations.at(-1).at,scanObserverInterrupted:true});
+      previousSafeScan=true;
     }
     await native.waitVersion(16,{scanAuthorized:process.env.ANDROID_ALLOW_PLAY_PROTECT_SCAN==='1',previousSafeScan});
     await finishNativeReplacement(retained,process.env.ANDROID_PREVIOUS_APP_PID,submission,{resumedPending:true});
@@ -230,7 +264,7 @@ try {
     console.log(await native.suite('network'));evidence.result='NETWORK_PASS';
   }
   else if(process.argv.includes('--regression')){
-    for(const suite of [native.api==='36'?'controller':'installer','bridge'])console.log(await native.suite(suite));evidence.result='REGRESSION_PASS';
+    for(const suite of ['controller','bridge'])console.log(await native.suite(suite));evidence.result='REGRESSION_PASS';
   }
   else if(process.argv.includes('--negative')){await negativeCases();}
   else if(process.argv.includes('--recovery')){await recoveryCases();}

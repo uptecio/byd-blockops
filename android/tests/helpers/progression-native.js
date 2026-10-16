@@ -7,7 +7,7 @@ import { setTimeout as delay } from 'node:timers/promises';
 
 // Raw CDP keeps actual Android visibility/lifecycle behavior. Touch targets use
 // adb taps/swipes; keyboard controls use CDP input, never arena internals.
-export async function nativeProgressionFixture({artifactDir,serverOrigin,networkMode='offline'}={}) {
+export async function nativeProgressionFixture({artifactDir,serverOrigin,networkMode='offline',preserveImmersiveHelp=false}={}) {
   assert.ok(['offline','preserve'].includes(networkMode),'Explicit supported network mode');
   const serial=process.env.ANDROID_TEST_SERIAL,avd=process.env.ANDROID_TEST_AVD;
   assert.match(serial||'',/^emulator-\d+$/,'Explicit owned emulator serial required');assert.ok(avd,'Explicit owned AVD name required');
@@ -82,7 +82,8 @@ export async function nativeProgressionFixture({artifactDir,serverOrigin,network
     },
   };
   async function attach() {
-    await detach();await shell('settings','put','secure','immersive_mode_confirmations','confirmed');
+    await detach();
+    if(!preserveImmersiveHelp)await shell('settings','put','secure','immersive_mode_confirmations','confirmed');
     if(serverOrigin){
       assert.equal(new URL(serverOrigin).protocol,'https:','Native staging requires TLS');
       await shell('svc','wifi','enable');

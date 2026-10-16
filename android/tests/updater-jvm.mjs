@@ -7,7 +7,7 @@ import { fileURLToPath } from 'node:url';
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 const suites = {
   controller: {
-    sources: ['UpdateModel', 'UpdatePolicy', 'UpdatePorts', 'UpdateCancellation', 'UpdateController'],
+    sources: ['UpdateModel', 'UpdatePolicy', 'UpdatePorts', 'UpdateCancellation', 'UpdateController', 'UpdatePresentation'],
     test: 'UpdaterControllerTest',
   },
   policy: {
@@ -16,7 +16,7 @@ const suites = {
   },
   transfer: {
     sources: ['UpdateModel', 'UpdatePolicy', 'UpdatePorts', 'UpdateCancellation',
-      'HttpsUpdateTransport', 'UpdateCandidateStore'],
+      'HttpsUpdateTransport', 'UpdateCandidateStore', 'UpdateController'],
     test: 'UpdaterTransferTest',
   },
 };

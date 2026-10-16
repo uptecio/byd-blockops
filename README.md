@@ -175,6 +175,8 @@ npm run test:configurations
 npm audit
 ```
 
+`npm test` also requires JDK 17 (`java` and `javac` on PATH): the updater integration test passes real Java controller snapshots through the JavaScript Home presentation. No Android SDK or emulator is needed for that test.
+
 The browser checks need Playwright Chromium (`npx playwright install chromium` if not already installed). Screenshots are written to `artifacts/` and the task workspace. JavaScript unit tests cover reload/ammo conservation, firing cooldowns, arena collision/visibility, navigation, bots, mode rules, skins, spawn locations and round transitions. Browser checks exercise actual controls, Home previews/persistence/fallback, class filters, firing/reload, pause and responsive layout. Configuration tests launch all 24 map/mode combinations in solo and with two independent browser peers, checking HUD, team/skin/spawn agreement and clean Home returns.
 
 `npm run test:touch` uses actual browser multi-touch events to check simultaneous movement/aim/fire, pointer cancellation, quick single shots, ammo preservation when switching weapons, and pausing/Home confirmation with fingers held down. Cancel and a fresh round must clear held movement/fire. Combat tests exercise cover blocking both player and bot damage, death state, and mode score limits.

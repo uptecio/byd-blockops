@@ -23,11 +23,7 @@ public final class UpdateDialog {
     }
     public void render(Snapshot state){
         if(activity==null||activity.isDestroyed()||dialog==null||!dialog.isShowing())return;
-        String text="Installed: "+state.installedVersion;
-        if(state.availableVersion!=null)text+="\nAvailable: "+state.availableVersion+"\nDownload size: "+state.totalBytes+" bytes";
-        if("downloading".equals(state.phase))text+="\nDownloaded: "+state.downloadedBytes+" / "+state.totalBytes+" bytes";
-        if(!state.message.isEmpty())text+="\n\n"+state.message;
-        dialog.setMessage(text);
+        dialog.setMessage(UpdatePresentation.text(state,controller.releaseSummary()));
         Button action=dialog.getButton(DialogInterface.BUTTON_POSITIVE);
         String label="Check again";Runnable command=()->controller.check(true);boolean enabled=true;
         switch(state.phase){

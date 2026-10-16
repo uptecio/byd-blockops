@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createUpdateUI } from '../src/update-ui.js';
+import { execFileSync } from 'node:child_process';
 
 function fixture(bridge = true) {
   const nodes = Object.fromEntries(['home-updates', 'update-status', 'update-check', 'update-open'].map(id => [id, {
@@ -61,4 +62,30 @@ test('bridgeFailureDisablesOnlyUpdater', () => {
   const f = fixture(); f.window.BlockOpsUpdates.check = () => { throw Error('detached'); };
   f.ui.setHomeVisible(true); assert.doesNotThrow(() => f.nodes['update-check'].click());
   assert.equal(f.nodes['home-updates'].hidden, true);
+});
+
+// These inputs come from real controller lifecycle/results, not informative hand-built snapshots.
+test('controller results explain older/equal/newer versions and keep pending recovery reachable', () => {
+  const output = execFileSync(process.execPath, ['android/tests/updater-jvm.mjs', 'controller', 'presentationSnapshots'], { encoding: 'utf8' });
+  const states = Object.fromEntries(output.split('\n').filter(line => line.startsWith('SNAPSHOT ')).map(line => {
+    const [, label, json] = line.match(/^SNAPSHOT (\S+) (.*)$/);
+    return [label, JSON.parse(json)];
+  }));
+  for (const minor of [9, 10, 11]) {
+    const f = fixture(); f.ui.setHomeVisible(true);
+    f.window.receiveBlockOpsUpdate(states[`version-${minor}`]);
+    const status = f.nodes['update-status'].textContent;
+    assert.match(status, minor > 10 ? /Update available/i : /up to date/i);
+    assert.match(status, /Installed: v0\.10\.0/);
+    assert.equal(f.nodes['update-open'].hidden, minor <= 10);
+    if (minor > 10) assert.match(status, /Available: v0\.11\.0/);
+    else assert.doesNotMatch(status, /Available:/);
+  }
+  const f = fixture(); f.ui.setHomeVisible(true);
+  f.window.receiveBlockOpsUpdate(states['pending-dismissed']);
+  for (let entry = 0; entry < 2; entry++) {
+    assert.equal(f.nodes['update-open'].hidden, false, 'Pending native recovery must remain reachable after Later');
+    f.nodes['update-open'].click(); assert.deepEqual(f.calls.at(-1), ['open']);
+    f.ui.setHomeVisible(false); f.ui.setHomeVisible(true);
+  }
 });

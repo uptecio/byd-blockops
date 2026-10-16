@@ -5,6 +5,14 @@ import {mkdir,writeFile,appendFile} from 'node:fs/promises';
 import {join} from 'node:path';
 import {setTimeout as delay} from 'node:timers/promises';
 
+export function transferStopped(status,action){
+  const phase=action==='cancel'?'idle':'error';
+  const message=action==='cancel'?'Update cancelled. You can retry.':'Update interrupted. Return Home to retry.';
+  return ['cancel','background'].includes(action)&&status.phase===phase&&status.message===message
+    &&status.downloaded===0&&Array.isArray(status.sessions)&&status.sessions.length===0
+    &&status.ownedSession==null;
+}
+
 export function playProtectState(xml,focus){
   if(!focus?.includes('com.android.vending/com.google.android.finsky.protectdialogs.activity.PlayProtectDialogsActivity'))return 'other';
   if(/harmful|malicious|unsafe|blocked|install anyway|couldn.?t scan|can.?t scan/i.test(xml))return 'security-boundary';
@@ -37,6 +45,8 @@ export async function updaterNativeFixture({artifactDir,serial,avd}) {
     'emulator-5584':['bydgame_updater_api26_google','26'],
     'emulator-5586':['bydgame_updater_final_api36','36'],
     'emulator-5588':['bydgame_updater_final_api26_google','26'],
+    'emulator-5590':['bydgame_updater_review_api36','36'],
+    'emulator-5592':['bydgame_updater_review_api26_google','26'],
   };
   const api=owned[serial]?.[0]===avd?owned[serial][1]:null;
   assert.ok(api,'Only explicitly owned updater serial/AVD/API triples are accepted');
@@ -170,26 +180,36 @@ export async function updaterNativeFixture({artifactDir,serial,avd}) {
     async version(){const text=(await command('shell','dumpsys','package','au.local.blockops')).stdout;return {code:Number(/versionCode=(\d+)/.exec(text)?.[1]),name:/versionName=(\S+)/.exec(text)?.[1]};},
     async waitVersion(code,{scanAuthorized=false,previousSafeScan=false}={}){
       let scanRequested=false,safeInstallRequested=false,lastXml='';
+      const readFocus=async()=>/mCurrentFocus=Window\{([^}]+)\}/.exec((await command('shell','dumpsys','window')).stdout)?.[1];
       await until(async()=>{
         const installed=(await this.version()).code===code;
-        const focus=/mCurrentFocus=Window\{([^}]+)\}/.exec((await command('shell','dumpsys','window')).stdout)?.[1];
+        const focus=await readFocus();
         if(!focus?.includes('com.android.vending'))return installed;
-        const observation=await settledPlayProtect({readFocus:async()=>/mCurrentFocus=Window\{([^}]+)\}/.exec((await command('shell','dumpsys','window')).stdout)?.[1],readHierarchy:hierarchy});
+        const observation=await settledPlayProtect({readFocus,readHierarchy:hierarchy});
         if(!observation)return false;
         const {xml,state}=observation;
-        if(xml!==lastXml){await appendFile(join(artifactDir,'play-protect-observations.jsonl'),JSON.stringify({at:Date.now(),focus:observation.focus,state,xml})+'\n',{mode:0o600});lastXml=xml;}
+        if(xml!==lastXml){
+          await appendFile(join(artifactDir,'play-protect-observations.jsonl'),JSON.stringify({at:Date.now(),focus:observation.focus,state,xml})+'\n',{mode:0o600});
+          lastXml=xml;
+        }
         assert.notEqual(state,'security-boundary','Different Play Protect security finding: stop without override');
         assert.notEqual(state,'other','Unexpected Play Protect Activity: stop without override');
         if(state==='recommendation'&&!scanRequested){
           assert.equal(previousSafeScan,false,'A previously completed scan must not be submitted again');
           assert.equal(scanAuthorized,true,'Explicit user authorization required before uploading updater fixture to Google');
           assert.equal(code,16,'Scan authorization is scoped to the updater fixture16');
-          await this.screenshot('play-protect-before-authorized-scan');await button('Scan app',{scanAuthorized:true});scanRequested=true;
+          await this.screenshot('play-protect-before-authorized-scan');
+          await button('Scan app',{scanAuthorized:true});
+          scanRequested=true;
         }
         if(state==='safe'&&!safeInstallRequested){
-          assert.equal(scanAuthorized,true);assert.equal(code,16);assert.ok(scanRequested||previousSafeScan,'Safe-result Install requires this scan or explicit verified prior scan provenance');
-          await this.screenshot('play-protect-safe-result');await writeFile(join(artifactDir,'play-protect-safe-result.json'),JSON.stringify({at:Date.now(),focus:observation.focus,xml,verdict:'This app looks safe',previousSafeScan}),{mode:0o600});
-          await button('Install',{safeInstallAuthorized:true});safeInstallRequested=true;
+          assert.equal(scanAuthorized,true);
+          assert.equal(code,16);
+          assert.ok(scanRequested||previousSafeScan,'Safe-result Install requires this scan or explicit verified prior scan provenance');
+          await this.screenshot('play-protect-safe-result');
+          await writeFile(join(artifactDir,'play-protect-safe-result.json'),JSON.stringify({at:Date.now(),focus:observation.focus,xml,verdict:'This app looks safe',previousSafeScan}),{mode:0o600});
+          await button('Install',{safeInstallAuthorized:true});
+          safeInstallRequested=true;
         }
         return false;
       },`installed version ${code} after native confirmation`,180000);

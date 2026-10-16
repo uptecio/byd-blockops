@@ -22,6 +22,7 @@ public final class UpdaterTransferTest {
         public long elapsedMillis() { return elapsed; }
     }
     public static void main(String[] args) throws Exception {
+        startupRemovesOrphanPartials();
         trustedParentAliasRetainsCandidate();
         redirectLimits(); boundedRead(); cancelClosesConnection(); truncatedAndOversizedDownload();
         deadlinesAndTls(); retryDeadlines(); privatePromotion(); metadataAndDiskFailure(); staleTransferCannotReplaceFile();
@@ -30,6 +31,41 @@ public final class UpdaterTransferTest {
         supersededTransfersRemainCancellable();
         supersedingDuringDelayedTeardown();
         System.out.println("PASS transfer");
+    }
+    // A new controller/store must prune process-death partials before accepting more work.
+    private static void startupRemovesOrphanPartials() throws Exception {
+        for (boolean withComplete : new boolean[]{false,true}) {
+            Path root=Files.createTempDirectory("updater-restart-");
+            try {
+                HttpsUpdateTransport transport=transport(connection(200,ABC));
+                UpdateCandidateStore previous=new UpdateCandidateStore(root.toFile(),transport);
+                Candidate complete=withComplete?previous.download(release(1,ABC_SHA),new UpdateCancellation(),(n,t)->{}):null;
+                Path orphan=root.resolve("transfer-orphan.part"), metadata=root.resolve("metadata-orphan.part"), unrelated=root.resolve("player.part");
+                Files.write(orphan,ABC); Files.write(metadata,ABC); Files.write(unrelated,ABC);
+                UpdateCandidateStore restarted=new UpdateCandidateStore(root.toFile(),transport);
+                UpdatePorts.Installer installer=new UpdatePorts.Installer(){
+                    public boolean allowed(){return true;} public void openPermissionSettings(){}
+                    public int commit(Candidate c,UpdateCancellation token){throw new AssertionError("Automatic install");}
+                    public void confirm(int id){throw new AssertionError("Automatic confirmation");}
+                    public InstallEvent reconcile(Integer id){return new InstallEvent(-1,"idle","");}
+                    public void cancelOwned(int id){} public void setListener(java.util.function.Consumer<InstallEvent> listener){}
+                };
+                UpdateController controller=new UpdateController(
+                    new InstalledApp("au.local.blockops","0.10.0",14,UpdatePolicy.SIGNER_SHA256,36),
+                    token->release(1,ABC_SHA),restarted,(c,i)->{UpdateCandidateStore.verifyBytes(c);return new ApkIdentity(i.packageName,"0.12.0",16,i.signerSha256,26);},
+                    installer,new UpdatePorts.StateStore(){public SavedState load(){return new SavedState(0,0,0,null);}public void save(SavedState s){}},
+                    new Clock(),Runnable::run,Runnable::run,s->{},Runnable::run);
+                assert !Files.exists(orphan)&&!Files.exists(metadata) : "Process-death partials survived initialization";
+                assert Arrays.equals(ABC,Files.readAllBytes(unrelated)) : "Unrelated file changed";
+                controller.home(true); controller.foreground(true);
+                assert controller.snapshot().phase.equals(withComplete?"ready":"available");
+                if(withComplete)assert restarted.load().file.equals(complete.file);
+                else {controller.download();assert controller.snapshot().phase.equals("ready");}
+                assert Arrays.equals(ABC,Files.readAllBytes(restarted.load().file.toPath()));
+                controller.close();
+            } finally {remove(root);}
+        }
+        System.out.println("PASS startupRemovesOrphanPartials");
     }
     // Android aliases Context.getFilesDir's /data/user/0 parent to /data/data.
     // A trusted root alias must reload; candidate symlinks still fail even with matching bytes.

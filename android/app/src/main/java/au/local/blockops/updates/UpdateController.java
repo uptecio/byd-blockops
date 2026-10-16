@@ -53,6 +53,7 @@ public final class UpdateController implements AutoCloseable {
             try {
                 installer.setListener(event -> ui.execute(() -> event(event)));
                 SavedState loaded=store.load(); InstallEvent pending=installer.reconcile(null);
+                candidates.deletePartial();
                 Candidate complete=null;
                 try { complete=candidates.load(); if(complete!=null)verifier.inspect(complete,installed); }
                 catch(Failure invalid) { complete=null;candidates.forget(); }
@@ -77,11 +78,19 @@ public final class UpdateController implements AutoCloseable {
         else showOffer("");
         replayStartupEvents();
         if(pendingCheck!=null){boolean manual=pendingCheck;pendingCheck=null;check(manual);}
+        automaticCheck();
     }
     private void replayStartupEvents(){while(!startupEvents.isEmpty())event(startupEvents.remove());}
     public synchronized void home(boolean value) {
-        if(closed)return;boolean entering=!home&&value;home=value;
-        if(!value)depart();else if(entering&&initialized&&candidate==null&&!busy&&session==null)restoreCandidate();
+        if(closed)return;
+        boolean entering=!home&&value;
+        home=value;
+        if(!value){
+            depart();
+        }else if(entering){
+            if(initialized&&candidate==null&&!busy&&session==null)restoreCandidate();
+            automaticCheck();
+        }
     }
     private void restoreCandidate(){
         long op=generation;
@@ -93,10 +102,23 @@ public final class UpdateController implements AutoCloseable {
         });
     }
     public synchronized void foreground(boolean value) {
-        if(closed)return; boolean returning=!foreground&&value;foreground=value;launchEligible=value;
-        if(!value)depart(); else if(returning&&initialized&&"permission".equals(state.phase))refreshPermission();
+        if(closed)return;
+        boolean returning=!foreground&&value;
+        foreground=value;
+        launchEligible=value;
+        if(!value){
+            depart();
+        }else if(returning){
+            if(initialized&&"permission".equals(state.phase))refreshPermission();
+            automaticCheck();
+        }
+    }
+    private void automaticCheck(){
+        if(eligible()&&candidate==null)check(false);
     }
     public synchronized Snapshot snapshot(){return state;}
+    /** Native-only release text; never expands the WebView snapshot or command surface. */
+    public synchronized String releaseSummary(){return offer==null?"":plainText(offer.summary,512);}
     /** Activity pause/replacement revokes install consent without cancelling a foreground transfer. */
     public synchronized void activityDetached(){
         consent=false;launchEligible=false;
@@ -110,7 +132,10 @@ public final class UpdateController implements AutoCloseable {
         if(!initialized&&!closed){pendingCheck=Boolean.TRUE.equals(pendingCheck)||manual;return;}
         if(!eligible()||busy||session!=null||recoveryNeeded)return;
         if(manual)dismissed=false;
-        if(!mayRequest(manual)){showOffer("Please wait before checking again.");return;}
+        if(!mayRequest(manual)){
+            if(manual)showOffer("Please wait before checking again.");
+            return;
+        }
         long op=begin("checking","Checking for updates…"); UpdateCancellation cancellation=token; markRequest();
         worker.execute(() -> {
             try { cancellation.check();Release release=source.latest(cancellation);
@@ -165,7 +190,11 @@ public final class UpdateController implements AutoCloseable {
     }
     private void submit(long op,Candidate selected,UpdateCancellation cancellation) {
         final long priorEvents;
-        synchronized(this){if(!owns(op)||!consent)return;priorEvents=installEvents;submitting=true;}
+        synchronized(this){
+            if(!owns(op)||!consent)return;
+            priorEvents=installEvents;
+            submitting=true;
+        }
         try {
             int id=installer.commit(selected,cancellation);
             ui.execute(() -> submissionResult(op,priorEvents,new InstallEvent(id,"installing","Waiting for Android installation…"),null,false));
@@ -241,8 +270,34 @@ public final class UpdateController implements AutoCloseable {
         if(session!=null||recoveryNeeded){publish("installing",0,"Cancelling pending installation…");cancelOwnedSession(session);
         }else{busy=false;publish(candidate!=null?"ready":"idle",0,"Update cancelled. You can retry.");cleanupPartial();}
     }
-    public synchronized void dismiss(){if(closed)return;dismissed=true;consent=false;if(submitting)requestSubmissionCancellation();else publish(state.phase,state.downloadedBytes,state.message);}
-    private void depart(){consent=false;if(submitting){requestSubmissionCancellation();return;}if(busy&&session==null&&!cancelling){invalidate();busy=false;publish(candidate!=null?"ready":"error",0,"Update interrupted. Return Home to retry.");cleanupPartial();}}
+    public synchronized void dismiss(){
+        if(closed)return;
+        dismissed=true;
+        consent=false;
+        if(submitting){
+            requestSubmissionCancellation();
+        }else if(busy&&session==null&&candidate!=null&&!cancelling
+                &&("verifying".equals(state.phase)||"installing".equals(state.phase))){
+            invalidate();
+            busy=false;
+            showOffer("Tap Install when you are ready to continue.");
+        }else{
+            publish(state.phase,state.downloadedBytes,state.message);
+        }
+    }
+    private void depart(){
+        consent=false;
+        if(submitting){
+            requestSubmissionCancellation();
+            return;
+        }
+        if(busy&&session==null&&!cancelling){
+            invalidate();
+            busy=false;
+            publish(candidate!=null?"ready":"error",0,"Update interrupted. Return Home to retry.");
+            cleanupPartial();
+        }
+    }
     private synchronized void event(InstallEvent event){
         if(closed)return;
         if(!initialized){startupEvents.add(event);return;}
@@ -287,10 +342,18 @@ public final class UpdateController implements AutoCloseable {
     }});}
     private void persist(){SavedState copy=saved;worker.execute(() -> {try{store.save(copy);}catch(Failure failure){ui.execute(() -> {synchronized(this){if(!closed)fail(failure);}});}});}
     private void fail(Failure failure){publish(session==null&&!recoveryNeeded?"error":"installing",0,failure.message);}
-    private void showOffer(String message){publish(candidate!=null?"ready":offer==null?"idle":newer(offer)?"available":"current",0,message);}
+    private void showOffer(String message){
+        String phase=candidate!=null?"ready":offer==null?"idle":newer(offer)?"available":"current";
+        if(message.isEmpty()){
+            if("current".equals(phase))message="You are up to date.";
+            else if("available".equals(phase))message="Update available.";
+            else if("ready".equals(phase))message="Ready to install.";
+        }
+        publish(phase,0,message);
+    }
     private boolean newer(Release release){try{return UpdatePolicy.compare(release.version,UpdatePolicy.parseVersion(installed.versionName,false))>0;}catch(IllegalArgumentException invalid){return false;}}
     private void publish(String phase,long bytes,String message){
-        state=new Snapshot(state.revision+1,phase,installed.versionName,offer==null?null:offer.version.toString(),offer==null?0:offer.asset.size,bytes,message,dismissed);
+        state=new Snapshot(state.revision+1,phase,installed.versionName,offer==null||!newer(offer)?null:offer.version.toString(),offer==null?0:offer.asset.size,bytes,message,dismissed);
         Snapshot next=state;ui.execute(() -> {synchronized(this){if(!closed&&state==next)listener.onState(next);}});
     }
     private static boolean same(Release a,Release b){return a.id==b.id&&a.tag.equals(b.tag)&&a.asset.id==b.asset.id&&a.asset.size==b.asset.size&&a.asset.uri.equals(b.asset.uri)&&Objects.equals(a.asset.digest,b.asset.digest)&&a.sha256.equals(b.sha256);}

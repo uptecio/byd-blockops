@@ -91,10 +91,11 @@ public final class UpdaterAndroidTest {
         try{
             android.webkit.WebView view=homeView(activity);Object bridge=field(activity,"updateBridge");
             java.lang.reflect.Method open=bridge.getClass().getMethod("open");
-            evaluate(view,"document.getElementById('settings-screen').hidden=false;BlockOpsUpdates.open()");
-            SystemClock.sleep(200);runner.runOnMainSync(()->{});check(field(activity,"updateDialog")==null,"Hidden Home opened native dialog");
+            evaluate(view,"document.getElementById('settings-screen').hidden=false");
+            observedUpdateRequest(activity,view);
+            check(field(activity,"updateDialog")==null,"Hidden Home opened native dialog");
             evaluate(view,"document.getElementById('settings-screen').hidden=true;BlockOpsUpdates.homeState('garbage');BlockOpsUpdates.homeState('home')");
-            SystemClock.sleep(200);open.invoke(bridge);
+            observedUpdateRequest(activity,view);
             long deadline=SystemClock.elapsedRealtime()+10000;boolean[] shown={false};
             do { runner.runOnMainSync(()->{try{shown[0]=field(activity,"updateDialog")!=null;}catch(Exception e){throw new AssertionError(e);}});
                 if(!shown[0])SystemClock.sleep(25);
@@ -102,13 +103,57 @@ public final class UpdaterAndroidTest {
             check(shown[0],"Local foreground Home cannot open native dialog");
             runner.runOnMainSync(()->runner.callActivityOnPause(activity));
             check(field(activity,"updateDialog")==null&&field(activity,"updateObservation")==null,"Pause retained native presentation");
-            open.invoke(bridge);SystemClock.sleep(200);runner.runOnMainSync(()->{});check(field(activity,"updateDialog")==null,"Background Activity opened dialog");
-            runner.runOnMainSync(()->runner.callActivityOnResume(activity));SystemClock.sleep(200);
-            runner.runOnMainSync(()->view.loadData("<html><body>foreign</body></html>","text/html","UTF-8"));SystemClock.sleep(200);
-            open.invoke(bridge);SystemClock.sleep(200);runner.runOnMainSync(()->{});check(field(activity,"updateDialog")==null,"Nonlocal document opened dialog");
-            runner.runOnMainSync(()->{try{java.lang.reflect.Method failure=activity.getClass().getDeclaredMethod("showFailure",String.class);failure.setAccessible(true);failure.invoke(activity,"Fixture renderer unavailable");}catch(Exception e){throw new AssertionError(e);}});
+            observedUpdateRequest(activity,view);check(field(activity,"updateDialog")==null,"Background Activity opened dialog");
+            runner.runOnMainSync(()->runner.callActivityOnResume(activity));
+            // Assert the synchronous nonlocal URL gate independently of platform navigation:
+            // newer WebView rejects this data page with HTTP403; Chrome69 completes it.
+            runner.runOnMainSync(()->{try{
+                view.loadData("<html><body>foreign</body></html>","text/html","UTF-8");
+                check(view.getUrl()!=null&&view.getUrl().startsWith("data:"),"Actual nonlocal URL not observed");
+                java.lang.reflect.Method request=activity.getClass().getDeclaredMethod("updateRequest",android.webkit.WebView.class,String.class);
+                request.setAccessible(true);request.invoke(activity,view,"open");
+                check(field(activity,"updateDialog")==null,"Nonlocal document opened dialog");
+                activity.finish();
+            }catch(Exception failure){throw new AssertionError(failure);}});
+            long teardownDeadline=SystemClock.elapsedRealtime()+10000;boolean[] destroyed={false};
+            do{
+                runner.runOnMainSync(()->{try{destroyed[0]=activity.isDestroyed()&&field(activity,"gameView")==null;}catch(Exception failure){throw new AssertionError(failure);}});
+                if(!destroyed[0])SystemClock.sleep(25);
+            }while(!destroyed[0]&&SystemClock.elapsedRealtime()<teardownDeadline);
+            check(destroyed[0],"Finished Activity did not destroy its actual view");
             open.invoke(bridge);runner.runOnMainSync(()->{});check(field(activity,"updateDialog")==null,"Destroyed view opened dialog");
         }finally{runner.runOnMainSync(activity::finish);}
+    }
+    /** Wrap only WebView evaluation to observe the real DOM probe's completed callback.
+     * Ingress epoch/queue tests separately exercise the unchanged actual bridge closure. */
+    private void observedUpdateRequest(Activity activity,android.webkit.WebView actual)throws Exception{
+        java.util.concurrent.CountDownLatch completed=new java.util.concurrent.CountDownLatch(1);
+        java.lang.reflect.Field current=activity.getClass().getDeclaredField("gameView");current.setAccessible(true);
+        java.lang.reflect.Method request=activity.getClass().getDeclaredMethod("updateRequest",android.webkit.WebView.class,String.class);request.setAccessible(true);
+        ObservedProbeView[] observed={null};Throwable[] failure={null};
+        runner.runOnMainSync(()->{try{
+            observed[0]=new ObservedProbeView(activity,actual,completed);
+            current.set(activity,observed[0]);request.invoke(activity,observed[0],"open");
+            if(!observed[0].probed)completed.countDown(); // Synchronous pre-probe rejection.
+        }catch(Throwable problem){failure[0]=problem;completed.countDown();}});
+        try{
+            check(completed.await(10,java.util.concurrent.TimeUnit.SECONDS),"Eligibility callback did not complete");
+            runner.runOnMainSync(()->{});
+            if(failure[0]!=null)throw new AssertionError(failure[0]);
+        }finally{runner.runOnMainSync(()->{try{current.set(activity,actual);if(observed[0]!=null)observed[0].destroy();}catch(Exception problem){throw new AssertionError(problem);}});}
+    }
+    private static final class ObservedProbeView extends android.webkit.WebView {
+        final android.webkit.WebView actual;
+        final java.util.concurrent.CountDownLatch completed;
+        boolean probed;
+        ObservedProbeView(Context context,android.webkit.WebView actual,java.util.concurrent.CountDownLatch completed){super(context);this.actual=actual;this.completed=completed;}
+        @Override public String getUrl(){return actual.getUrl();}
+        @Override public void evaluateJavascript(String script,android.webkit.ValueCallback<String> callback){
+            if(script.startsWith("(function()")){
+                probed=true;
+                actual.evaluateJavascript(script,result->{try{callback.onReceiveValue(result);}finally{completed.countDown();}});
+            }else actual.evaluateJavascript(script,callback);
+        }
     }
     private void bridgeLateCallback()throws Exception{
         Activity activity=runner.startActivitySync(new Intent(context,au.local.blockops.MainActivity.class).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));
@@ -275,11 +320,66 @@ public final class UpdaterAndroidTest {
         durablePreferences();runner.passed("durablePreferences");
         nativeDialog();runner.passed("nativeDialog");
         applicationLifecycle();runner.passed("applicationLifecycle");
+        automaticApplicationDiscovery();runner.passed("automaticApplicationDiscovery");
+        nativeCheckOutcomes();runner.passed("nativeCheckOutcomes");
+        orphanPartialRecovery();runner.passed("orphanPartialRecovery");
         startupReceiverOrdering();runner.passed("startupReceiverOrdering");
         cancelDuringStaging();runner.passed("cancelDuringStaging");
         cancelAfterSubmissionGate();runner.passed("cancelAfterSubmissionGate");
-        installedIdentity();runner.passed("installedIdentity");
+        if(android.os.Build.VERSION.SDK_INT>=28){installedIdentity();runner.passed("installedIdentity");}
         invalidFactoryIsInert();runner.passed("invalidFactoryIsInert");
+    }
+    private void nativeCheckOutcomes()throws Exception{
+        Activity activity=runner.startActivitySync(new Intent(context,au.local.blockops.MainActivity.class).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));
+        Throwable[] problem={null};
+        runner.runOnMainSync(()->{try{
+            for(int minor:new int[]{9,10,11}){
+                ControllerRig rig=new ControllerRig();
+                rig.release=new Release(1,"v0."+minor+".0",new Version(0,minor,0),rig.release.asset,zeros(64),"Remote summary");
+                rig.controller.home(true);rig.controller.foreground(true);rig.drain();
+                UpdateDialog presentation=new UpdateDialog(activity,rig.controller);presentation.show();
+                android.app.AlertDialog dialog=(android.app.AlertDialog)field(presentation,"dialog");
+                String text=((android.widget.TextView)dialog.findViewById(android.R.id.message)).getText().toString();
+                check(text.contains("Installed: 0.10.0"),"Native check omitted installed version");
+                check(text.contains(minor>10?"Update available":"up to date"),"Native successful result missing");
+                check(text.contains("Available:")==(minor>10),"Native older/equal release labelled available");
+                presentation.detach();rig.controller.close();rig.drain();
+            }
+        }catch(Throwable failure){problem[0]=failure;}finally{activity.finish();}});
+        if(problem[0]!=null)throw new AssertionError(problem[0]);
+    }
+    private void orphanPartialRecovery()throws Exception{
+        Candidate fixture=fixture();
+        byte[] bytes=java.nio.file.Files.readAllBytes(fixture.file.toPath());
+        for(boolean complete:new boolean[]{false,true}){
+            java.nio.file.Path root=java.nio.file.Files.createTempDirectory(context.getCacheDir().toPath(),"orphan-recovery-");
+            try{
+                UpdatePorts.Clock clock=new UpdatePorts.Clock(){public long wallMillis(){return System.currentTimeMillis();}public long elapsedMillis(){return SystemClock.elapsedRealtime();}};
+                HttpsUpdateTransport transport=new HttpsUpdateTransport(url->new Connection(url,bytes),clock);
+                UpdateCandidateStore prior=new UpdateCandidateStore(root.toFile(),transport);
+                if(complete)prior.download(fixture.release,new UpdateCancellation(),(n,t)->{});
+                java.nio.file.Path partial=root.resolve("transfer-orphan.part"),unrelated=root.resolve("preserve.part");
+                java.nio.file.Files.write(partial,new byte[]{1});java.nio.file.Files.write(unrelated,new byte[]{2});
+                UpdateCandidateStore restarted=new UpdateCandidateStore(root.toFile(),transport);
+                Rig installer=new Rig();ManualQueue worker=new ManualQueue(),ui=new ManualQueue();
+                UpdateController controller=new UpdateController(new InstalledApp("au.local.blockops","0.9.0",13,SIGNER,android.os.Build.VERSION.SDK_INT),
+                    token->fixture.release,restarted,new AndroidApkVerifier(context),installer.installer,
+                    new UpdatePorts.StateStore(){public SavedState load(){return new SavedState(0,0,0,null);}public void save(SavedState s){}},
+                    clock,worker,ui,s->{},worker);
+                drain(worker,ui);
+                check(!java.nio.file.Files.exists(partial),"Native process-death orphan remains");
+                check(java.nio.file.Files.readAllBytes(unrelated)[0]==2,"Native orphan cleanup changed unrelated data");
+                controller.home(true);controller.foreground(true);drain(worker,ui);
+                check(controller.snapshot().phase.equals(complete?"ready":"available"),"Orphan cleanup stranded update availability");
+                if(!complete){controller.download();drain(worker,ui);}
+                check(controller.snapshot().phase.equals("ready")&&restarted.load()!=null,"Native candidate not usable after cleanup");
+                controller.close();drain(worker,ui);
+            }finally{
+                try(java.util.stream.Stream<java.nio.file.Path> files=java.nio.file.Files.walk(root)){
+                    for(java.nio.file.Path file:(Iterable<java.nio.file.Path>)files.sorted(java.util.Comparator.reverseOrder())::iterator)java.nio.file.Files.delete(file);
+                }
+            }
+        }
     }
     private void installedIdentity()throws Exception{
         android.content.pm.PackageInfo actual=context.getPackageManager().getPackageInfo(context.getPackageName(),android.content.pm.PackageManager.GET_SIGNING_CERTIFICATES);
@@ -361,17 +461,32 @@ public final class UpdaterAndroidTest {
         ControllerRig rig=new ControllerRig();
         final Throwable[] problem={null};
         runner.runOnMainSync(()->{try{
-            rig.drain();rig.controller.home(true);rig.controller.foreground(true);rig.controller.check(true);rig.drain();
+            rig.drain();rig.controller.home(true);rig.controller.foreground(true);rig.drain();
             UpdateDialog presentation=new UpdateDialog(activity,rig.controller);presentation.show();
             java.lang.reflect.Field field=UpdateDialog.class.getDeclaredField("dialog");field.setAccessible(true);
             android.app.AlertDialog dialog=(android.app.AlertDialog)field.get(presentation);
             String text=((android.widget.TextView)dialog.findViewById(android.R.id.message)).getText().toString();
-            check(text.contains("0.10.0")&&text.contains("0.11.0")&&text.contains("100"),"Missing version/size text");
+            check(text.contains("0.10.0")&&text.contains("0.11.0")&&text.contains("100")&&text.contains("Plain release summary")&&text.contains("Update available"),"Missing version/size/summary/result text");
             dialog.getButton(android.content.DialogInterface.BUTTON_NEGATIVE).performClick();rig.drain();check(rig.controller.snapshot().dismissed,"Later did not dismiss session offer");
-            presentation.show();presentation.render(new Snapshot(50,"downloading","0.10.0","0.11.0",100,25,"Downloading",false));
+            presentation.show();
+            String[] progress={null};
+            rig.listener=s->{presentation.render(s);if("downloading".equals(s.phase)&&s.downloadedBytes==25){
+                progress[0]=((android.widget.TextView)dialog.findViewById(android.R.id.message)).getText().toString();
+                check(!dialog.getButton(-1).isEnabled(),"Duplicate download action enabled");
+            }};
+            rig.onProgress=()->{while(!rig.ui.isEmpty())rig.ui.remove().run();};
+            rig.now+=30000;rig.controller.download();rig.drain();
+            check(progress[0]!=null&&progress[0].contains("25 / 100 bytes (25%)"),"Actual native progress missing bytes/percentage");
             text=((android.widget.TextView)dialog.findViewById(android.R.id.message)).getText().toString();
-            check(text.contains("25")&&text.contains("100")&&!dialog.getButton(-1).isEnabled(),"Progress or duplicate action wrong");
-            rig.now+=30000;rig.controller.download();rig.drain();rig.allowed=false;rig.controller.install();rig.drain();presentation.render(rig.controller.snapshot());
+            check(text.contains("Android may close the game")&&text.contains("reopen"),"Ready native explanation missing");
+            for(boolean verified:new boolean[]{false,true}){
+                dialog.getButton(-1).performClick();
+                if(verified){while(!rig.worker.isEmpty())rig.worker.remove().run();while(!rig.ui.isEmpty())rig.ui.remove().run();}
+                dialog.getButton(-2).performClick();rig.drain();
+                check(rig.commits==0&&rig.confirms==0&&rig.controller.snapshot().phase.equals("ready"),"Native Later stranded or submitted revoked consent");
+                presentation.show();
+            }
+            rig.allowed=false;rig.controller.install();rig.drain();presentation.render(rig.controller.snapshot());
             text=((android.widget.TextView)dialog.findViewById(android.R.id.message)).getText().toString();
             check(text.contains("Settings")&&text.contains("Install"),"Permission explanation missing");
             dialog.getButton(-1).performClick();rig.drain();check(rig.settings==1&&rig.commits==0,"Settings action submitted install");
@@ -391,6 +506,24 @@ public final class UpdaterAndroidTest {
             dialog.getButton(-3).performClick();rig.drain();check(rig.controller.snapshot().phase.equals("ready"),"Failed-confirmation session could not be cancelled");
             presentation.detach();check(!dialog.isShowing(),"Detach kept old window");rig.controller.close();rig.drain();
         }catch(Throwable failure){problem[0]=failure;}finally{activity.finish();}});
+        if(problem[0]!=null)throw new AssertionError(problem[0]);
+    }
+    private void automaticApplicationDiscovery()throws Exception{
+        Throwable[] problem={null};
+        runner.runOnMainSync(()->{try{
+            for(boolean initialized:new boolean[]{false,true}){
+                ControllerRig rig=new ControllerRig();TestApplication app=new TestApplication(rig);app.attach(context);app.onCreate();
+                Activity activity=new Activity();
+                if(initialized)rig.drain();
+                app.onActivityStarted(activity);app.onActivityResumed(activity);app.setHome(activity,true);rig.drain();
+                check(rig.requests==1&&rig.downloads==0&&rig.controller.snapshot().phase.equals("available"),"Home lifecycle omitted automatic discovery");
+                app.setHome(activity,false);app.setHome(activity,true);rig.drain();check(rig.requests==1,"Cached Home return requested again");
+                rig.now+=21600000;
+                app.onActivityPaused(activity);app.onActivityStopped(activity);app.onActivityStarted(activity);app.onActivityResumed(activity);app.setHome(activity,true);rig.drain();
+                check(rig.requests==2,"Foreground Home did not refresh expired cache");
+                rig.controller.close();rig.drain();app.onTerminate();
+            }
+        }catch(Throwable failure){problem[0]=failure;}});
         if(problem[0]!=null)throw new AssertionError(problem[0]);
     }
     private void applicationLifecycle() throws Exception {
@@ -419,18 +552,19 @@ public final class UpdaterAndroidTest {
         @Override protected UpdateController createUpdater(){rig.listener=this::dispatchUpdate;return rig.controller;}
     }
     static final class ControllerRig implements UpdatePorts.Installer,UpdatePorts.CandidateStore {
-        long now=1800000000000L;int downloads,commits,settings,confirms,cancels;boolean allowed=true,cancelFailure,confirmFailure;Integer recorded;
+        long now=1800000000000L;int requests,downloads,commits,settings,confirms,cancels;boolean allowed=true,cancelFailure,confirmFailure;Integer recorded;
+        Runnable onProgress=()->{};
         java.util.function.Consumer<InstallEvent> events;UpdatePorts.Listener listener=s->{};
         final java.util.ArrayDeque<Runnable> ui=new java.util.ArrayDeque<>(),worker=new java.util.ArrayDeque<>();
-        final Release release=new Release(1,"v0.11.0",new Version(0,11,0),new Asset(1,"block-ops-test.apk",
-            URI.create("https://github.com/uptecio/byd-blockops/releases/download/v0.11.0/block-ops-test.apk"),100,"sha256:"+zeros(64)),zeros(64),"");
+        Release release=new Release(1,"v0.11.0",new Version(0,11,0),new Asset(1,"block-ops-test.apk",
+            URI.create("https://github.com/uptecio/byd-blockops/releases/download/v0.11.0/block-ops-test.apk"),100,"sha256:"+zeros(64)),zeros(64),"Plain release summary");
         Candidate candidate;
-        final UpdateController controller=new UpdateController(new InstalledApp("au.local.blockops","0.10.0",14,SIGNER,36),t->release,this,
+        final UpdateController controller=new UpdateController(new InstalledApp("au.local.blockops","0.10.0",14,SIGNER,36),t->{requests++;return release;},this,
             (c,i)->new ApkIdentity(i.packageName,"0.11.0",15,i.signerSha256,26),this,new UpdatePorts.StateStore(){
                 public SavedState load(){return new SavedState(0,0,0,null);}public void save(SavedState s){}},
             new UpdatePorts.Clock(){public long wallMillis(){return now;}public long elapsedMillis(){return now;}},worker::add,ui::add,s->listener.onState(s),worker::add);
         void drain(){for(int i=0;i<20&&(!ui.isEmpty()||!worker.isEmpty());i++){while(!ui.isEmpty())ui.remove().run();while(!worker.isEmpty())worker.remove().run();}}
-        public Candidate load(){return candidate;}public Candidate download(Release r,UpdateCancellation t,UpdatePorts.Progress p)throws UpdatePorts.Failure{t.check();downloads++;return candidate=new Candidate(new File("test"),r);}
+        public Candidate load(){return candidate;}public Candidate download(Release r,UpdateCancellation t,UpdatePorts.Progress p)throws UpdatePorts.Failure{t.check();downloads++;p.onBytes(25,100);onProgress.run();return candidate=new Candidate(new File("test"),r);}
         public void forget(){candidate=null;}public void deletePartial(){}
         public boolean allowed(){return allowed;}public void openPermissionSettings(){settings++;}public int commit(Candidate c,UpdateCancellation cancellation)throws UpdatePorts.Failure{cancellation.check();commits++;recorded=7;return 7;}
         public void confirm(int id)throws UpdatePorts.Failure{if(confirmFailure)throw new UpdatePorts.Failure("install_failed","Confirmation failed");confirms++;}

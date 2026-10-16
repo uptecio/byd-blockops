@@ -16,13 +16,116 @@ public final class UpdaterControllerTest {
         new Asset(id,"block-ops-test.apk",URI.create("https://github.com/uptecio/byd-blockops/releases/download/v0.11.0/block-ops-test.apk"),100,"sha256:" + "a".repeat(64)),"a".repeat(64),"Update"); }
     public static void main(String[] args) throws Exception {
         if(args.length>0){UpdaterControllerTest.class.getDeclaredMethod(args[0]).invoke(null);System.out.println("PASS "+args[0]);return;}
-        sixHourCache(); manualThirtySecondFloor(); failureFifteenMinuteBackoff(); serverRetryWins();
+        automaticHomeDiscovery(); sixHourCache(); manualThirtySecondFloor(); failureFifteenMinuteBackoff(); serverRetryWins();
         clockRollback(); laterIsSessionOnly(); cancelGeneration(); assetChangedNeedsConsent(); recreationIsNotBackground();
         invalidCandidateForgotten(); installConsent(); asynchronousCancellation(); retryBound(); callbackBeforeCommitReturns();
         rollbackAutomaticCache(); checkDuringInitialization(); installRevalidationFailure(); completedCandidateSurvivesDeparture();
         terminalDuringCancel();staleSubmitFailure();invalidRecoveredCandidate();pauseDuringInstall();downloadRetryDeadline();
         pendingSessionFailureRecovery();startupTerminalWins();immediateDownloadCoalesces();stagingCancelBeforeGate();uncertainSubmitCancellation();
-        laterIsReleaseSpecific();System.out.println("PASS controller (29 cases)");
+        laterIsReleaseSpecific();laterBeforeSubmission();nativePresentation();System.out.println("PASS controller (32 cases)");
+    }
+    static void nativePresentation() throws Exception {
+        // Reflection lets the absent production formatter/query fail as explicit behavior gaps.
+        java.lang.reflect.Method text;
+        try { text=Class.forName("au.local.blockops.updates.UpdatePresentation").getMethod("text",Snapshot.class,String.class); }
+        catch (ClassNotFoundException absent) {throw new AssertionError("Native presentation has no tested summary/progress/reopen formatter",absent);}
+        java.lang.reflect.Method summary=UpdateController.class.getMethod("releaseSummary");
+        Rig r=new Rig(new SavedState(0,0,0,null),1800000000000L,false);
+        yes(summary.invoke(r.c).equals(""));
+        r.next=new Release(1,"v0.11.0",new Version(0,11,0),release(1).asset,"a".repeat(64),"<plain>"+"x".repeat(900));
+        r.c.home(true); r.c.foreground(true); r.drain();
+        String bounded=(String)summary.invoke(r.c);
+        eq(bounded.length(),512); yes(bounded.startsWith("<plain>"));
+        String available=(String)text.invoke(null,r.c.snapshot(),bounded);
+        yes(available.contains("Installed: 0.10.0")); yes(available.contains("Available: 0.11.0"));
+        yes(available.contains("Download size: 100 bytes")); yes(available.contains(bounded));
+        r.c.download(); r.worker.run(); r.ui.run();
+        yes(r.c.snapshot().phase.equals("downloading"));
+        String progress=(String)text.invoke(null,r.c.snapshot(),bounded);
+        yes(progress.contains("0 / 100 bytes (0%)"));
+        r.worker.run(); r.ui.run();
+        yes(r.c.snapshot().phase.equals("ready"));
+        String ready=(String)text.invoke(null,r.c.snapshot(),bounded);
+        yes(ready.contains("Android may close the game")); yes(ready.contains("reopen"));
+        for(int minor:new int[]{9,10}){
+            Rig current=new Rig(new SavedState(0,0,0,null),1800000000000L,false);
+            current.next=new Release(1,"v0."+minor+".0",new Version(0,minor,0),release(1).asset,"a".repeat(64),"Old release");
+            current.c.home(true);current.c.foreground(true);current.drain();
+            String rendered=(String)text.invoke(null,current.c.snapshot(),summary.invoke(current.c));
+            yes(rendered.contains("up to date"));yes(!rendered.contains("Available:"));
+            yes(!rendered.contains("Old release"));
+        }
+        System.out.println("PASS nativePresentation");
+    }
+    // Later must revoke both verification and queued submission, leaving an explicit retry.
+    static void laterBeforeSubmission() {
+        for (boolean afterVerification : new boolean[]{false,true}) {
+            Rig r = ready();
+            r.c.install();
+            if (afterVerification) {
+                r.worker.run(); r.ui.run();
+                yes(r.c.snapshot().phase.equals("installing"));
+            }
+            r.c.dismiss(); r.drain();
+            eq(r.commits,0); eq(r.confirms,0);
+            yes(r.c.snapshot().phase.equals("ready"));
+            r.c.install(); r.drain(); eq(r.commits,1);
+        }
+        Rig recovered = new Rig(new SavedState(0,0,0,null),1800000000000L,false);
+        recovered.recorded=7;
+        recovered.drain(); recovered.c.home(true); recovered.c.foreground(true);
+        recovered.c.dismiss(); recovered.c.home(false); recovered.c.home(true); recovered.drain();
+        yes(recovered.c.snapshot().phase.equals("installing"));
+        eq(recovered.recorded,7); eq(recovered.commits,0); eq(recovered.confirms,0);
+        recovered.c.cancel(); recovered.drain(); yes(recovered.recorded==null);
+        System.out.println("PASS laterBeforeSubmission");
+    }
+    // Missing lifecycle scheduling must fail without a direct check() call.
+    static void automaticHomeDiscovery() {
+        for (boolean homeBeforeInitialization : new boolean[]{false,true}) {
+            Rig r = new Rig(new SavedState(0,0,0,null),1800000000000L,false);
+            if (!homeBeforeInitialization) r.drain();
+            r.c.home(true);
+            r.c.foreground(true);
+            r.drain();
+            eq(r.requests,1);
+            yes(r.c.snapshot().phase.equals("available"));
+            eq(r.downloads,0);
+            r.c.home(false); r.c.home(true); r.drain(); eq(r.requests,1);
+            r.advance(6*HOUR-1);
+            r.c.foreground(false); r.c.foreground(true); r.drain(); eq(r.requests,1);
+            r.advance(1);
+            r.c.foreground(false); r.c.foreground(true); r.drain(); eq(r.requests,2);
+        }
+        Rig failed = new Rig(new SavedState(0,0,0,null),1800000000000L,false);
+        failed.failure = new Failure("network","Try again");
+        failed.c.foreground(true); failed.c.home(true); failed.drain(); eq(failed.requests,1);
+        failed.advance(899999);
+        failed.c.home(false); failed.c.home(true); failed.drain(); eq(failed.requests,1);
+        failed.advance(1);
+        failed.c.home(false); failed.c.home(true); failed.drain(); eq(failed.requests,2);
+        Rig exited = new Rig(new SavedState(0,0,0,null),1800000000000L,false);
+        exited.c.foreground(true); exited.c.home(true); exited.c.home(false); exited.drain();
+        eq(exited.requests,0);
+        System.out.println("PASS automaticHomeDiscovery");
+    }
+    // Export real lifecycle/check/dismissal results for the production JavaScript adapter test.
+    static void presentationSnapshots() {
+        for (int minor : new int[]{9,10,11}) {
+            Rig r=new Rig(new SavedState(0,0,0,null),1800000000000L,false);
+            r.next=new Release(1,"v0."+minor+".0",new Version(0,minor,0),release(1).asset,"a".repeat(64),"Release summary");
+            r.c.home(true); r.c.foreground(true); r.drain();
+            emit("version-"+minor,r.c.snapshot());
+        }
+        Rig pending=new Rig(new SavedState(0,0,0,null),1800000000000L,false);
+        pending.recorded=7; pending.drain(); pending.c.home(true); pending.c.foreground(true);
+        pending.c.dismiss(); pending.c.home(false); pending.c.home(true); pending.drain();
+        emit("pending-dismissed",pending.c.snapshot());
+    }
+    static void emit(String label,Snapshot s) {
+        System.out.println("SNAPSHOT "+label+" {\"revision\":"+s.revision+",\"phase\":\""+s.phase+"\",\"installedVersion\":\""+s.installedVersion
+            +"\",\"availableVersion\":"+(s.availableVersion==null?"null":"\""+s.availableVersion+"\"")+",\"totalBytes\":"+s.totalBytes
+            +",\"downloadedBytes\":"+s.downloadedBytes+",\"message\":\""+s.message+"\",\"dismissed\":"+s.dismissed+"}");
     }
     static void pendingSessionFailureRecovery(){
         Rig r=ready();r.c.install();r.drain();r.cancelFailure=new Failure("install_failed","Removal timed out");r.c.cancel();r.drain();
@@ -231,7 +334,7 @@ public final class UpdaterControllerTest {
         Rig(SavedState initial,long now){this(initial,now,true);}
         Rig(SavedState initial,long now,boolean initialize){wall=now;saved=initial; c=new UpdateController(APP,t->{t.check();requests++;if(failure!=null)throw failure;return next;},this,
             (a,i)->{onInspect.run();if(bad)throw new Failure("integrity","Invalid update");return new ApkIdentity(i.packageName,"0.11.0",15,i.signerSha256,26);},
-            this,new StateStore(){public SavedState load(){return saved;}public void save(SavedState s){saved=s;}},this,worker,ui,s->{},worker); if(initialize){drain(); c.home(true);c.foreground(true);drain();}}
+            this,new StateStore(){public SavedState load(){return saved;}public void save(SavedState s){saved=s;}},this,worker,ui,s->{},worker); if(initialize){drain(); c.home(true);c.foreground(true);}}
         void drain(){for(int i=0;i<20&&(!ui.tasks.isEmpty()||!worker.tasks.isEmpty());i++){ui.run();worker.run();}ui.run();}
         void check(boolean manual){c.check(manual);drain();} void advance(long ms){wall+=ms;elapsed+=ms;}
         public long wallMillis(){return wall;} public long elapsedMillis(){return elapsed;}
