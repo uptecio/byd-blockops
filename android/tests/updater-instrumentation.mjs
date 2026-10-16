@@ -80,7 +80,7 @@ const output = mutate(['shell', 'am', 'instrument', '-w', '-r', '-e', 'suite', s
   'au.local.blockops.test/au.local.blockops.updates.UpdaterInstrumentation']);
 await writeFile(join(artifacts, 'instrumentation.log'), output);
 process.stdout.write(output);
-const names = suite === 'bridge' ? ['threeCommandBridge', 'bridgeHomeAndEncoding', 'bridgeGates', 'bridgeLateCallback'] : ['parseGithubJson', 'parseActualApk', 'permissionRequiresSecondTap', 'wrongSessionIgnored',
+const names = suite === 'bridge' ? ['threeCommandBridge', 'bridgeHomeAndEncoding', 'bridgeGates', 'bridgeLateCallback', 'bridgeQueuedIngress'] : ['parseGithubJson', 'parseActualApk', 'permissionRequiresSecondTap', 'wrongSessionIgnored',
   'pendingActionForegroundOnly', 'restartDoesNotRecommit', 'cancelOnlyOwnedSession', 'sessionRemovalTiming',
   'delayedSessionRemoval', 'removalCallbacksRemainResponsive', 'realOwnedSessions'];
 if (suite === 'controller') names.push('discoverOwnedSession', 'durablePreferences', 'nativeDialog', 'applicationLifecycle',

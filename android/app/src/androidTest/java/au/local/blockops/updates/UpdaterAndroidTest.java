@@ -45,6 +45,7 @@ public final class UpdaterAndroidTest {
         check(commands.equals(new java.util.TreeSet<>(java.util.Arrays.asList("homeState","check","open"))),"Bridge exposes extra authority");
         runner.passed("threeCommandBridge");
         bridgeHomeAndEncoding();runner.passed("bridgeHomeAndEncoding");
+        bridgeQueuedIngress();runner.passed("bridgeQueuedIngress");
         bridgeLateCallback();runner.passed("bridgeLateCallback");
         bridgeGates();runner.passed("bridgeGates");
     }
@@ -128,6 +129,80 @@ public final class UpdaterAndroidTest {
             if(pending!=null)pending.destroy();activity.finish();
         }catch(Exception failure){problem[0]=failure;}}});
         if(problem[0]!=null)throw new AssertionError(problem[0]);
+    }
+    @SuppressWarnings("unchecked")
+    private void bridgeQueuedIngress()throws Exception{
+        Activity activity=runner.startActivitySync(new Intent(context,au.local.blockops.MainActivity.class).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));
+        try{
+            android.webkit.WebView view=homeView(activity);
+            UpdateBridge bridge=(UpdateBridge)field(activity,"updateBridge");
+            // Hold the actual bridge's executor, retaining its real Activity/owner closure.
+            // Other WebView handshakes continue normally; only this test thread is held.
+            java.util.concurrent.Executor originalMain=(java.util.concurrent.Executor)field(bridge,"main");
+            java.util.function.Consumer<String> originalRequest=(java.util.function.Consumer<String>)field(bridge,"request");
+            java.util.concurrent.BlockingQueue<Runnable> held=new java.util.concurrent.LinkedBlockingQueue<>();
+            Thread ingress=Thread.currentThread();boolean[] draining={false};int[] dispatched={0};
+            StringBuilder trace=new StringBuilder();
+            java.lang.reflect.Field main=bridge.getClass().getDeclaredField("main");main.setAccessible(true);
+            java.lang.reflect.Field request=bridge.getClass().getDeclaredField("request");request.setAccessible(true);
+            runner.runOnMainSync(()->{try{
+                main.set(bridge,(java.util.concurrent.Executor)command->{if(Thread.currentThread()==ingress)held.add(command);else originalMain.execute(command);});
+                request.set(bridge,(java.util.function.Consumer<String>)command->{if(draining[0])dispatched[0]++;
+                    try{trace.append(command).append(':').append(field(activity,"documentGeneration")).append('/').append(field(activity,"updateEligibilityGeneration")).append(';');}catch(Exception e){throw new AssertionError(e);}
+                    originalRequest.accept(command);});
+            }catch(Exception e){throw new AssertionError(e);}});
+            try{
+                bridge.open();Runnable paused=held.remove();
+                bridge.check();Runnable pausedCheck=held.remove();
+                bridge.homeState("home");Runnable pausedHome=held.remove();
+                runner.runOnMainSync(()->{runner.callActivityOnPause(activity);runner.callActivityOnResume(activity);});
+                drainBridge(paused,draining,dispatched,0,"Queued Open survived pause/resume");
+                drainBridge(pausedCheck,draining,dispatched,0,"Queued Check survived pause/resume");
+                drainBridge(pausedHome,draining,dispatched,0,"Queued Home survived pause/resume");
+                check(field(activity,"updateDialog")==null,"Stale Open created a dialog");
+                runner.runOnMainSync(()->runner.callActivityOnPause(activity));
+                bridge.open();Runnable whilePaused=held.remove();
+                runner.runOnMainSync(()->runner.callActivityOnResume(activity));
+                drainBridge(whilePaused,draining,dispatched,0,"Open initiated while paused survived resume");
+                // Lifecycle calls enqueue WebView visibility work. Complete that work and its
+                // bridge reports before modeling a new user action in the resumed document.
+                check("true".equals(evaluate(view,"!document.hidden")),"Resumed WebView is not visible");
+                runner.runOnMainSync(()->{});
+
+                bridge.open();Runnable oldHome=held.remove();
+                bridge.homeState("hidden");Runnable hidden=held.remove();
+                bridge.homeState("home");Runnable freshHome=held.remove();
+                drainBridge(oldHome,draining,dispatched,0,"Queued Open survived Home exit");
+                drainBridge(hidden,draining,dispatched,1,"Hidden report was lost");
+                drainBridge(freshHome,draining,dispatched,1,"Fresh Home stranded behind hidden report");
+
+                bridge.open();Runnable oldDocument=held.remove();
+                bridge.homeState("home");Runnable oldDocumentHome=held.remove();
+                runner.runOnMainSync(()->view.getWebViewClient().onPageStarted(view,"https://appassets.androidplatform.net/assets/index.html",null));
+                drainBridge(oldDocument,draining,dispatched,0,"Queued Open survived document replacement");
+                drainBridge(oldDocumentHome,draining,dispatched,0,"Queued Home survived document replacement");
+                bridge.homeState("home");drainBridge(held.remove(),draining,dispatched,1,"New document Home was rejected");
+
+                bridge.open();drainBridge(held.remove(),draining,dispatched,1,"Fresh Open was rejected");
+                long deadline=SystemClock.elapsedRealtime()+10000;boolean[] shown={false};
+                do{runner.runOnMainSync(()->{try{shown[0]=field(activity,"updateDialog")!=null;}catch(Exception e){throw new AssertionError(e);}});
+                    if(!shown[0])SystemClock.sleep(25);
+                }while(!shown[0]&&SystemClock.elapsedRealtime()<deadline);
+                check(shown[0],"Fresh Open did not show the real native dialog: "+evaluate(view,
+                        "JSON.stringify({mode:document.body.dataset.mode,hidden:document.hidden,homeHidden:document.getElementById('home-screen').hidden,modals:Array.from(document.querySelectorAll('.modal-screen:not([hidden])')).map(function(x){return x.id;})})")
+                        +" resumed="+field(activity,"updateResumed")+" finishing="+activity.isFinishing()+" destroyed="+activity.isDestroyed()+" trace="+trace);
+            }finally{runner.runOnMainSync(()->{try{main.set(bridge,originalMain);request.set(bridge,originalRequest);}catch(Exception e){throw new AssertionError(e);}});}
+        }finally{runner.runOnMainSync(activity::finish);}
+    }
+    private void drainBridge(Runnable command,boolean[] draining,int[] dispatched,int expected,String message){
+        Throwable[] failure={null};
+        runner.runOnMainSync(()->{
+            dispatched[0]=0;draining[0]=true;
+            try{command.run();}catch(Throwable error){failure[0]=error;}finally{draining[0]=false;}
+        });
+        if(failure[0]!=null)throw new AssertionError(failure[0]);
+        // Synchronous dispatch barrier: zero means no DOM probe or privileged Activity action was reached.
+        check(dispatched[0]==expected,message+" (dispatches="+dispatched[0]+")");
     }
     private static final class PendingProbeView extends android.webkit.WebView {
         android.webkit.ValueCallback<String> probe;

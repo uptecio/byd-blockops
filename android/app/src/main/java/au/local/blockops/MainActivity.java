@@ -100,6 +100,7 @@ public final class MainActivity extends Activity {
             @Override
             public void onPageStarted(WebView view, String url, android.graphics.Bitmap icon) {
                 if (view != gameView) return;
+                updateBridge.invalidate();
                 boolean replacingDocument = documentGeneration++ > 0;
                 if (updateResumed && replacingDocument) updateApplication().setHome(MainActivity.this, false);
                 detachUpdateDialog();
@@ -235,6 +236,7 @@ public final class MainActivity extends Activity {
     @Override
     protected void onPause() {
         updateResumed = false;
+        if (updateBridge != null) updateBridge.invalidate();
         updateEligibilityGeneration++;
         detachUpdaterPresentation();
         pauseGame();
@@ -247,6 +249,8 @@ public final class MainActivity extends Activity {
     @Override
     protected void onResume() {
         super.onResume();
+        // Commands entered while paused must not gain authority by draining after resume.
+        if (updateBridge != null) updateBridge.invalidate();
         updateResumed = true;
         if (gameView != null) gameView.onResume();
         // Application.onActivityResumed runs after this callback. Handshake follows it on main.
@@ -291,6 +295,7 @@ public final class MainActivity extends Activity {
     }
 
     private void showFailure(String message) {
+        if (updateBridge != null) updateBridge.invalidate();
         documentGeneration++;
         if (updateResumed) updateApplication().setHome(this, false);
         detachUpdaterPresentation();
@@ -321,6 +326,7 @@ public final class MainActivity extends Activity {
     @Override
     protected void onDestroy() {
         updateResumed = false;
+        if (updateBridge != null) updateBridge.invalidate();
         documentGeneration++;
         detachUpdaterPresentation();
         if (gameView != null) {
