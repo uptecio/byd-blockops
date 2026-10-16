@@ -117,8 +117,11 @@ public final class UpdateCandidateStore implements UpdatePorts.CandidateStore {
             if (!"1".equals(required(properties, "schema"))) throw integrityFailure();
             String name = required(properties, "file");
             if (!isCompleteName(name)) throw integrityFailure();
-            File file = new File(directory, name);
-            if (!file.getCanonicalFile().getParentFile().equals(directory.getCanonicalFile())
+            // Android may alias the trusted Context files directory (/data/user/0 -> /data/data).
+            // Normalize that parent, while still rejecting an aliased candidate file itself.
+            File trustedDirectory = directory.getCanonicalFile();
+            File file = new File(trustedDirectory, name);
+            if (!file.getCanonicalFile().getParentFile().equals(trustedDirectory)
                     || !file.getCanonicalFile().equals(file.getAbsoluteFile())) throw integrityFailure();
             String tag = required(properties, "tag");
             String digest = required(properties, "digest");

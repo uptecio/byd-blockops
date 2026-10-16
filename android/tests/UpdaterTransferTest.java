@@ -22,6 +22,7 @@ public final class UpdaterTransferTest {
         public long elapsedMillis() { return elapsed; }
     }
     public static void main(String[] args) throws Exception {
+        trustedParentAliasRetainsCandidate();
         redirectLimits(); boundedRead(); cancelClosesConnection(); truncatedAndOversizedDownload();
         deadlinesAndTls(); retryDeadlines(); privatePromotion(); metadataAndDiskFailure(); staleTransferCannotReplaceFile();
         cleanupCannotDeleteNewTransfer();
@@ -29,6 +30,25 @@ public final class UpdaterTransferTest {
         supersededTransfersRemainCancellable();
         supersedingDuringDelayedTeardown();
         System.out.println("PASS transfer");
+    }
+    // Android aliases Context.getFilesDir's /data/user/0 parent to /data/data.
+    // A trusted root alias must reload; candidate symlinks still fail even with matching bytes.
+    private static void trustedParentAliasRetainsCandidate() throws Exception {
+        Path root=Files.createTempDirectory("updater-parent-alias-");
+        try {
+            Path real=Files.createDirectory(root.resolve("real")),alias=root.resolve("alias");
+            Files.createSymbolicLink(alias,real);
+            UpdateCandidateStore store=new UpdateCandidateStore(alias.resolve("updater").toFile(),transport(connection(200,ABC)));
+            Candidate downloaded=store.download(release(1,ABC_SHA),new UpdateCancellation(),(n,t)->{});
+            Candidate loaded=store.load();
+            assert loaded!=null&&loaded.release.id==1&&Arrays.equals(ABC,Files.readAllBytes(loaded.file.toPath())) : "Trusted parent alias lost complete candidate";
+            Path outside=root.resolve("unrelated.apk");Files.write(outside,ABC);
+            Files.delete(downloaded.file.toPath());Files.createSymbolicLink(downloaded.file.toPath(),outside);
+            fails(store::load);assert Arrays.equals(ABC,Files.readAllBytes(outside));
+            Files.delete(downloaded.file.toPath());
+            Path inside=real.resolve("updater/unrelated.apk");Files.write(inside,ABC);Files.createSymbolicLink(downloaded.file.toPath(),inside);
+            fails(store::load);assert Arrays.equals(ABC,Files.readAllBytes(inside));
+        } finally {remove(root);}
     }
     // A sixth follow, implicit follow, unsafe hop, auth header, or leaked query must fail here.
     private static void redirectLimits() throws Exception {
