@@ -38,7 +38,9 @@ public final class UpdatePorts {
     public interface Installer {
         boolean allowed() throws Failure;
         void openPermissionSettings() throws Failure;
-        int commit(Candidate candidate) throws Failure;
+        default int commit(Candidate candidate) throws Failure { return commit(candidate, new UpdateCancellation()); }
+        /** Check cancellation before creating a session and immediately before platform submission. */
+        int commit(Candidate candidate, UpdateCancellation cancellation) throws Failure;
         void confirm(int sessionId) throws Failure;
         InstallEvent reconcile(Integer sessionId) throws Failure;
         void cancelOwned(int sessionId) throws Failure;

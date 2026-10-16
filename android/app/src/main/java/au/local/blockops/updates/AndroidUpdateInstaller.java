@@ -69,7 +69,12 @@ public final class AndroidUpdateInstaller implements Installer {
     }
 
     @Override public synchronized int commit(Candidate candidate) throws Failure {
+        return commit(candidate, new UpdateCancellation());
+    }
+
+    @Override public synchronized int commit(Candidate candidate, UpdateCancellation cancellation) throws Failure {
         requireNoRemoval();
+        cancellation.check();
         Activity activity = requireForeground();
         if (store.get() != null) throw new Failure("install_pending", "An installation is pending. Cancel it before trying again.");
         if (!allowed()) throw new Failure("install_permission", "Allow this app to install updates, then tap Install again.");
@@ -78,6 +83,7 @@ public final class AndroidUpdateInstaller implements Installer {
         try {
             requireInstalledUnchanged();
             verifier.inspect(candidate, installed);
+            cancellation.check();
             created = platform.create(candidate.release.asset.size);
             // A synchronous durable SessionStore write must finish before any submission.
             store.set(created);
@@ -90,6 +96,9 @@ public final class AndroidUpdateInstaller implements Installer {
             int flags = PendingIntent.FLAG_UPDATE_CURRENT;
             if (Build.VERSION.SDK_INT >= 31) flags |= PendingIntent.FLAG_MUTABLE;
             PendingIntent status = PendingIntent.getBroadcast(context, created, callback, flags);
+            // Revocation never waits for this monitor or holds a token monitor across platform IO.
+            // Crossing this final gate makes a later cancellation an uncertain submission to recover.
+            cancellation.check();
             submissionStarted = true;
             platform.submit(created, status.getIntentSender());
             return created;

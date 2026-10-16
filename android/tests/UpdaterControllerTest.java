@@ -15,12 +15,48 @@ public final class UpdaterControllerTest {
     static Release release(long id) { return new Release(1,"v0.11.0",new Version(0,11,0),
         new Asset(id,"block-ops-test.apk",URI.create("https://github.com/uptecio/byd-blockops/releases/download/v0.11.0/block-ops-test.apk"),100,"sha256:" + "a".repeat(64)),"a".repeat(64),"Update"); }
     public static void main(String[] args) throws Exception {
+        if(args.length>0){UpdaterControllerTest.class.getDeclaredMethod(args[0]).invoke(null);System.out.println("PASS "+args[0]);return;}
         sixHourCache(); manualThirtySecondFloor(); failureFifteenMinuteBackoff(); serverRetryWins();
         clockRollback(); laterIsSessionOnly(); cancelGeneration(); assetChangedNeedsConsent(); recreationIsNotBackground();
         invalidCandidateForgotten(); installConsent(); asynchronousCancellation(); retryBound(); callbackBeforeCommitReturns();
         rollbackAutomaticCache(); checkDuringInitialization(); installRevalidationFailure(); completedCandidateSurvivesDeparture();
         terminalDuringCancel();staleSubmitFailure();invalidRecoveredCandidate();pauseDuringInstall();downloadRetryDeadline();
-        System.out.println("PASS controller (23 cases)");
+        pendingSessionFailureRecovery();startupTerminalWins();immediateDownloadCoalesces();stagingCancelBeforeGate();uncertainSubmitCancellation();
+        laterIsReleaseSpecific();System.out.println("PASS controller (29 cases)");
+    }
+    static void pendingSessionFailureRecovery(){
+        Rig r=ready();r.c.install();r.drain();r.cancelFailure=new Failure("install_failed","Removal timed out");r.c.cancel();r.drain();
+        yes(r.c.snapshot().phase.equals("installing"));eq(r.cancels,1);r.cancelFailure=null;r.c.cancel();r.drain();
+        eq(r.cancels,2);yes(r.c.snapshot().phase.equals("ready"));r.c.install();r.drain();eq(r.commits,2);
+        r.confirmFailure=new Failure("install_failed","Cannot launch confirmation");r.events.accept(new InstallEvent(7,"confirmation","Confirm"));r.drain();
+        yes(r.c.snapshot().phase.equals("installing"));r.c.cancel();r.drain();yes(r.c.snapshot().phase.equals("ready"));
+        Rig vanished=ready();vanished.c.install();vanished.drain();vanished.cancelFailure=new Failure("install_failed","Timeout");
+        vanished.c.cancel();vanished.drain();vanished.recorded=null;vanished.c.cancel();vanished.drain();
+        eq(vanished.cancels,1);yes(vanished.c.snapshot().phase.equals("ready"));
+    }
+    static void startupTerminalWins(){
+        Rig r=new Rig(new SavedState(0,0,0,null),1800000000000L,false);r.recorded=7;r.candidate=new Candidate(new File("fixture"),release(1));
+        r.onInspect=()->{r.recorded=null;r.events.accept(new InstallEvent(7,"idle","Resolved"));r.ui.run();};
+        r.drain();yes(!r.c.snapshot().phase.equals("installing"));r.c.home(true);r.c.foreground(true);r.check(true);eq(r.requests,1);
+    }
+    static void immediateDownloadCoalesces(){
+        Rig r=new Rig();r.check(true);r.c.download();r.c.download();r.drain();eq(r.requests,2);eq(r.downloads,1);
+        yes(r.c.snapshot().phase.equals("ready"));r.check(true);eq(r.requests,2);
+        Rig limited=new Rig();limited.check(true);limited.failure=new Failure("limited","Wait",limited.wall+HOUR);
+        limited.c.download();limited.drain();eq(limited.requests,2);limited.c.download();limited.drain();eq(limited.requests,2);
+    }
+    static Rig ready(){Rig r=new Rig();r.check(true);r.advance(30000);r.c.download();r.drain();return r;}
+    static void stagingCancelBeforeGate(){
+        Rig r=ready();r.onStage=()->{r.c.cancel();r.c.install();r.c.check(true);};r.c.install();r.drain();
+        eq(r.commits,0);eq(r.requests,2);yes(r.c.snapshot().phase.equals("ready"));eq(r.confirms,0);
+    }
+    static void uncertainSubmitCancellation(){
+        Rig r=ready();r.onSubmitted=()->{r.c.cancel();r.events.accept(new InstallEvent(7,"confirmation","Confirm"));};
+        r.submitFailure=new Failure("install_failed","Uncertain submission");r.c.install();r.drain();
+        eq(r.commits,1);eq(r.cancels,1);eq(r.confirms,0);yes(r.recorded==null);yes(r.c.snapshot().phase.equals("ready"));
+        Rig failure=ready();failure.onSubmitted=failure.c::cancel;failure.cancelFailure=new Failure("install_failed","Timed out");
+        failure.c.install();failure.drain();yes(failure.c.snapshot().phase.equals("installing"));eq(failure.cancels,1);
+        failure.cancelFailure=null;failure.c.cancel();failure.drain();eq(failure.cancels,2);yes(failure.c.snapshot().phase.equals("ready"));
     }
     static void sixHourCache() {
         Rig r=new Rig(); r.check(false); eq(r.requests,1); eq(r.downloads,0);
@@ -55,6 +91,11 @@ public final class UpdaterControllerTest {
         Rig r=new Rig(); r.check(true); r.c.dismiss(); r.drain(); yes(r.c.snapshot().dismissed);
         Rig restart=new Rig(r.saved); yes(!restart.c.snapshot().dismissed);
         r.advance(30000); r.check(true); yes(!r.c.snapshot().dismissed); System.out.println("PASS laterIsSessionOnly");
+    }
+    static void laterIsReleaseSpecific(){
+        Rig r=new Rig();r.check(false);r.c.dismiss();r.drain();r.advance(6*HOUR);r.check(false);yes(r.c.snapshot().dismissed);
+        r.next=new Release(2,"v0.12.0",new Version(0,12,0),release(2).asset,"a".repeat(64),"New release");
+        r.advance(6*HOUR);r.check(false);yes(!r.c.snapshot().dismissed);
     }
     static void cancelGeneration() {
         Rig r=new Rig(); r.c.check(true); r.ui.run(); r.worker.run(); // old completion is queued
@@ -120,7 +161,8 @@ public final class UpdaterControllerTest {
     static void staleSubmitFailure(){
         Rig r=new Rig();r.check(true);r.advance(30000);r.c.download();r.drain();
         r.commitFailure=new Failure("install_failed","Old failure");r.c.install();r.ui.run();r.worker.run();r.ui.run();r.worker.run();
-        r.c.cancel();r.advance(30000);r.c.check(true);r.ui.run();yes(r.c.snapshot().phase.equals("checking"));r.drain();
+        r.c.cancel();r.advance(30000);r.c.check(true);r.ui.run();yes(r.c.snapshot().phase.equals("installing"));r.drain();
+        eq(r.requests,2);yes(r.c.snapshot().phase.equals("ready"));
         yes(!r.c.snapshot().message.equals("Old failure"));
     }
     static void downloadRetryDeadline(){
@@ -180,14 +222,15 @@ public final class UpdaterControllerTest {
     }
     static final class Rig implements Clock, CandidateStore, Installer {
         final Queue ui=new Queue(),worker=new Queue(); long wall=1800000000000L,elapsed=1000;
-        int requests,downloads,commits,confirms,settings; boolean bad,allowed=true,terminalInCommit,terminalInCancel; Release next=release(1);
-        SavedState saved; Candidate candidate; Failure failure,commitFailure,downloadFailure; Consumer<InstallEvent> events;
+        int requests,downloads,commits,confirms,settings,cancels; boolean bad,allowed=true,terminalInCommit,terminalInCancel; Release next=release(1);
+        Integer recorded;Runnable onInspect=()->{},onStage=()->{},onSubmitted=()->{};
+        SavedState saved; Candidate candidate; Failure failure,commitFailure,downloadFailure,cancelFailure,confirmFailure,submitFailure; Consumer<InstallEvent> events;
         final UpdateController c;
         Rig(){this(new SavedState(0,0,0,null));}
         Rig(SavedState initial){this(initial,1800000000000L);}
         Rig(SavedState initial,long now){this(initial,now,true);}
         Rig(SavedState initial,long now,boolean initialize){wall=now;saved=initial; c=new UpdateController(APP,t->{t.check();requests++;if(failure!=null)throw failure;return next;},this,
-            (a,i)->{if(bad)throw new Failure("integrity","Invalid update");return new ApkIdentity(i.packageName,"0.11.0",15,i.signerSha256,26);},
+            (a,i)->{onInspect.run();if(bad)throw new Failure("integrity","Invalid update");return new ApkIdentity(i.packageName,"0.11.0",15,i.signerSha256,26);},
             this,new StateStore(){public SavedState load(){return saved;}public void save(SavedState s){saved=s;}},this,worker,ui,s->{},worker); if(initialize){drain(); c.home(true);c.foreground(true);drain();}}
         void drain(){for(int i=0;i<20&&(!ui.tasks.isEmpty()||!worker.tasks.isEmpty());i++){ui.run();worker.run();}ui.run();}
         void check(boolean manual){c.check(manual);drain();} void advance(long ms){wall+=ms;elapsed+=ms;}
@@ -195,8 +238,10 @@ public final class UpdaterControllerTest {
         public Candidate download(Release r,UpdateCancellation t,Progress p)throws Failure {t.check();downloads++;if(downloadFailure!=null)throw downloadFailure;p.onBytes(100,100);return candidate=new Candidate(new File("fixture"),r);}
         public Candidate load(){return candidate;} public void deletePartial(){} public void forget(){candidate=null;}
         public boolean allowed(){return allowed;} public void openPermissionSettings(){settings++;}
-        public int commit(Candidate c)throws Failure{commits++;if(commitFailure!=null)throw commitFailure;if(terminalInCommit)events.accept(new InstallEvent(7,"idle","Installed"));return 7;} public void confirm(int id){eq(id,7);confirms++;}
-        public InstallEvent reconcile(Integer id){return new InstallEvent(-1,"idle","");} public void cancelOwned(int id){if(terminalInCancel)events.accept(new InstallEvent(id,"idle","Resolved"));}
+        public int commit(Candidate c,UpdateCancellation cancellation)throws Failure{cancellation.check();onStage.run();cancellation.check();commits++;if(commitFailure!=null)throw commitFailure;recorded=7;onSubmitted.run();if(submitFailure!=null)throw submitFailure;if(terminalInCommit){recorded=null;events.accept(new InstallEvent(7,"idle","Installed"));}return 7;}
+        public void confirm(int id)throws Failure{eq(id,7);if(confirmFailure!=null)throw confirmFailure;confirms++;}
+        public InstallEvent reconcile(Integer id){return recorded==null?new InstallEvent(-1,"idle",""):new InstallEvent(recorded,"installing","Pending");}
+        public void cancelOwned(int id)throws Failure{cancels++;if(cancelFailure!=null)throw cancelFailure;recorded=null;if(terminalInCancel)events.accept(new InstallEvent(id,"idle","Resolved"));}
         public void setListener(Consumer<InstallEvent> l){events=l;}
     }
 }

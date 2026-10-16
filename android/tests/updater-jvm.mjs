@@ -29,7 +29,7 @@ try {
   sources.push(join(root, 'android/tests', `${suite.test}.java`));
   for (const [command, args] of [
     ['javac', ['-encoding', 'UTF-8', '-d', output, ...sources]],
-    ['java', ['-ea', '-cp', output, `au.local.blockops.updates.${suite.test}`]],
+    ['java', ['-ea', '-cp', output, `au.local.blockops.updates.${suite.test}`, ...process.argv.slice(3)]],
   ]) {
     const result = spawnSync(command, args, { encoding: 'utf8', timeout: 60_000 });
     if (result.stdout) process.stdout.write(result.stdout);

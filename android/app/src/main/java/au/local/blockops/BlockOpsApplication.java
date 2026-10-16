@@ -2,7 +2,6 @@ package au.local.blockops;
 
 import android.app.Activity;
 import android.app.Application;
-import android.content.pm.PackageInfo;
 import android.os.Build;
 import android.os.Bundle;
 import android.os.Handler;
@@ -33,19 +32,38 @@ public class BlockOpsApplication extends Application implements Application.Acti
     public synchronized UpdateController updater(){if(updater==null)updater=createUpdater();return updater;}
     @Override public AndroidUpdateInstaller updateInstaller(){updater();return installer;}
     protected UpdateController createUpdater(){
+        Clock clock=new Clock(){public long wallMillis(){return System.currentTimeMillis();}public long elapsedMillis(){return SystemClock.elapsedRealtime();}};
+        worker=Executors.newSingleThreadExecutor(r->new Thread(r,"updater-worker"));
+        cleanup=Executors.newSingleThreadExecutor(r->new Thread(r,"updater-cleanup"));
         try{
-            PackageInfo info=getPackageManager().getPackageInfo(getPackageName(),0);
-            InstalledApp installed=new InstalledApp(getPackageName(),info.versionName,Build.VERSION.SDK_INT>=28?info.getLongVersionCode():info.versionCode,
-                UpdatePolicy.SIGNER_SHA256,Build.VERSION.SDK_INT);
-            Clock clock=new Clock(){public long wallMillis(){return System.currentTimeMillis();}public long elapsedMillis(){return SystemClock.elapsedRealtime();}};
+            InstalledApp installed=AndroidApkVerifier.readInstalled(this);
             HttpsUpdateTransport transport=new HttpsUpdateTransport(url->(HttpsURLConnection)url.openConnection(),clock);
             UpdatePreferences prefs=new UpdatePreferences(this);AndroidApkVerifier verifier=new AndroidApkVerifier(this);
             installer=new AndroidUpdateInstaller(this,prefs,this::eligibleActivity,installed,verifier);
-            worker=Executors.newSingleThreadExecutor(r->new Thread(r,"updater-worker"));
-            cleanup=Executors.newSingleThreadExecutor(r->new Thread(r,"updater-cleanup"));
             return new UpdateController(installed,new GithubReleaseClient(transport),new UpdateCandidateStore(new File(getFilesDir(),"updater-v1"),transport),
                 verifier,installer,prefs,clock,worker,main::post,this::dispatchUpdate,cleanup);
-        }catch(android.content.pm.PackageManager.NameNotFoundException impossible){throw new IllegalStateException("Installed app unavailable",impossible);}
+        }catch(Failure failure){
+            RejectedIdentity rejected=new RejectedIdentity(failure);
+            InstalledApp untrusted=new InstalledApp(getPackageName(),"Unavailable",0,"",Build.VERSION.SDK_INT);
+            StateStore unavailable=new StateStore(){public SavedState load()throws Failure{throw failure;}public void save(SavedState state)throws Failure{throw failure;}};
+            return new UpdateController(untrusted,rejected,rejected,rejected,rejected,unavailable,clock,worker,main::post,this::dispatchUpdate,cleanup);
+        }
+    }
+    /** No transport, files, preference state or Android installer exists for an untrusted identity. */
+    private static final class RejectedIdentity implements ReleaseSource,CandidateStore,Verifier,Installer {
+        private final Failure failure;RejectedIdentity(Failure failure){this.failure=failure;}
+        public Release latest(UpdateCancellation cancellation)throws Failure{throw failure;}
+        public Candidate load()throws Failure{throw failure;}
+        public Candidate download(Release release,UpdateCancellation cancellation,Progress progress)throws Failure{throw failure;}
+        public void deletePartial(){}public void forget(){}
+        public ApkIdentity inspect(Candidate candidate,InstalledApp installed)throws Failure{throw failure;}
+        public boolean allowed()throws Failure{throw failure;}
+        public void openPermissionSettings()throws Failure{throw failure;}
+        public int commit(Candidate candidate,UpdateCancellation cancellation)throws Failure{throw failure;}
+        public void confirm(int sessionId)throws Failure{throw failure;}
+        public InstallEvent reconcile(Integer sessionId)throws Failure{throw failure;}
+        public void cancelOwned(int sessionId)throws Failure{throw failure;}
+        public void setListener(java.util.function.Consumer<InstallEvent> listener){}
     }
     /** Must be called on main thread; close is safe from any thread and suppresses queued deliveries. */
     public AutoCloseable observeUpdates(Listener observer){

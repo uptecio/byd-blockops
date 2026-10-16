@@ -83,7 +83,8 @@ process.stdout.write(output);
 const names = ['parseGithubJson', 'parseActualApk', 'permissionRequiresSecondTap', 'wrongSessionIgnored',
   'pendingActionForegroundOnly', 'restartDoesNotRecommit', 'cancelOnlyOwnedSession', 'sessionRemovalTiming',
   'delayedSessionRemoval', 'removalCallbacksRemainResponsive', 'realOwnedSessions'];
-if (suite === 'controller') names.push('discoverOwnedSession', 'durablePreferences', 'nativeDialog', 'applicationLifecycle');
+if (suite === 'controller') names.push('discoverOwnedSession', 'durablePreferences', 'nativeDialog', 'applicationLifecycle',
+  'startupReceiverOrdering', 'cancelDuringStaging', 'cancelAfterSubmissionGate', 'installedIdentity', 'invalidFactoryIsInert');
 if (output.includes('FAIL ') || !output.includes('INSTRUMENTATION_CODE: -1')
     || names.some(name => !output.includes(`PASS ${name}`)) || !output.includes(`PASS ${suite}`)) {
   throw new Error('Instrumentation did not pass every required case');

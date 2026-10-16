@@ -1,6 +1,7 @@
 package au.local.blockops.updates;
 
 import java.util.Objects;
+import java.util.ArrayDeque;
 import java.util.concurrent.Executor;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -25,11 +26,13 @@ public final class UpdateController implements AutoCloseable {
     private volatile Snapshot state;
     private long generation, installEvents, requestAt = -1, successUntil, failureUntil, retryUntil, lastWall;
     private Boolean pendingCheck;
+    private final ArrayDeque<InstallEvent> startupEvents = new ArrayDeque<>();
     private SavedState saved = new SavedState(0,0,0,null);
     private Release offer;
     private Candidate candidate;
     private UpdateCancellation token = new UpdateCancellation();
     private boolean home, foreground, launchEligible, closed, initialized, busy, dismissed, consent, confirmation;
+    private boolean submitting, cancelSubmission, cancelling, recoveryNeeded;
     private Integer session;
 
     public UpdateController(InstalledApp installed, ReleaseSource source, CandidateStore candidates,
@@ -55,7 +58,7 @@ public final class UpdateController implements AutoCloseable {
                 catch(Failure invalid) { complete=null;candidates.forget(); }
                 Candidate recovered=complete;
                 ui.execute(() -> initialize(loaded,pending,recovered));
-            } catch(Failure failure) { ui.execute(() -> { synchronized(this){initialized=true;fail(failure);} }); }
+            } catch(Failure failure) { ui.execute(() -> { synchronized(this){if(closed)return;initialized=true;fail(failure);replayStartupEvents();} }); }
         });
     }
     private synchronized void initialize(SavedState loaded, InstallEvent pending, Candidate complete) {
@@ -72,8 +75,10 @@ public final class UpdateController implements AutoCloseable {
         persist();
         if("installing".equals(pending.phase)){session=pending.sessionId;publish("installing",0,pending.message);}
         else showOffer("");
+        replayStartupEvents();
         if(pendingCheck!=null){boolean manual=pendingCheck;pendingCheck=null;check(manual);}
     }
+    private void replayStartupEvents(){while(!startupEvents.isEmpty())event(startupEvents.remove());}
     public synchronized void home(boolean value) {
         if(closed)return;boolean entering=!home&&value;home=value;
         if(!value)depart();else if(entering&&initialized&&candidate==null&&!busy&&session==null)restoreCandidate();
@@ -95,14 +100,15 @@ public final class UpdateController implements AutoCloseable {
     /** Activity pause/replacement revokes install consent without cancelling a foreground transfer. */
     public synchronized void activityDetached(){
         consent=false;launchEligible=false;
+        if(submitting){requestSubmissionCancellation();return;}
         if(busy&&session==null&&candidate!=null&&("verifying".equals(state.phase)||"installing".equals(state.phase))){
             invalidate();busy=false;showOffer("Return Home and tap Install again.");
         }
     }
-    public synchronized boolean canConfirmInstall(){return eligible()&&launchEligible&&!busy&&session!=null&&confirmation;}
+    public synchronized boolean canConfirmInstall(){return eligible()&&launchEligible&&!busy&&!recoveryNeeded&&session!=null&&confirmation;}
     public synchronized void check(boolean manual) {
         if(!initialized&&!closed){pendingCheck=Boolean.TRUE.equals(pendingCheck)||manual;return;}
-        if(!eligible()||busy||session!=null)return;
+        if(!eligible()||busy||session!=null||recoveryNeeded)return;
         if(manual)dismissed=false;
         if(!mayRequest(manual)){showOffer("Please wait before checking again.");return;}
         long op=begin("checking","Checking for updates…"); UpdateCancellation cancellation=token; markRequest();
@@ -113,8 +119,9 @@ public final class UpdateController implements AutoCloseable {
         });
     }
     public synchronized void download() {
-        if(!eligible()||busy||session!=null||offer==null||candidate!=null||!newer(offer))return;
-        if(!mayRequest(true)){publish("available",0,"Please wait before downloading.");return;}
+        if(!eligible()||busy||session!=null||recoveryNeeded||offer==null||candidate!=null||!newer(offer))return;
+        // This consented recheck is distinct from manual Check. Server/failure guards still apply.
+        if(clock.elapsedMillis()<Math.max(retryUntil,failureUntil)){publish("available",0,"Please wait before downloading.");return;}
         Release selected=offer;long op=begin("checking","Checking the selected update…"); UpdateCancellation cancellation=token;markRequest();
         worker.execute(() -> {
             try { cancellation.check();Release fresh=source.latest(cancellation);
@@ -138,10 +145,11 @@ public final class UpdateController implements AutoCloseable {
         }catch(Failure failure){completeFailure(op,failure,false);}
     }
     public synchronized void install() {
-        if(!eligible()||!launchEligible||busy)return;
+        if(!eligible()||!launchEligible||busy||recoveryNeeded)return;
         if(session!=null){if(confirmation){consent=true;confirm(session);}return;}
         if(candidate==null)return;
         Candidate selected=candidate;consent=true;long op=begin("verifying","Verifying update before installation…");
+        UpdateCancellation cancellation=token;
         worker.execute(() -> {
             try {
                 try{verifier.inspect(selected,installed);}catch(Failure invalid){candidates.forget();throw invalid;}
@@ -150,29 +158,70 @@ public final class UpdateController implements AutoCloseable {
                     if(!owns(op))return;
                     if(!allowed){busy=false;consent=false;publish("permission",0,"Allow this app to install updates in Android Settings, then return and tap Install again.");return;}
                     publish("installing",0,"Preparing Android installation…");
-                    worker.execute(() -> submit(op,selected));
+                    worker.execute(() -> submit(op,selected,cancellation));
                 }});
             }catch(Failure failure){ui.execute(() -> {synchronized(this){if(owns(op)){candidate=null;busy=false;consent=false;fail(failure);}}});}
         });
     }
-    private void submit(long op,Candidate selected) {
+    private void submit(long op,Candidate selected,UpdateCancellation cancellation) {
         final long priorEvents;
-        synchronized(this){if(!owns(op)||!consent)return;priorEvents=installEvents;}
-        try {int id=installer.commit(selected);ui.execute(() -> {synchronized(this){
-            if(closed||installEvents!=priorEvents)return;session=id;busy=false;
-            if(!owns(op))consent=false;
-            publish("installing",0,"Waiting for Android installation…");
-        }});}catch(Failure failure){
+        synchronized(this){if(!owns(op)||!consent)return;priorEvents=installEvents;submitting=true;}
+        try {
+            int id=installer.commit(selected,cancellation);
+            ui.execute(() -> submissionResult(op,priorEvents,new InstallEvent(id,"installing","Waiting for Android installation…"),null,false));
+        }catch(Failure failure){
             boolean invalid="invalid_candidate".equals(failure.code)||"invalid_identity".equals(failure.code);
-            if(invalid){try{candidates.forget();}catch(Failure ignored){/* Candidate remains unusable in this coordinator. */}}
-            try{InstallEvent pending=installer.reconcile(null);ui.execute(() -> {synchronized(this){
-                if(closed||installEvents!=priorEvents)return;
-                if(!"installing".equals(pending.phase)&&!owns(op))return;
-                busy=false;consent=false;
-                if(invalid)candidate=null;
-                if("installing".equals(pending.phase)){session=pending.sessionId;publish("installing",0,pending.message);}else fail(failure);
-            }});}catch(Failure recovery){completeFailure(op,recovery,false);}
+            if(invalid){try{candidates.forget();}catch(Failure ignored){/* Never expose the invalid candidate. */}}
+            final InstallEvent pending;
+            try{pending=installer.reconcile(null);}
+            catch(Failure recovery){ui.execute(() -> submissionResult(op,priorEvents,null,recovery,invalid));return;}
+            ui.execute(() -> submissionResult(op,priorEvents,pending,failure,invalid));
         }
+    }
+    private synchronized void submissionResult(long op,long priorEvents,InstallEvent pending,Failure failure,boolean invalid){
+        if(invalid)candidate=null;
+        // Keep this operation busy through its return and cancellation resolution. A native Cancel
+        // after the final platform gate is still a request to cancel the resulting owned session.
+        if(cancelSubmission||closed){cancelOwnedSession(null);return;}
+        submitting=false;busy=false;
+        if(installEvents!=priorEvents){
+            if(confirmation&&session!=null&&consent&&owns(op)&&launchEligible)confirm(session);
+            return;
+        }
+        if(pending==null){recoveryNeeded=true;consent=false;publish("installing",0,failure.message);return;}
+        if("installing".equals(pending.phase)){
+            session=pending.sessionId;publish("installing",0,pending.message);
+        }else if(owns(op)){
+            consent=false;session=null;if(failure!=null)fail(failure);else showOffer("");
+        }
+    }
+    private void requestSubmissionCancellation(){
+        if(cancelSubmission)return;
+        invalidate();cancelSubmission=true;consent=false;confirmation=false;busy=true;
+        publish("installing",0,"Cancelling pending installation…");
+    }
+    private void cancelOwnedSession(Integer expected){
+        if(cancelling)return;
+        cancelling=true;busy=true;long priorEvents=installEvents;
+        worker.execute(() -> {
+            Integer known=expected;Failure failure=null;
+            try{
+                InstallEvent pending=installer.reconcile(null);
+                if(!"idle".equals(pending.phase)){
+                    known=pending.sessionId;
+                    if(expected!=null&&!expected.equals(known))throw new Failure("wrong_session","The pending installation changed. Review it before cancelling.");
+                    installer.cancelOwned(known);
+                }
+            }catch(Failure problem){failure=problem;}
+            Integer retained=known;Failure problem=failure;
+            ui.execute(() -> {synchronized(this){
+                submitting=false;cancelSubmission=false;cancelling=false;busy=false;recoveryNeeded=false;
+                if(closed)return;
+                if(installEvents!=priorEvents&&session==null)return;
+                if(problem!=null){session=retained;recoveryNeeded=retained==null;publish("installing",0,problem.message);}
+                else{session=null;confirmation=false;showOffer("Installation cancelled.");}
+            }});
+        });
     }
     public synchronized void openPermissionSettings() {
         if(!eligible()||!launchEligible||busy||!"permission".equals(state.phase))return;
@@ -186,27 +235,29 @@ public final class UpdateController implements AutoCloseable {
         }});}catch(Failure failure){completeFailure(op,failure,false);}});
     }
     public synchronized void cancel(){
-        if(closed||(busy&&session!=null))return;invalidate();consent=false;confirmation=false;
-        if(session!=null){int id=session;long priorEvents=installEvents;busy=true;publish("installing",0,"Cancelling pending installation…");
-            worker.execute(() -> {try{installer.cancelOwned(id);ui.execute(() -> {synchronized(this){if(closed||installEvents!=priorEvents)return;session=null;busy=false;showOffer("Installation cancelled.");}});}
-                catch(Failure failure){ui.execute(() -> {synchronized(this){if(closed||installEvents!=priorEvents)return;busy=false;fail(failure);}});}});
+        if(closed||cancelling)return;
+        if(submitting){requestSubmissionCancellation();return;}
+        invalidate();consent=false;confirmation=false;
+        if(session!=null||recoveryNeeded){publish("installing",0,"Cancelling pending installation…");cancelOwnedSession(session);
         }else{busy=false;publish(candidate!=null?"ready":"idle",0,"Update cancelled. You can retry.");cleanupPartial();}
     }
-    public synchronized void dismiss(){if(closed)return;dismissed=true;consent=false;publish(state.phase,state.downloadedBytes,state.message);}
-    private void depart(){consent=false;if(busy&&session==null){invalidate();busy=false;publish(candidate!=null?"ready":"error",0,"Update interrupted. Return Home to retry.");cleanupPartial();}}
+    public synchronized void dismiss(){if(closed)return;dismissed=true;consent=false;if(submitting)requestSubmissionCancellation();else publish(state.phase,state.downloadedBytes,state.message);}
+    private void depart(){consent=false;if(submitting){requestSubmissionCancellation();return;}if(busy&&session==null&&!cancelling){invalidate();busy=false;publish(candidate!=null?"ready":"error",0,"Update interrupted. Return Home to retry.");cleanupPartial();}}
     private synchronized void event(InstallEvent event){
         if(closed)return;
+        if(!initialized){startupEvents.add(event);return;}
         if(session!=null&&session!=event.sessionId)return;
         ++installEvents;
+        boolean operationPending=submitting||cancelling;
         if("confirmation".equals(event.phase)){
-            session=event.sessionId;confirmation=true;busy=false;publish("installing",0,event.message);
-            if(consent&&eligible())confirm(event.sessionId);
-        }else if("installing".equals(event.phase)){session=event.sessionId;busy=false;publish("installing",0,event.message);}
-        else{session=null;confirmation=false;consent=false;busy=false;
+            session=event.sessionId;confirmation=!cancelSubmission&&!cancelling;busy=operationPending;publish("installing",0,cancelSubmission?"Cancelling pending installation…":event.message);
+            if(!operationPending&&consent&&eligible()&&launchEligible)confirm(event.sessionId);
+        }else if("installing".equals(event.phase)){session=event.sessionId;busy=operationPending;publish("installing",0,cancelSubmission?"Cancelling pending installation…":event.message);}
+        else{session=null;confirmation=false;consent=false;busy=operationPending;recoveryNeeded=false;
             if("error".equals(event.phase))publish("error",0,event.message);else publish("idle",0,"Review update status after reopening the app. Completed downloads remain available for an explicit retry.");
         }
     }
-    private void confirm(int id){try{installer.confirm(id);confirmation=false;consent=false;publish("installing",0,"Waiting for Android installation…");}catch(Failure failure){consent=false;fail(failure);}}
+    private void confirm(int id){try{installer.confirm(id);confirmation=false;consent=false;publish("installing",0,"Waiting for Android installation…");}catch(Failure failure){confirmation=false;consent=false;fail(failure);}}
     private void cleanupPartial(){worker.execute(() -> {try{candidates.deletePartial();}catch(Failure ignored){/* A later operation retries owned cleanup. */}});}
     private long begin(String phase,String message){invalidate();busy=true;publish(phase,0,message);return generation;}
     private void invalidate(){++generation;UpdateCancellation old=token;token=new UpdateCancellation();old.cancel(cleanup);}
@@ -224,6 +275,7 @@ public final class UpdateController implements AutoCloseable {
     }
     private void markRequest(){requestAt=clock.elapsedMillis();}
     private void checked(Release release){
+        if(offer==null||offer.id!=release.id||!offer.tag.equals(release.tag))dismissed=false;
         if(candidate!=null&&!same(candidate.release,release))candidate=null;
         offer=release;long now=wall();successUntil=deadline(clock.elapsedMillis(),CACHE);failureUntil=0;
         saved=new SavedState(now,0,saved.serverRetryUntilWallMillis,release);persist();}
@@ -234,7 +286,7 @@ public final class UpdateController implements AutoCloseable {
         fail(failure);
     }});}
     private void persist(){SavedState copy=saved;worker.execute(() -> {try{store.save(copy);}catch(Failure failure){ui.execute(() -> {synchronized(this){if(!closed)fail(failure);}});}});}
-    private void fail(Failure failure){publish("error",0,failure.message);}
+    private void fail(Failure failure){publish(session==null&&!recoveryNeeded?"error":"installing",0,failure.message);}
     private void showOffer(String message){publish(candidate!=null?"ready":offer==null?"idle":newer(offer)?"available":"current",0,message);}
     private boolean newer(Release release){try{return UpdatePolicy.compare(release.version,UpdatePolicy.parseVersion(installed.versionName,false))>0;}catch(IllegalArgumentException invalid){return false;}}
     private void publish(String phase,long bytes,String message){

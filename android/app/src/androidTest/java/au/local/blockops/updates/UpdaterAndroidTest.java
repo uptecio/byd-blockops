@@ -95,6 +95,72 @@ public final class UpdaterAndroidTest {
         durablePreferences();runner.passed("durablePreferences");
         nativeDialog();runner.passed("nativeDialog");
         applicationLifecycle();runner.passed("applicationLifecycle");
+        startupReceiverOrdering();runner.passed("startupReceiverOrdering");
+        cancelDuringStaging();runner.passed("cancelDuringStaging");
+        cancelAfterSubmissionGate();runner.passed("cancelAfterSubmissionGate");
+        installedIdentity();runner.passed("installedIdentity");
+        invalidFactoryIsInert();runner.passed("invalidFactoryIsInert");
+    }
+    private void installedIdentity()throws Exception{
+        android.content.pm.PackageInfo actual=context.getPackageManager().getPackageInfo(context.getPackageName(),android.content.pm.PackageManager.GET_SIGNING_CERTIFICATES);
+        InstalledApp installed=AndroidApkVerifier.readInstalled(context);
+        String actualHash=HttpsUpdateTransport.hex(HttpsUpdateTransport.sha256().digest(actual.signingInfo.getApkContentsSigners()[0].toByteArray()));
+        check(installed.signerSha256.equals(actualHash)&&installed.signerSha256.equals(SIGNER)
+            &&installed.versionCode==actual.getLongVersionCode()&&installed.versionName.equals(actual.versionName),"Installed identity was not read from PackageManager");
+        android.content.pm.PackageInfo legacy=new android.content.pm.PackageInfo();legacy.packageName=actual.packageName;
+        legacy.versionName=actual.versionName;legacy.versionCode=actual.versionCode;legacy.signatures=actual.signingInfo.getApkContentsSigners();
+        check(AndroidApkVerifier.decodeInstalled(legacy,26).signerSha256.equals(actualHash),"Legacy current signer not read");
+        check(AndroidApkVerifier.decodeInstalled(legacy,27).signerSha256.equals(actualHash),"API27 current signer not read");
+        rejected(()->AndroidApkVerifier.decodeInstalled(null,36));
+        rejected(()->AndroidApkVerifier.decodeInstalled(legacy,28)); // No current SigningInfo; no legacy fallback.
+        legacy.signatures=null;rejected(()->AndroidApkVerifier.decodeInstalled(legacy,26));
+        legacy.signatures=new android.content.pm.Signature[0];rejected(()->AndroidApkVerifier.decodeInstalled(legacy,26));
+        legacy.signatures=new android.content.pm.Signature[]{null};rejected(()->AndroidApkVerifier.decodeInstalled(legacy,26));
+        legacy.signatures=new android.content.pm.Signature[]{new android.content.pm.Signature(new byte[]{1})};rejected(()->AndroidApkVerifier.decodeInstalled(legacy,26));
+        android.content.pm.Signature trusted=actual.signingInfo.getApkContentsSigners()[0];
+        legacy.signatures=new android.content.pm.Signature[]{trusted,trusted};rejected(()->AndroidApkVerifier.decodeInstalled(legacy,26));
+        legacy.signatures=new android.content.pm.Signature[]{trusted};legacy.versionName="invalid";rejected(()->AndroidApkVerifier.decodeInstalled(legacy,26));
+        legacy.versionName=actual.versionName;legacy.packageName="foreign.package";rejected(()->AndroidApkVerifier.decodeInstalled(legacy,26));
+        legacy.packageName=actual.packageName;legacy.versionCode=0;rejected(()->AndroidApkVerifier.decodeInstalled(legacy,26));
+    }
+    private void invalidFactoryIsInert() throws Exception {
+        java.util.concurrent.atomic.AtomicInteger network=new java.util.concurrent.atomic.AtomicInteger();
+        // Last case in this isolated instrumentation process: every Java HTTPS connection is forbidden.
+        URL.setURLStreamHandlerFactory(protocol->"https".equals(protocol)?new URLStreamHandler(){
+            protected URLConnection openConnection(URL url)throws IOException{network.incrementAndGet();throw new IOException("Unexpected network");}
+        }:null);
+        InvalidIdentityApplication app=new InvalidIdentityApplication();Throwable[] problem={null};
+        runner.runOnMainSync(()->{try{app.attach(context);app.onCreate();app.updater().home(true);app.updater().foreground(true);}
+            catch(Throwable failure){problem[0]=failure;}});
+        if(problem[0]!=null)throw new AssertionError("Invalid identity crashed game startup",problem[0]);
+        drainApplication(app);
+        check(app.updater().snapshot().phase.equals("error"),"Untrusted factory did not publish an error");
+        Activity activity=runner.startActivitySync(new Intent(context,au.local.blockops.MainActivity.class).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));
+        runner.runOnMainSync(()->{try{
+            UpdateDialog presentation=new UpdateDialog(activity,app.updater());presentation.show();
+            java.lang.reflect.Field field=UpdateDialog.class.getDeclaredField("dialog");field.setAccessible(true);
+            ((android.app.AlertDialog)field.get(presentation)).getButton(-1).performClick();
+            presentation.detach();
+        }catch(Throwable failure){problem[0]=failure;}});
+        if(problem[0]!=null)throw new AssertionError(problem[0]);drainApplication(app);
+        check(app.updater().snapshot().phase.equals("error"),"Retry escaped fail-closed identity state");
+        runner.runOnMainSync(()->{app.updater().download();app.updater().install();app.updater().openPermissionSettings();app.updater().cancel();});
+        drainApplication(app);
+        check(network.get()==0&&app.launches==0&&app.updateInstaller()==null,"Invalid identity reached network/platform installer");
+        check(app.updater().snapshot().message.length()<=240,"Unbounded identity failure");
+        runner.runOnMainSync(()->{activity.finish();app.onTerminate();});
+    }
+    private void drainApplication(au.local.blockops.BlockOpsApplication app)throws Exception{
+        java.lang.reflect.Field field=au.local.blockops.BlockOpsApplication.class.getDeclaredField("worker");field.setAccessible(true);
+        java.util.concurrent.ExecutorService worker=(java.util.concurrent.ExecutorService)field.get(app);
+        for(int i=0;i<3;i++){worker.submit(()->{}).get(2,java.util.concurrent.TimeUnit.SECONDS);runner.waitForIdleSync();}
+    }
+    static final class InvalidIdentityApplication extends au.local.blockops.BlockOpsApplication {
+        int launches;void attach(Context base){attachBaseContext(base);}
+        @Override public String getPackageName(){return "au.local.blockops.missing.identity";}
+        @Override public File getFilesDir(){throw new AssertionError("Untrusted identity opened candidate files");}
+        @Override public android.content.SharedPreferences getSharedPreferences(String name,int mode){throw new AssertionError("Untrusted identity opened updater preferences");}
+        @Override public void startActivity(Intent intent){launches++;throw new AssertionError("Untrusted identity launched an Activity");}
     }
     private void durablePreferences() throws Exception {
         Context isolated=new ContextWrapper(context){@Override public android.content.SharedPreferences getSharedPreferences(String name,int mode){
@@ -136,6 +202,13 @@ public final class UpdaterAndroidTest {
             check(rig.confirms==0,"Lost Activity consent launched confirmation");rig.controller.foreground(true);presentation.render(rig.controller.snapshot());
             check(dialog.getButton(-1).isEnabled(),"Fresh native confirmation action missing");dialog.getButton(-1).performClick();rig.drain();
             check(rig.confirms==1&&rig.commits==1,"Fresh tap resubmitted or failed to confirm");
+            rig.cancelFailure=true;dialog.getButton(-3).performClick();rig.drain();presentation.render(rig.controller.snapshot());
+            check(dialog.getButton(-3).getVisibility()==android.view.View.VISIBLE&&dialog.getButton(-3).isEnabled(),"Timeout hid cancellation recovery");
+            rig.cancelFailure=false;dialog.getButton(-3).performClick();rig.drain();presentation.render(rig.controller.snapshot());
+            check(rig.cancels==2&&rig.controller.snapshot().phase.equals("ready"),"Native cancellation retry failed");
+            dialog.getButton(-1).performClick();rig.drain();rig.confirmFailure=true;rig.events.accept(new InstallEvent(7,"confirmation","Confirm"));rig.drain();presentation.render(rig.controller.snapshot());
+            check(dialog.getButton(-3).getVisibility()==android.view.View.VISIBLE,"Failed confirmation stranded native controls");
+            dialog.getButton(-3).performClick();rig.drain();check(rig.controller.snapshot().phase.equals("ready"),"Failed-confirmation session could not be cancelled");
             presentation.detach();check(!dialog.isShowing(),"Detach kept old window");rig.controller.close();rig.drain();
         }catch(Throwable failure){problem[0]=failure;}finally{activity.finish();}});
         if(problem[0]!=null)throw new AssertionError(problem[0]);
@@ -166,7 +239,7 @@ public final class UpdaterAndroidTest {
         @Override protected UpdateController createUpdater(){rig.listener=this::dispatchUpdate;return rig.controller;}
     }
     static final class ControllerRig implements UpdatePorts.Installer,UpdatePorts.CandidateStore {
-        long now=1800000000000L;int downloads,commits,settings,confirms;boolean allowed=true;
+        long now=1800000000000L;int downloads,commits,settings,confirms,cancels;boolean allowed=true,cancelFailure,confirmFailure;Integer recorded;
         java.util.function.Consumer<InstallEvent> events;UpdatePorts.Listener listener=s->{};
         final java.util.ArrayDeque<Runnable> ui=new java.util.ArrayDeque<>(),worker=new java.util.ArrayDeque<>();
         final Release release=new Release(1,"v0.11.0",new Version(0,11,0),new Asset(1,"block-ops-test.apk",
@@ -179,10 +252,60 @@ public final class UpdaterAndroidTest {
         void drain(){for(int i=0;i<20&&(!ui.isEmpty()||!worker.isEmpty());i++){while(!ui.isEmpty())ui.remove().run();while(!worker.isEmpty())worker.remove().run();}}
         public Candidate load(){return candidate;}public Candidate download(Release r,UpdateCancellation t,UpdatePorts.Progress p)throws UpdatePorts.Failure{t.check();downloads++;return candidate=new Candidate(new File("test"),r);}
         public void forget(){candidate=null;}public void deletePartial(){}
-        public boolean allowed(){return allowed;}public void openPermissionSettings(){settings++;}public int commit(Candidate c){commits++;return 7;}
-        public void confirm(int id){confirms++;}public InstallEvent reconcile(Integer id){return new InstallEvent(-1,"idle","");}public void cancelOwned(int id){}
+        public boolean allowed(){return allowed;}public void openPermissionSettings(){settings++;}public int commit(Candidate c,UpdateCancellation cancellation)throws UpdatePorts.Failure{cancellation.check();commits++;recorded=7;return 7;}
+        public void confirm(int id)throws UpdatePorts.Failure{if(confirmFailure)throw new UpdatePorts.Failure("install_failed","Confirmation failed");confirms++;}
+        public InstallEvent reconcile(Integer id){return recorded==null?new InstallEvent(-1,"idle",""):new InstallEvent(recorded,"installing","Pending");}
+        public void cancelOwned(int id)throws UpdatePorts.Failure{cancels++;if(cancelFailure)throw new UpdatePorts.Failure("install_failed","Cancellation timed out");recorded=null;}
         public void setListener(java.util.function.Consumer<InstallEvent> l){events=l;}
     }
+    private void startupReceiverOrdering() throws Exception {
+        Rig rig=new Rig();Candidate candidate=fixture();int id=rig.installer.commit(candidate);
+        ManualQueue ui=new ManualQueue(),worker=new ManualQueue();int[] checks={0};
+        UpdateController controller=adapterController(rig,candidate,worker,ui,(c,i)->{
+            rig.installer.handleStatus(status(id,PackageInstaller.STATUS_SUCCESS));ui.run();
+            return new AndroidApkVerifier(context).inspect(c,i);
+        },checks);
+        drain(worker,ui);check(rig.store.id==null&&!controller.snapshot().phase.equals("installing"),"Startup revived stale reconciled session");
+        controller.home(true);controller.foreground(true);controller.check(true);drain(worker,ui);
+        check(checks[0]==1,"Startup terminal result left checks blocked");controller.close();drain(worker,ui);
+    }
+    private void cancelDuringStaging() throws Exception {
+        Rig rig=new Rig();Candidate candidate=fixture();ManualQueue ui=new ManualQueue(),worker=new ManualQueue();
+        UpdateController controller=adapterController(rig,candidate,worker,ui,new AndroidApkVerifier(context),new int[]{0});drain(worker,ui);
+        controller.home(true);controller.foreground(true);
+        rig.platform.afterWrite=()->runner.runOnMainSync(controller::cancel);
+        controller.install();drain(worker,ui);
+        check(rig.platform.commitCalls==0,"Cancelled staging still submitted");
+        check(rig.store.id==null&&rig.platform.sessions.isEmpty(),"Cancelled staging retained owned unsubmitted session");
+        check(controller.snapshot().phase.equals("ready")&&rig.platform.launches==0,"Cancelled staging revived install/confirmation UI");
+        controller.close();drain(worker,ui);
+    }
+    private void cancelAfterSubmissionGate() throws Exception {
+        Rig rig=new Rig();Candidate candidate=fixture();ManualQueue ui=new ManualQueue(),worker=new ManualQueue();
+        UpdateController controller=adapterController(rig,candidate,worker,ui,new AndroidApkVerifier(context),new int[]{0});drain(worker,ui);
+        controller.home(true);controller.foreground(true);rig.platform.throwAfterSubmit=true;
+        rig.platform.afterSubmit=()->{
+            runner.runOnMainSync(controller::cancel);
+            try{rig.installer.handleStatus(status(rig.store.id,PackageInstaller.STATUS_PENDING_USER_ACTION).putExtra(Intent.EXTRA_INTENT,new Intent("fixture.confirm")));}
+            catch(Exception failure){throw new AssertionError(failure);}
+        };
+        controller.install();drain(worker,ui);
+        check(rig.platform.commitCalls==1&&rig.store.id==null&&rig.platform.sessions.isEmpty(),"Uncertain cancelled submit was not resolved");
+        check(controller.snapshot().phase.equals("ready")&&rig.platform.launches==0,"Uncertain cancelled submit revived confirmation/UI");
+        controller.close();drain(worker,ui);
+    }
+    private UpdateController adapterController(Rig rig,Candidate candidate,ManualQueue worker,ManualQueue ui,UpdatePorts.Verifier verifier,int[] checks){
+        return new UpdateController(new InstalledApp("au.local.blockops","0.9.0",13,SIGNER,36),t->{checks[0]++;return candidate.release;},
+            new UpdatePorts.CandidateStore(){public Candidate load(){return candidate;}public Candidate download(Release r,UpdateCancellation t,UpdatePorts.Progress p){return candidate;}
+                public void deletePartial(){}public void forget(){}},verifier,rig.installer,
+            new UpdatePorts.StateStore(){public SavedState load(){return new SavedState(0,0,0,null);}public void save(SavedState s){}},
+            new UpdatePorts.Clock(){public long wallMillis(){return 1800000000000L;}public long elapsedMillis(){return SystemClock.elapsedRealtime();}},worker,ui,s->{},worker);
+    }
+    private static final class ManualQueue implements java.util.concurrent.Executor{
+        final java.util.concurrent.ConcurrentLinkedQueue<Runnable> tasks=new java.util.concurrent.ConcurrentLinkedQueue<>();
+        public void execute(Runnable task){tasks.add(task);}void run(){Runnable task;while((task=tasks.poll())!=null)task.run();}
+    }
+    private static void drain(ManualQueue worker,ManualQueue ui){for(int i=0;i<20&&(!worker.tasks.isEmpty()||!ui.tasks.isEmpty());i++){worker.run();ui.run();}}
     private void discoverOwnedSession() throws Exception {
         Rig empty=new Rig();check(empty.installer.reconcile(null).phase.equals("idle"),"No-record discovery failed");
         Rig sealed=new Rig();int id=sealed.installer.commit(fixture());
@@ -375,6 +498,7 @@ public final class UpdaterAndroidTest {
         boolean allowed = true, recordedBeforeSubmit, throwAfterSubmit, ignoreAbandon;
         Intent lastIntent;
         Runnable afterWrite = () -> {};
+        Runnable afterSubmit = () -> {};
         ScriptedPlatform(MemorySessionStore store) { this.store = store; }
         public boolean allowed() { return allowed; }
         public int create(long size) { int id = next++; sessions.put(id, new AndroidUpdateInstaller.SessionState(false)); return id; }
@@ -382,6 +506,7 @@ public final class UpdaterAndroidTest {
         public void submit(int id, IntentSender sender) {
             recordedBeforeSubmit = store.id != null && store.id == id && sender != null;
             commitCalls++; sessions.put(id, new AndroidUpdateInstaller.SessionState(true));
+            afterSubmit.run();
             if (throwAfterSubmit) throw new IllegalStateException("Ambiguous platform failure");
         }
         public AndroidUpdateInstaller.SessionState session(int id) {
