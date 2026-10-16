@@ -39,7 +39,7 @@ test('isolated build and preview serve staged assets while live dist is preserve
   const stageRoot = join(scratch, staged);
   assert.ok((await readFile(`${stageRoot}/game.js`, 'utf8')).length > 10000);
   const page = await readFile(`${stageRoot}/index.html`, 'utf8');
-  assert.match(page, /v0\.10\.0 · SHOOTING RANGE/); assert.match(page, /id="climb-hint"/);
+  assert.match(page, /v0\.11\.0 · GITHUB UPDATES/); assert.match(page, /id="climb-hint"/);
   const server = spawn(process.execPath, [resolve('scripts/serve.mjs')], { cwd: scratch, env: { ...process.env, DIST_DIR: staged, PORT: '0' } });
   try {
     const address = await new Promise((resolve, reject) => {
@@ -60,6 +60,7 @@ test('package release selectors reject ambiguity and recognize shooting range', 
     [{ANDROID_PACKAGE_RELEASE:'shooting-range',ANDROID_PACKAGE_BASELINE:'1'}, /Conflicting package selectors/],
     [{ANDROID_PACKAGE_RELEASE:'solo-powers',ANDROID_PACKAGE_BASELINE:'1'}, /Conflicting package selectors/],
     [{ANDROID_PACKAGE_RELEASE:'minigun',ANDROID_PACKAGE_BASELINE:'1'}, /Conflicting package selectors/],
+    [{ANDROID_PACKAGE_RELEASE:'github-updater',ANDROID_PACKAGE_BASELINE:'1'}, /Conflicting package selectors/],
   ]) {
     const {ANDROID_PACKAGE_RELEASE,ANDROID_PACKAGE_BASELINE,...env}=process.env;
     const child=spawn(process.execPath,[resolve('android/tests/package-smoke.mjs')],{env:{...env,...selection}});
@@ -67,6 +68,39 @@ test('package release selectors reject ambiguity and recognize shooting range', 
     const exit=await new Promise(resolve=>child.on('close',resolve));
     assert.notEqual(exit,0);assert.match(output,pattern);
   }
+});
+
+test('GitHub updater metadata and runners identify the candidate explicitly', async () => {
+  const pkg = JSON.parse(await readFile('package.json', 'utf8'));
+  const lock = JSON.parse(await readFile('package-lock.json', 'utf8'));
+  assert.equal(pkg.version, '0.11.0');
+  assert.equal(lock.version, pkg.version);
+  assert.equal(lock.packages[''].version, pkg.version);
+  assert.match(await readFile('android/app/build.gradle', 'utf8'), /versionCode 15\s+versionName '0\.11\.0'/);
+  assert.equal(pkg.scripts['test:updates:native'], 'node android/tests/updater-jvm.mjs policy && node android/tests/updater-jvm.mjs transfer && node android/tests/updater-jvm.mjs controller');
+  assert.equal(pkg.scripts['test:updates:android'], 'node android/tests/updater-smoke.mjs');
+  const { ANDROID_PACKAGE_RELEASE, ANDROID_PACKAGE_BASELINE, ...env } = process.env;
+  const child = spawn(process.execPath, [resolve('android/tests/package-smoke.mjs')], {
+    env: { ...env, ANDROID_PACKAGE_RELEASE: 'github-updater', ANDROID_SDK_ROOT: '/nonexistent-updater-selector-probe' },
+  });
+  let output = '';
+  child.stdout.on('data', data => { output += data; });
+  child.stderr.on('data', data => { output += data; });
+  assert.notEqual(await new Promise(resolve => child.on('close', resolve)), 0);
+  assert.doesNotMatch(output, /Unknown ANDROID_PACKAGE_RELEASE/);
+  assert.match(output, /nonexistent-updater-selector-probe/);
+});
+
+test('production updater endpoint has no configurable entry point', async () => {
+  const root = 'android/app/src/main/java/au/local/blockops';
+  const policy = await readFile(`${root}/updates/UpdatePolicy.java`, 'utf8');
+  const client = await readFile(`${root}/updates/GithubReleaseClient.java`, 'utf8');
+  const application = await readFile(`${root}/BlockOpsApplication.java`, 'utf8');
+  assert.match(policy, /public static final URI RELEASES_URI\s*=\s*URI\.create\("https:\/\/api\.github\.com\/repos\/uptecio\/byd-blockops\/releases\/latest"\)/);
+  assert.deepEqual([...client.matchAll(/public GithubReleaseClient\(([^)]*)\)/g)].map(match => match[1]), ['HttpsUpdateTransport transport']);
+  assert.match(client, /transport\.read\(UpdatePolicy\.RELEASES_URI,/);
+  assert.match(application, /new GithubReleaseClient\(transport\)/);
+  assert.doesNotMatch(client + application, /System\.getProperty|System\.getenv|getIntent\(|getStringExtra\(/);
 });
 
 test('build-output validation succeeds in a checkout without generated dist', async context => {

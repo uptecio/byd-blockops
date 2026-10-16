@@ -11,12 +11,13 @@ const run = promisify(execFile);
 // expected metadata from the artifact being tested.
 const baseline = process.env.ANDROID_PACKAGE_BASELINE === '1';
 const release = process.env.ANDROID_PACKAGE_RELEASE;
-assert.ok(release === undefined || release === 'solo-powers' || release === 'minigun' || release === 'shooting-range', 'Unknown ANDROID_PACKAGE_RELEASE');
+assert.ok(release === undefined || release === 'solo-powers' || release === 'minigun' || release === 'shooting-range' || release === 'github-updater', 'Unknown ANDROID_PACKAGE_RELEASE');
 assert.ok(!(baseline && release !== undefined), 'Conflicting package selectors');
 const powers = release === 'solo-powers';
 const minigun = release === 'minigun';
 const range = release === 'shooting-range';
-const apk = resolve(process.env.ANDROID_APK_PATH || (range ? 'artifacts/block-ops-v0.10.0-shooting-range.apk' : minigun ? 'artifacts/block-ops-v0.9.2-minigun.apk' : powers ? 'artifacts/block-ops-v0.9.1-solo-powers.apk' : baseline ? 'artifacts/block-ops-v0.8.0-rooftops-hiding.apk' : 'artifacts/block-ops-v0.9.0-tall-roofs.apk'));
+const updater = release === 'github-updater';
+const apk = resolve(process.env.ANDROID_APK_PATH || (updater ? 'artifacts/block-ops-v0.11.0-github-updater.apk' : range ? 'artifacts/block-ops-v0.10.0-shooting-range.apk' : minigun ? 'artifacts/block-ops-v0.9.2-minigun.apk' : powers ? 'artifacts/block-ops-v0.9.1-solo-powers.apk' : baseline ? 'artifacts/block-ops-v0.8.0-rooftops-hiding.apk' : 'artifacts/block-ops-v0.9.0-tall-roofs.apk'));
 const dist = resolve(process.env.DIST_DIR || 'dist');
 const sdk = process.env.ANDROID_SDK_ROOT || process.env.ANDROID_HOME || `${process.env.HOME}/Android/Sdk`;
 const versions = (await readdir(join(sdk, 'build-tools'))).sort((a, b) => b.localeCompare(a, undefined, { numeric: true }));
@@ -31,11 +32,11 @@ const { stdout: badging } = await run(join(buildTools, 'aapt'), ['dump', 'badgin
 // Catches accidentally packaging the previous release or changing its Android compatibility.
 test('APK metadata identifies the explicitly selected release', () => {
   assert.match(badging, /package: name='au\.local\.blockops'/);
-  assert.match(badging, range ? /versionCode='14'/ : minigun ? /versionCode='13'/ : powers ? /versionCode='12'/ : baseline ? /versionCode='10'/ : /versionCode='11'/);
-  assert.match(badging, range ? /versionName='0\.10\.0'/ : minigun ? /versionName='0\.9\.2'/ : powers ? /versionName='0\.9\.1'/ : baseline ? /versionName='0\.8\.0'/ : /versionName='0\.9\.0'/);
+  assert.match(badging, updater ? /versionCode='15'/ : range ? /versionCode='14'/ : minigun ? /versionCode='13'/ : powers ? /versionCode='12'/ : baseline ? /versionCode='10'/ : /versionCode='11'/);
+  assert.match(badging, updater ? /versionName='0\.11\.0'/ : range ? /versionName='0\.10\.0'/ : minigun ? /versionName='0\.9\.2'/ : powers ? /versionName='0\.9\.1'/ : baseline ? /versionName='0\.8\.0'/ : /versionName='0\.9\.0'/);
   assert.match(badging, /sdkVersion:'26'/);
   assert.match(badging, /targetSdkVersion:'36'/);
-  assert.deepEqual([...badging.matchAll(/^uses-permission: name='([^']+)'/gm)].map(match => match[1]), ['android.permission.INTERNET']);
+  assert.deepEqual([...badging.matchAll(/^uses-permission: name='([^']+)'/gm)].map(match => match[1]), updater ? ['android.permission.INTERNET', 'android.permission.REQUEST_INSTALL_PACKAGES'] : ['android.permission.INTERNET']);
   assert.doesNotMatch(badging, /^native-code:/m, 'APK remains independent of CPU architecture');
 });
 
@@ -55,7 +56,7 @@ test('APK bundles the exact reviewed offline assets', async () => {
     assert.ok(expected.length > 0, `${name} must not be empty`);
     const { stdout } = await run('unzip', ['-p', apk, `assets/${name}`], { encoding: 'buffer', maxBuffer: 32 * 1024 * 1024 });
     assert.deepEqual(stdout, expected, `${name} bundled bytes must match the tested DIST_DIR`);
-    if(name==='index.html')assert.match(stdout.toString(),range ? /v0\.10\.0 · SHOOTING RANGE/ : minigun ? /v0\.9\.2 MINIGUN/ : powers ? /v0\.9\.1 SOLO POWERS/ : baseline ? /v0\.8\.0 ROOFTOPS \+ HIDING/ : /v0\.9\.0 TALL ROOFS/,'visible release label matches package');
+    if(name==='index.html')assert.match(stdout.toString(),updater ? /v0\.11\.0 · GITHUB UPDATES/ : range ? /v0\.10\.0 · SHOOTING RANGE/ : minigun ? /v0\.9\.2 MINIGUN/ : powers ? /v0\.9\.1 SOLO POWERS/ : baseline ? /v0\.8\.0 ROOFTOPS \+ HIDING/ : /v0\.9\.0 TALL ROOFS/,'visible release label matches package');
   }
 });
 
@@ -65,6 +66,14 @@ test('APK retains the packaged local appassets origin', async () => {
   assert.ok(names.length,'native code is packaged');
   const bytecode=await Promise.all(names.map(async name=>(await run('unzip',['-p',apk,name],{encoding:'buffer',maxBuffer:32*1024*1024})).stdout));
   assert.ok(bytecode.some(dex=>dex.includes(Buffer.from('https://appassets.androidplatform.net/assets/index.html'))),'native entry points at the local packaged HTTPS index');
+  if (updater) {
+    for (const dex of bytecode) {
+      for (const marker of ['FixtureApplication', 'FixtureUpdateSource', 'UpdaterInstrumentation', 'UpdaterAndroidTest', 'updater-fixture', 'socket-fixture']) {
+        assert.ok(!dex.includes(Buffer.from(marker)), `Production DEX excludes ${marker}`);
+      }
+    }
+    assert.ok(bytecode.some(dex => dex.includes(Buffer.from('https://api.github.com/repos/uptecio/byd-blockops/releases/latest'))), 'fixed production release endpoint is packaged');
+  }
 });
 
 console.log(`APK SHA-256: ${createHash('sha256').update(await readFile(apk)).digest('hex')}`);

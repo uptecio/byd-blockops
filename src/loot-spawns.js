@@ -1,3 +1,4 @@
+import { entriesObject } from './entries-object.js';
 // Authored walkable ground locations. Guns cover both ends, outer flanks and
 // central approaches with >=12.5 units between them. Rotated pairs balance
 // access from both team ends; assignments vary, but positions never move.
@@ -52,7 +53,7 @@ const locations = {
   },
 };
 
-export const LOOT_SPAWNS = Object.freeze(Object.fromEntries(Object.entries(locations).map(([mapId, groups]) => [
+export const LOOT_SPAWNS = Object.freeze(entriesObject(Object.entries(locations).map(([mapId, groups]) => [
   mapId,
   Object.freeze(Object.entries(groups).flatMap(([type, points]) => points.map(([x, z], index) => Object.freeze({
     id: `map:${mapId}:${type}:${index + 1}`, x, z,

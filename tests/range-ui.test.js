@@ -158,7 +158,7 @@ test('real ammo HUD keeps a normal magazine and infinity reserve without disabli
 test('entering practice Loadout clears held FIRE and confirmation explains retained XP',t=>{
   const {context,game,$} = fixture(t);game.tryStartRange('mp5');game.input.fire=true;
   context.document.querySelector=()=>({textContent:''});
-  Object.assign(context,{input:game.input,invalidatePowerMenu(){},resetPowerSession(){},equipmentUI:{close(){}},renderTeamMap(){},renderProgression(){},mapSession:null});
+  Object.assign(context,{input:game.input,invalidatePowerMenu(){},resetPowerSession(){},equipmentUI:{close(){}},renderTeamMap(){},renderProgression(){},mapSession:null,updateUI:null});
   const setMode=controller('setMode',context);context.setMode=setMode;context.document.body={dataset:{}};
   setMode('armory');assert.equal(game.input.fire,false);assert.equal(game.active,false);assert.equal(game.input.enabled,false);
   Object.assign(context,{sessionToken:()=>game.modeState,showHome(){}});

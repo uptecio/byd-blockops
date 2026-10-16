@@ -1,3 +1,4 @@
+import { entriesObject } from './entries-object.js';
 // Authored roof identities and geometry are shared by the renderer, simulation,
 // navigation and acceptance tests. No invisible collision-only surfaces.
 const unit = { N:{x:0,z:-1}, E:{x:1,z:0}, S:{x:0,z:1}, W:{x:-1,z:0} };
@@ -156,5 +157,5 @@ const definitions={
     annex(1,-16,-12,'N','#6de3cc'),annex(2,16,12,'S','#6de3cc')
   ]}
 };
-export const ROOF_ACCESS=Object.fromEntries(Object.entries(definitions).map(([id,record])=>[id,{style:record.style,theme:record.theme,
+export const ROOF_ACCESS=entriesObject(Object.entries(definitions).map(([id,record])=>[id,{style:record.style,theme:record.theme,
   destinations:record.destinations.map(d=>destination(id,{colour:record.colour,style:record.style,...d}))}]));
