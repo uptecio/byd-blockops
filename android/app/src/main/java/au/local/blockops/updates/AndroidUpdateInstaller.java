@@ -9,6 +9,8 @@ import android.content.pm.PackageInfo;
 import android.content.pm.PackageInstaller;
 import android.net.Uri;
 import android.os.Build;
+import android.os.Looper;
+import android.os.SystemClock;
 import android.provider.Settings;
 import java.io.FileInputStream;
 import java.io.IOException;
@@ -33,6 +35,7 @@ public final class AndroidUpdateInstaller implements Installer {
     private Consumer<InstallEvent> listener = event -> {};
     private Intent pending;
     private Integer pendingSession;
+    private boolean removalInProgress;
 
     /** Supplier returns a live Activity only while foreground Home consent is eligible. */
     public AndroidUpdateInstaller(Context context, SessionStore store, Supplier<Activity> foreground,
@@ -56,6 +59,7 @@ public final class AndroidUpdateInstaller implements Installer {
 
     /** Called only by a native user tap; returning from Settings has no submission side effect. */
     @Override public synchronized void openPermissionSettings() throws Failure {
+        requireNoRemoval();
         Activity activity = requireForeground();
         forgetConfirmation();
         try {
@@ -65,6 +69,7 @@ public final class AndroidUpdateInstaller implements Installer {
     }
 
     @Override public synchronized int commit(Candidate candidate) throws Failure {
+        requireNoRemoval();
         Activity activity = requireForeground();
         if (store.get() != null) throw new Failure("install_pending", "An installation is pending. Cancel it before trying again.");
         if (!allowed()) throw new Failure("install_permission", "Allow this app to install updates, then tap Install again.");
@@ -100,6 +105,7 @@ public final class AndroidUpdateInstaller implements Installer {
 
     /** Native explicit continuation only. Pending Intent objects never enter persistent storage. */
     @Override public synchronized void confirm(int sessionId) throws Failure {
+        requireNoRemoval();
         Activity activity = requireForeground();
         requireRecorded(sessionId);
         if (pending == null || pendingSession == null || pendingSession != sessionId) {
@@ -111,8 +117,9 @@ public final class AndroidUpdateInstaller implements Installer {
     }
 
     @Override public synchronized InstallEvent reconcile(Integer sessionId) throws Failure {
+        requireNoRemoval();
         Integer recorded = store.get();
-        if (recorded == null || !recorded.equals(sessionId)) return new InstallEvent(-1, "idle", "");
+        if (recorded == null || (sessionId != null && !recorded.equals(sessionId))) return new InstallEvent(-1, "idle", "");
         try {
             long currentCode = platform.installedCode();
             SessionState session = platform.session(recorded);
@@ -121,8 +128,7 @@ public final class AndroidUpdateInstaller implements Installer {
                 return new InstallEvent(recorded, "idle", "Check for updates to see the installed version.");
             }
             if (!session.sealed) {
-                platform.abandon(recorded);
-                if (platform.session(recorded) != null) throw failed();
+                abandonAndVerify(recorded, true);
                 store.set(null); forgetConfirmation();
                 return new InstallEvent(recorded, "idle", "The unfinished installation was cancelled. You can try again.");
             }
@@ -136,10 +142,10 @@ public final class AndroidUpdateInstaller implements Installer {
     }
 
     @Override public synchronized void cancelOwned(int sessionId) throws Failure {
+        requireNoRemoval();
         requireRecorded(sessionId);
         try {
-            if (platform.session(sessionId) != null) platform.abandon(sessionId);
-            if (platform.session(sessionId) != null) throw failed();
+            abandonAndVerify(sessionId, true);
             store.set(null); forgetConfirmation();
         } catch (RuntimeException failure) { throw failed(); }
     }
@@ -191,11 +197,43 @@ public final class AndroidUpdateInstaller implements Installer {
         try {
             SessionState state = platform.session(created);
             if (state != null && state.sealed) return;
-            if (state != null) platform.abandon(created);
-            if (platform.session(created) != null) throw failed();
+            abandonAndVerify(created, created.equals(store.get()));
             if (created.equals(store.get())) store.set(null);
             forgetConfirmation();
         } catch (RuntimeException failure) { throw failed(); }
+    }
+    /** Android removes sessions asynchronously. Only the worker waits, without holding this monitor. */
+    private void abandonAndVerify(int id, boolean recorded) throws Failure {
+        if (Looper.myLooper() == Looper.getMainLooper()) throw failed();
+        requireNoRemoval();
+        removalInProgress = true;
+        try {
+            if (recorded) requireRecorded(id);
+            if (platform.session(id) != null) platform.abandon(id);
+            long started = SystemClock.elapsedRealtime();
+            while (true) {
+                if (recorded) {
+                    Integer owner = store.get();
+                    // A legitimate terminal callback may clear this ID while the monitor is
+                    // released. Still verify absence; a different ID always stops this cleanup.
+                    if (owner != null && owner != id) throw new Failure("wrong_session", "This installation is no longer pending.");
+                }
+                if (platform.session(id) == null) return;
+                long remaining = 2000 - (SystemClock.elapsedRealtime() - started);
+                if (remaining <= 0) throw failed();
+                try {
+                    // Release the monitor so the UI receiver can record a result. Mutating operations
+                    // remain serialized by removalInProgress; ownership is checked after each wake.
+                    wait(Math.min(25, remaining));
+                } catch (InterruptedException interrupted) {
+                    Thread.currentThread().interrupt();
+                    throw failed();
+                }
+            }
+        } finally { removalInProgress = false; }
+    }
+    private void requireNoRemoval() throws Failure {
+        if (removalInProgress) throw new Failure("install_pending", "Installation cleanup is pending. Please wait.");
     }
     private void forgetConfirmation() { pending = null; pendingSession = null; }
     private static Uri sessionUri(int sessionId) { return Uri.parse("blockops-update:" + sessionId); }

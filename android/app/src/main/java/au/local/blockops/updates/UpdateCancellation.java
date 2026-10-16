@@ -5,6 +5,7 @@ import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
+import java.util.concurrent.Executor;
 
 /** One operation's cancellation token and owned, interruptible resources. */
 public final class UpdateCancellation {
@@ -27,6 +28,11 @@ public final class UpdateCancellation {
     }
 
     public void cancel() {
+        cancel(Runnable::run);
+    }
+
+    /** Revoke synchronously; potentially blocking socket closes run on the cleanup executor. */
+    public void cancel(Executor cleanup) {
         List<Closeable> pending;
         synchronized (this) {
             if (cancelled) return;
@@ -34,7 +40,9 @@ public final class UpdateCancellation {
             pending = new ArrayList<>(resources);
             resources.clear();
         }
-        for (Closeable resource : pending) close(resource);
+        if (!pending.isEmpty()) cleanup.execute(() -> {
+            for (Closeable resource : pending) close(resource);
+        });
     }
 
     private static void close(Closeable resource) {

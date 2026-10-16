@@ -7,7 +7,7 @@ import { homedir } from 'node:os';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 const suite = process.argv[2];
-if (suite !== 'installer') throw new Error('Expected installer suite');
+if (!['installer', 'controller'].includes(suite)) throw new Error('Expected installer or controller suite');
 for (const key of ['ANDROID_TEST_SERIAL', 'ANDROID_TEST_AVD', 'ANDROID_TEST_ARTIFACTS']) {
   if (!process.env[key]) throw new Error(`Explicit ${key} is required`);
 }
@@ -81,8 +81,10 @@ const output = mutate(['shell', 'am', 'instrument', '-w', '-r', '-e', 'suite', s
 await writeFile(join(artifacts, 'instrumentation.log'), output);
 process.stdout.write(output);
 const names = ['parseGithubJson', 'parseActualApk', 'permissionRequiresSecondTap', 'wrongSessionIgnored',
-  'pendingActionForegroundOnly', 'restartDoesNotRecommit', 'cancelOnlyOwnedSession', 'realOwnedSessions'];
+  'pendingActionForegroundOnly', 'restartDoesNotRecommit', 'cancelOnlyOwnedSession', 'sessionRemovalTiming',
+  'delayedSessionRemoval', 'removalCallbacksRemainResponsive', 'realOwnedSessions'];
+if (suite === 'controller') names.push('discoverOwnedSession', 'durablePreferences', 'nativeDialog', 'applicationLifecycle');
 if (output.includes('FAIL ') || !output.includes('INSTRUMENTATION_CODE: -1')
-    || names.some(name => !output.includes(`PASS ${name}`)) || !output.includes('PASS installer')) {
+    || names.some(name => !output.includes(`PASS ${name}`)) || !output.includes(`PASS ${suite}`)) {
   throw new Error('Instrumentation did not pass every required case');
 }

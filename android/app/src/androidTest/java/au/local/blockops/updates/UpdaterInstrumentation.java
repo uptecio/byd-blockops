@@ -13,12 +13,14 @@ public final class UpdaterInstrumentation extends Instrumentation {
     @Override public void onStart() {
         Bundle result = new Bundle();
         try {
-            if (!"installer".equals(arguments.getString("suite"))) throw new AssertionError("Unknown suite");
-            new UpdaterAndroidTest(this).run();
-            result.putString("stream", "PASS installer\n");
+            String suite=arguments.getString("suite");
+            if (!"installer".equals(suite)&&!"controller".equals(suite)) throw new AssertionError("Unknown suite");
+            UpdaterAndroidTest tests=new UpdaterAndroidTest(this);tests.run();
+            if("controller".equals(suite))tests.controller();
+            result.putString("stream", "PASS "+suite+"\n");
             finish(-1, result);
         } catch (Throwable failure) {
-            result.putString("stream", "FAIL installer: " + android.util.Log.getStackTraceString(failure));
+            result.putString("stream", "FAIL "+arguments.getString("suite")+": " + android.util.Log.getStackTraceString(failure));
             finish(0, result);
         }
     }

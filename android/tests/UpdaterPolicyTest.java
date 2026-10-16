@@ -200,14 +200,14 @@ public final class UpdaterPolicyTest {
     private static void boundedPublicState() {
         Snapshot snapshot = new Snapshot(1, "available", "0.10.0", "0.11.0", 1024, 0,
                 "Ready\u0000\u202e" + "x".repeat(10000), false);
-        assert snapshot.message.length() <= 1024;
+        assert snapshot.message.length() <= 240;
         assert snapshot.message.startsWith("Ready  ");
         assert snapshot.availableVersion.equals("0.11.0");
         Snapshot idle = new Snapshot(2, "idle", "0.10.0", null, 0, 0, null, false);
         assert idle.availableVersion == null;
         assert idle.message.equals("");
         UpdatePorts.Failure failure = new UpdatePorts.Failure("rate_limited", "Wait\n" + "x".repeat(10000), 12345L);
-        assert failure.getMessage().length() <= 1024;
+        assert failure.getMessage().length() <= 240;
         assert !failure.getMessage().contains("\n");
         assert failure.code.equals("rate_limited");
         assert failure.serverRetryUntilWallMillis == 12345L;

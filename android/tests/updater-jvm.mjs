@@ -6,6 +6,10 @@ import { fileURLToPath } from 'node:url';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 const suites = {
+  controller: {
+    sources: ['UpdateModel', 'UpdatePolicy', 'UpdatePorts', 'UpdateCancellation', 'UpdateController'],
+    test: 'UpdaterControllerTest',
+  },
   policy: {
     sources: ['UpdateModel', 'UpdatePolicy', 'UpdatePorts', 'UpdateCancellation'],
     test: 'UpdaterPolicyTest',

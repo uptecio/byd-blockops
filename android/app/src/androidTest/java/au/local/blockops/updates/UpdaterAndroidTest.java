@@ -38,7 +38,159 @@ public final class UpdaterAndroidTest {
         pendingActionForegroundOnly(); runner.passed("pendingActionForegroundOnly");
         restartDoesNotRecommit(); runner.passed("restartDoesNotRecommit");
         cancelOnlyOwnedSession(); runner.passed("cancelOnlyOwnedSession");
+        sessionRemovalTiming();runner.passed("sessionRemovalTiming");
+        delayedSessionRemoval();runner.passed("delayedSessionRemoval");
+        removalCallbacksRemainResponsive();runner.passed("removalCallbacksRemainResponsive");
         realOwnedSessions(); runner.passed("realOwnedSessions");
+    }
+    private void sessionRemovalTiming() throws Exception {
+        AndroidUpdateInstaller.NativePlatform platform=new AndroidUpdateInstaller.NativePlatform(context);
+        for(int attempt=0;attempt<5;attempt++){
+            int id=platform.create(3);long start=SystemClock.elapsedRealtime();
+            try{
+                platform.abandon(id);boolean initiallyPresent=platform.session(id)!=null;
+                while(platform.session(id)!=null&&SystemClock.elapsedRealtime()-start<2000)SystemClock.sleep(25);
+                check(platform.session(id)==null,"Owned diagnostic session still present");
+                runner.passed("sessionRemovalTiming id="+id+" initiallyPresent="+initiallyPresent+" elapsedMs="+(SystemClock.elapsedRealtime()-start));
+            }finally{if(platform.session(id)!=null)platform.abandon(id);}
+        }
+    }
+    private void delayedSessionRemoval() throws Exception {
+        Rig cancel=new Rig();int id=cancel.installer.commit(fixture());int unrelated=cancel.platform.create(3);
+        cancel.platform.removalQueries=3;cancel.installer.cancelOwned(id);
+        check(cancel.store.id==null&&!cancel.platform.sessions.containsKey(id)&&cancel.platform.sessions.containsKey(unrelated),"Delayed cancellation lost ownership/isolation");
+        Rig recover=new Rig();int writing=recover.platform.create(3);recover.store.set(writing);recover.platform.removalQueries=3;
+        check(recover.installer.reconcile(null).phase.equals("idle")&&recover.store.id==null,"Delayed recovery failed");
+        Rig failed=new Rig();int pending=failed.installer.commit(fixture());failed.platform.ignoreAbandon=true;
+        long started=SystemClock.elapsedRealtime();rejected(()->failed.installer.cancelOwned(pending));
+        check(failed.store.id==pending&&SystemClock.elapsedRealtime()-started<2500,"Unbounded failure or ownership cleared before removal");
+        rejected(()->failed.installer.commit(fixture()));check(failed.platform.commitCalls==1,"Failure permitted second submit");
+    }
+    private void removalCallbacksRemainResponsive() throws Exception {
+        Rig terminal=new Rig();int id=terminal.installer.commit(fixture());terminal.platform.ignoreAbandon=true;
+        Throwable[] outcome={null};Thread waiting=new Thread(()->{try{terminal.installer.cancelOwned(id);}catch(Throwable failure){outcome[0]=failure;}});
+        waiting.start();check(terminal.platform.abandonStarted.await(1,java.util.concurrent.TimeUnit.SECONDS),"Removal did not start");
+        long before=SystemClock.elapsedRealtime();runner.runOnMainSync(()->{synchronized(terminal.installer){
+            terminal.platform.sessions.remove(id);
+            try{terminal.installer.handleStatus(status(id,PackageInstaller.STATUS_SUCCESS));}catch(Exception failure){throw new AssertionError(failure);}
+        }});
+        check(SystemClock.elapsedRealtime()-before<500,"Removal blocked UI callback");waiting.join(2500);
+        check(!waiting.isAlive()&&outcome[0]==null&&terminal.store.id==null&&terminal.events.size()==1,"Terminal callback became cleanup error");
+
+        Rig replaced=new Rig();int old=replaced.installer.commit(fixture());int replacement=replaced.platform.create(3);replaced.platform.ignoreAbandon=true;
+        Throwable[] changed={null};Thread replacing=new Thread(()->{try{replaced.installer.cancelOwned(old);}catch(Throwable failure){changed[0]=failure;}});
+        replacing.start();check(replaced.platform.abandonStarted.await(1,java.util.concurrent.TimeUnit.SECONDS),"Replacement wait did not start");
+        synchronized(replaced.installer){replaced.store.id=replacement;}replacing.join(2500);
+        check(!replacing.isAlive()&&changed[0]!=null&&replaced.store.id==replacement&&replaced.platform.sessions.containsKey(replacement),"Changed ownership cleared/abandoned replacement");
+
+        Rig interrupted=new Rig();int owned=interrupted.installer.commit(fixture());interrupted.platform.ignoreAbandon=true;
+        boolean[] retainedInterrupt={false};Thread interrupting=new Thread(()->{try{interrupted.installer.cancelOwned(owned);}catch(Exception expected){retainedInterrupt[0]=Thread.currentThread().isInterrupted();}});
+        interrupting.start();check(interrupted.platform.abandonStarted.await(1,java.util.concurrent.TimeUnit.SECONDS),"Interrupt wait did not start");
+        interrupting.interrupt();interrupting.join(1000);check(!interrupting.isAlive()&&retainedInterrupt[0]&&interrupted.store.id==owned,"Interrupted removal lost ownership/interruption");
+    }
+    public void controller() throws Exception {
+        try{Class.forName("au.local.blockops.updates.UpdateDialog");}
+        catch(ClassNotFoundException missing){throw new AssertionError("Missing native updater dialog",missing);}
+        discoverOwnedSession();runner.passed("discoverOwnedSession");
+        durablePreferences();runner.passed("durablePreferences");
+        nativeDialog();runner.passed("nativeDialog");
+        applicationLifecycle();runner.passed("applicationLifecycle");
+    }
+    private void durablePreferences() throws Exception {
+        Context isolated=new ContextWrapper(context){@Override public android.content.SharedPreferences getSharedPreferences(String name,int mode){
+            return super.getSharedPreferences("test-task4-"+name,mode);}};
+        android.content.SharedPreferences raw=isolated.getSharedPreferences("block-ops-updater-v1",0);raw.edit().clear().commit();
+        try{
+            UpdatePreferences prefs=new UpdatePreferences(isolated);Release release=fixture().release;
+            prefs.set(17);prefs.save(new SavedState(100,200,300,release));
+            UpdatePreferences reopened=new UpdatePreferences(isolated);
+            check(reopened.get()==17&&reopened.load().cachedRelease.asset.id==release.asset.id,"State write lost session/release");
+            reopened.set(null);check(reopened.load().lastSuccessWallMillis==100&&reopened.get()==null,"Session write lost state");
+            raw.edit().putString("release","corrupt").commit();
+            check(reopened.load().cachedRelease==null,"Corrupt cache trusted");
+        }finally{raw.edit().clear().commit();}
+    }
+    private void nativeDialog() throws Exception {
+        Activity activity=runner.startActivitySync(new Intent(context,au.local.blockops.MainActivity.class).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));
+        ControllerRig rig=new ControllerRig();
+        final Throwable[] problem={null};
+        runner.runOnMainSync(()->{try{
+            rig.drain();rig.controller.home(true);rig.controller.foreground(true);rig.controller.check(true);rig.drain();
+            UpdateDialog presentation=new UpdateDialog(activity,rig.controller);presentation.show();
+            java.lang.reflect.Field field=UpdateDialog.class.getDeclaredField("dialog");field.setAccessible(true);
+            android.app.AlertDialog dialog=(android.app.AlertDialog)field.get(presentation);
+            String text=((android.widget.TextView)dialog.findViewById(android.R.id.message)).getText().toString();
+            check(text.contains("0.10.0")&&text.contains("0.11.0")&&text.contains("100"),"Missing version/size text");
+            dialog.getButton(android.content.DialogInterface.BUTTON_NEGATIVE).performClick();rig.drain();check(rig.controller.snapshot().dismissed,"Later did not dismiss session offer");
+            presentation.show();presentation.render(new Snapshot(50,"downloading","0.10.0","0.11.0",100,25,"Downloading",false));
+            text=((android.widget.TextView)dialog.findViewById(android.R.id.message)).getText().toString();
+            check(text.contains("25")&&text.contains("100")&&!dialog.getButton(-1).isEnabled(),"Progress or duplicate action wrong");
+            rig.now+=30000;rig.controller.download();rig.drain();rig.allowed=false;rig.controller.install();rig.drain();presentation.render(rig.controller.snapshot());
+            text=((android.widget.TextView)dialog.findViewById(android.R.id.message)).getText().toString();
+            check(text.contains("Settings")&&text.contains("Install"),"Permission explanation missing");
+            dialog.getButton(-1).performClick();rig.drain();check(rig.settings==1&&rig.commits==0,"Settings action submitted install");
+            rig.allowed=true;rig.controller.foreground(false);rig.controller.foreground(true);rig.drain();presentation.render(rig.controller.snapshot());
+            check(rig.commits==0,"Permission return auto installed");dialog.getButton(-1).performClick();rig.drain();check(rig.commits==1,"Second Install tap did not submit");
+            presentation.render(rig.controller.snapshot());check(!dialog.getButton(-1).isEnabled(),"Duplicate Install enabled while waiting");
+            rig.controller.activityDetached();rig.events.accept(new InstallEvent(7,"confirmation","Confirm installation"));rig.drain();
+            check(rig.confirms==0,"Lost Activity consent launched confirmation");rig.controller.foreground(true);presentation.render(rig.controller.snapshot());
+            check(dialog.getButton(-1).isEnabled(),"Fresh native confirmation action missing");dialog.getButton(-1).performClick();rig.drain();
+            check(rig.confirms==1&&rig.commits==1,"Fresh tap resubmitted or failed to confirm");
+            presentation.detach();check(!dialog.isShowing(),"Detach kept old window");rig.controller.close();rig.drain();
+        }catch(Throwable failure){problem[0]=failure;}finally{activity.finish();}});
+        if(problem[0]!=null)throw new AssertionError(problem[0]);
+    }
+    private void applicationLifecycle() throws Exception {
+        final Throwable[] problem={null};runner.runOnMainSync(()->{try{
+            ControllerRig rig=new ControllerRig();TestApplication app=new TestApplication(rig);app.attach(context);app.onCreate();
+            Activity first=new Activity(){@Override public boolean isChangingConfigurations(){return true;}};
+            Activity second=new Activity();int[] observed={0};AutoCloseable subscription=app.observeUpdates(s->observed[0]++);
+            rig.drain();app.onActivityStarted(first);app.onActivityResumed(first);app.setHome(first,true);rig.drain();
+            check(app.eligibleActivity()==first,"Home activity not eligible");rig.controller.check(true);rig.drain();rig.now+=30000;rig.controller.download();
+            app.onActivityPaused(first);check(app.eligibleActivity()==null,"Paused activity retained for launch");
+            app.onActivityStopped(first);app.onActivityDestroyed(first);
+            app.onActivityStarted(second);app.onActivityResumed(second);app.setHome(second,true);rig.drain();
+            check(rig.downloads==1&&rig.controller.snapshot().phase.equals("ready"),"Recreation cancelled transfer");
+            check(app.eligibleActivity()==second,"Replacement activity not eligible");
+            rig.controller.install();rig.drain();app.onActivityPaused(first);app.onActivityDestroyed(first);
+            rig.events.accept(new InstallEvent(7,"confirmation","Confirm"));rig.drain();
+            check(rig.confirms==1,"Late old Activity callback revoked replacement consent");
+            check(observed[0]>0,"Observer received no state");int count=observed[0];subscription.close();rig.controller.dismiss();rig.drain();check(observed[0]==count,"Detached observer called");
+            app.onActivityPaused(second);app.onActivityStopped(second);check(app.eligibleActivity()==null,"Background activity eligible");
+            rig.controller.close();rig.drain();app.onTerminate();
+        }catch(Throwable failure){problem[0]=failure;}});if(problem[0]!=null)throw new AssertionError(problem[0]);
+    }
+    static final class TestApplication extends au.local.blockops.BlockOpsApplication {
+        final ControllerRig rig;TestApplication(ControllerRig rig){this.rig=rig;}
+        void attach(Context context){attachBaseContext(context);}
+        @Override protected UpdateController createUpdater(){rig.listener=this::dispatchUpdate;return rig.controller;}
+    }
+    static final class ControllerRig implements UpdatePorts.Installer,UpdatePorts.CandidateStore {
+        long now=1800000000000L;int downloads,commits,settings,confirms;boolean allowed=true;
+        java.util.function.Consumer<InstallEvent> events;UpdatePorts.Listener listener=s->{};
+        final java.util.ArrayDeque<Runnable> ui=new java.util.ArrayDeque<>(),worker=new java.util.ArrayDeque<>();
+        final Release release=new Release(1,"v0.11.0",new Version(0,11,0),new Asset(1,"block-ops-test.apk",
+            URI.create("https://github.com/uptecio/byd-blockops/releases/download/v0.11.0/block-ops-test.apk"),100,"sha256:"+zeros(64)),zeros(64),"");
+        Candidate candidate;
+        final UpdateController controller=new UpdateController(new InstalledApp("au.local.blockops","0.10.0",14,SIGNER,36),t->release,this,
+            (c,i)->new ApkIdentity(i.packageName,"0.11.0",15,i.signerSha256,26),this,new UpdatePorts.StateStore(){
+                public SavedState load(){return new SavedState(0,0,0,null);}public void save(SavedState s){}},
+            new UpdatePorts.Clock(){public long wallMillis(){return now;}public long elapsedMillis(){return now;}},worker::add,ui::add,s->listener.onState(s),worker::add);
+        void drain(){for(int i=0;i<20&&(!ui.isEmpty()||!worker.isEmpty());i++){while(!ui.isEmpty())ui.remove().run();while(!worker.isEmpty())worker.remove().run();}}
+        public Candidate load(){return candidate;}public Candidate download(Release r,UpdateCancellation t,UpdatePorts.Progress p)throws UpdatePorts.Failure{t.check();downloads++;return candidate=new Candidate(new File("test"),r);}
+        public void forget(){candidate=null;}public void deletePartial(){}
+        public boolean allowed(){return allowed;}public void openPermissionSettings(){settings++;}public int commit(Candidate c){commits++;return 7;}
+        public void confirm(int id){confirms++;}public InstallEvent reconcile(Integer id){return new InstallEvent(-1,"idle","");}public void cancelOwned(int id){}
+        public void setListener(java.util.function.Consumer<InstallEvent> l){events=l;}
+    }
+    private void discoverOwnedSession() throws Exception {
+        Rig empty=new Rig();check(empty.installer.reconcile(null).phase.equals("idle"),"No-record discovery failed");
+        Rig sealed=new Rig();int id=sealed.installer.commit(fixture());
+        check(sealed.installer.reconcile(null).phase.equals("installing"),"Null did not discover owned sealed session");
+        check(sealed.installer.reconcile(id+1).phase.equals("idle")&&sealed.store.id==id,"Wrong ID changed owned session");
+        Rig unsealed=new Rig();int writing=unsealed.platform.create(3);unsealed.store.set(writing);
+        check(unsealed.installer.reconcile(null).phase.equals("idle")&&unsealed.store.id==null
+            &&!unsealed.platform.sessions.containsKey(writing),"Null did not reconcile owned unsealed session");
     }
     // Returning from permission Settings may never submit a session without another install call.
     private void permissionRequiresSecondTap() throws Exception {
@@ -63,6 +215,8 @@ public final class UpdaterAndroidTest {
         Rig background = new Rig(); background.platform.afterWrite = () -> background.foreground = null;
         rejected(() -> background.installer.commit(fixture()));
         check(background.platform.commitCalls == 0 && background.store.id == null, "Backgrounded staging committed");
+        Rig updated = new Rig();updated.platform.afterWrite=()->updated.platform.currentCode=14;
+        rejected(()->updated.installer.commit(fixture()));check(updated.platform.commitCalls==0&&updated.store.id==null,"Changed installed version submitted a second update");
         Rig persistence = new Rig(); persistence.store.rejectSave = true;
         rejected(() -> persistence.installer.commit(fixture()));
         check(persistence.platform.commitCalls == 0 && persistence.platform.sessions.isEmpty(), "Failed durable write submitted/leaked a session");
@@ -215,7 +369,9 @@ public final class UpdaterAndroidTest {
     private static final class ScriptedPlatform implements AndroidUpdateInstaller.Platform {
         final MemorySessionStore store;
         final Map<Integer, AndroidUpdateInstaller.SessionState> sessions = new HashMap<>();
-        int next = 100, commitCalls, launches;
+        int next = 100, commitCalls, launches, removalQueries;long currentCode=13;
+        Integer removing;
+        final java.util.concurrent.CountDownLatch abandonStarted=new java.util.concurrent.CountDownLatch(1);
         boolean allowed = true, recordedBeforeSubmit, throwAfterSubmit, ignoreAbandon;
         Intent lastIntent;
         Runnable afterWrite = () -> {};
@@ -228,9 +384,12 @@ public final class UpdaterAndroidTest {
             commitCalls++; sessions.put(id, new AndroidUpdateInstaller.SessionState(true));
             if (throwAfterSubmit) throw new IllegalStateException("Ambiguous platform failure");
         }
-        public AndroidUpdateInstaller.SessionState session(int id) { return sessions.get(id); }
-        public void abandon(int id) { if (!ignoreAbandon) sessions.remove(id); }
-        public long installedCode() { return 13; }
+        public AndroidUpdateInstaller.SessionState session(int id) {
+            if(removing!=null&&removing==id&&--removalQueries<=0){sessions.remove(id);removing=null;}
+            return sessions.get(id);
+        }
+        public void abandon(int id) { abandonStarted.countDown();if (!ignoreAbandon){if(removalQueries>0)removing=id;else sessions.remove(id);} }
+        public long installedCode() { return currentCode; }
         public void launch(Activity activity, Intent intent) { launches++; lastIntent = intent; }
     }
     private Activity activity() {
