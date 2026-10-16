@@ -10,7 +10,7 @@ export async function observeRange(page) {
   const proto = await cdp.send('Runtime.evaluate', { expression: 'Object.prototype', objectGroup: group });
   const objects = await cdp.send('Runtime.queryObjects', { prototypeObjectId: proto.result.objectId, objectGroup: group });
   const found = await cdp.send('Runtime.callFunctionOn', { objectId: objects.objects.objectId, objectGroup: group,
-    functionDeclaration: 'function(){return this.find(o=>typeof o?.getActors==="function"&&Array.isArray(o.bots)&&o.player&&o.hasRound);}' });
+    functionDeclaration: 'function(){return this.find(o=>o&&typeof o.getActors==="function"&&Array.isArray(o.bots)&&o.player&&o.hasRound);}' });
   assert.ok(found.result.objectId, 'passive range observer finds actual arena');
   return { async read() {
     const result = await cdp.send('Runtime.callFunctionOn', { objectId: found.result.objectId, returnByValue: true,
@@ -18,8 +18,8 @@ export async function observeRange(page) {
         kind:this.modeState.kind,mapId:this.settings.mapId,modeId:this.settings.modeId,
         player:{x:this.player.x,y:this.player.jump,z:this.player.z,yaw:this.yaw,pitch:this.pitch},camera:this.camera.position.toArray(),
         weaponId:this.weapon.id,ammo:this.weaponState.ammo,reserve:this.weaponState.reserve,reload:this.weaponState.reloadRemaining,
-        powers:{...this.soloPowers},targets:r?.state.targets.map(t=>({...t})),stats:{...this.matchView.range},
-        memory:{...this.renderer.info.memory},feedback:this.scene.getObjectByName('Range damage labels')?.children.length||0,
+        powers:{...this.soloPowers},targets:r&&r.state.targets.map(t=>({...t})),stats:{...this.matchView.range},
+        memory:{...this.renderer.info.memory},feedback:(this.scene.getObjectByName('Range damage labels')||{children:[]}).children.length,
         rangeNodes:this.scene.getObjectByName('Range view')?1:0,input:{fire:this.input.fire,move:{...this.input.move}},
         equipment:[...this.player.equipment.owned.values()].map(g=>({weaponId:g.weaponId,ammo:g.ammo,reserve:g.reserve,cooldown:g.cooldown,reload:g.reloadRemaining}))};}` });
     assert.equal(result.exceptionDetails, undefined, 'passive range read succeeds');

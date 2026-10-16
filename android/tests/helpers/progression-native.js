@@ -7,11 +7,13 @@ import { setTimeout as delay } from 'node:timers/promises';
 
 // Raw CDP keeps actual Android visibility/lifecycle behavior. Touch targets use
 // adb taps/swipes; keyboard controls use CDP input, never arena internals.
-export async function nativeProgressionFixture({artifactDir,serverOrigin}={}) {
+export async function nativeProgressionFixture({artifactDir,serverOrigin,networkMode='offline'}={}) {
+  assert.ok(['offline','preserve'].includes(networkMode),'Explicit supported network mode');
   const serial=process.env.ANDROID_TEST_SERIAL,avd=process.env.ANDROID_TEST_AVD;
   assert.match(serial||'',/^emulator-\d+$/,'Explicit owned emulator serial required');assert.ok(avd,'Explicit owned AVD name required');
   const sdk=process.env.ANDROID_SDK_ROOT||process.env.ANDROID_HOME||`${process.env.HOME}/Android/Sdk`,run=promisify(execFile);
-  const command=(...args)=>run(`${sdk}/platform-tools/adb`,['-s',serial,...args],{timeout:120000,maxBuffer:8*1024*1024});
+  const adb=process.env.ADB_BINARY||`${sdk}/platform-tools/adb`;
+  const command=(...args)=>run(adb,['-s',serial,...args],{timeout:120000,maxBuffer:8*1024*1024});
   const shell=(...args)=>command('shell',...args);
   assert.equal((await command('emu','avd','name')).stdout.trim().split('\n')[0].trim(),avd,'Only the named disposable AVD may be changed');
   const errors=[],packets=[];let socket,port,sequence=0;const pending=new Map();
@@ -75,7 +77,7 @@ export async function nativeProgressionFixture({artifactDir,serverOrigin}={}) {
       // Android's WebView CDP capture omits the hardware-composited WebGL layer
       // and can misplace CSS overlays. Observe the real display, like our other
       // native smoke tests, rather than mistaking that capture for game output.
-      const result=await run(`${sdk}/platform-tools/adb`,['-s',serial,'exec-out','screencap','-p'],{encoding:'buffer',timeout:15000,maxBuffer:8*1024*1024});
+      const result=await run(adb,['-s',serial,'exec-out','screencap','-p'],{encoding:'buffer',timeout:15000,maxBuffer:8*1024*1024});
       const bytes=result.stdout;if(options.path)await writeFile(options.path,bytes);return bytes;
     },
   };
@@ -85,7 +87,7 @@ export async function nativeProgressionFixture({artifactDir,serverOrigin}={}) {
       assert.equal(new URL(serverOrigin).protocol,'https:','Native staging requires TLS');
       await shell('svc','wifi','enable');
       await until(async()=>{try{return /^PING .*\([0-9a-f:.]+\)/mi.test((await shell('ping','-c','1','-W','1',new URL(serverOrigin).hostname)).stdout);}catch(error){return /^PING .*\([0-9a-f:.]+\)/mi.test(error.stdout||'');}},'owned TLS staging DNS',30000);
-    }else{await shell('svc','wifi','disable');await shell('svc','data','disable');}
+    }else if(networkMode==='offline'){await shell('svc','wifi','disable');await shell('svc','data','disable');}
     await shell('am','start','-W','-n','au.local.blockops/.MainActivity');
     const pid=(await shell('pidof','au.local.blockops')).stdout.trim();assert.match(pid,/^\d+$/);
     port=Number((await command('forward','tcp:0',`localabstract:webview_devtools_remote_${pid}`)).stdout.trim());assert.ok(port>0,'Unique dynamically allocated CDP forward');
@@ -95,16 +97,16 @@ export async function nativeProgressionFixture({artifactDir,serverOrigin}={}) {
       else if(message.method==='Runtime.exceptionThrown')errors.push(JSON.stringify(message.params.exceptionDetails));
       else if(message.method==='Network.webSocketFrameReceived'){try{packets.push(JSON.parse(message.params.response.payloadData));}catch{}}
     };
-    await send('Runtime.enable');await send('Page.enable');await send('Network.enable');await until(()=>evaluate(()=>document.body?.dataset.mode==='home'),'Home after native start');
+    await send('Runtime.enable');await send('Page.enable');await send('Network.enable');await until(()=>evaluate(()=>document.body&&document.body.dataset.mode==='home'),'Home after native start');
     Object.assign(viewport,await evaluate(()=>({width:innerWidth,height:innerHeight})));
     await evaluate(()=>{
       if(window.__lootObservation)return;const native=requestAnimationFrame.bind(window);let previous;window.__lootObservation={seconds:0};
-      window.requestAnimationFrame=callback=>native(now=>{if(previous!==now){if(previous!==undefined&&document.body?.dataset.mode==='playing')window.__lootObservation.seconds+=Math.min(.05,(now-previous)/1000);previous=now;}callback(now);});
+      window.requestAnimationFrame=callback=>native(now=>{if(previous!==now){if(previous!==undefined&&document.body&&document.body.dataset.mode==='playing')window.__lootObservation.seconds+=Math.min(.05,(now-previous)/1000);previous=now;}callback(now);});
     });
     return page;
   }
   return {
-    attach,packets,
+    attach,packets,detach,
     async identity(){
       const properties={};
       for(const name of ['ro.build.fingerprint','ro.build.version.release','ro.build.version.sdk','ro.product.model','ro.hardware.egl','ro.opengles.version'])properties[name]=(await shell('getprop',name)).stdout.trim();
