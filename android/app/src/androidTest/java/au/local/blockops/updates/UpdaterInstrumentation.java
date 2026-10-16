@@ -14,8 +14,9 @@ public final class UpdaterInstrumentation extends Instrumentation {
         Bundle result = new Bundle();
         try {
             String suite=arguments.getString("suite");
-            if (!"installer".equals(suite)&&!"controller".equals(suite)) throw new AssertionError("Unknown suite");
-            UpdaterAndroidTest tests=new UpdaterAndroidTest(this);tests.run();
+            if (!"installer".equals(suite)&&!"controller".equals(suite)&&!"bridge".equals(suite)) throw new AssertionError("Unknown suite");
+            UpdaterAndroidTest tests=new UpdaterAndroidTest(this);
+            if("bridge".equals(suite))tests.bridge();else tests.run();
             if("controller".equals(suite))tests.controller();
             result.putString("stream", "PASS "+suite+"\n");
             finish(-1, result);

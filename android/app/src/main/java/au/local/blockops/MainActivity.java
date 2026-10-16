@@ -5,6 +5,8 @@ import android.annotation.SuppressLint;
 import android.graphics.Color;
 import android.os.Build;
 import android.os.Bundle;
+import android.os.Handler;
+import android.os.Looper;
 import android.view.DisplayCutout;
 import android.view.Gravity;
 import android.view.View;
@@ -29,10 +31,23 @@ import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.util.HashMap;
 import java.util.Map;
+import au.local.blockops.updates.UpdateBridge;
+import au.local.blockops.updates.UpdateDialog;
+import au.local.blockops.updates.UpdateModel.Snapshot;
 
 public final class MainActivity extends Activity {
     private FrameLayout root;
     private WebView gameView;
+    private UpdateBridge updateBridge;
+    private UpdateDialog updateDialog;
+    private AutoCloseable updateObservation;
+    private boolean updateResumed;
+    private long documentGeneration;
+    private long updateEligibilityGeneration;
+    private final Handler updateMain = new Handler(Looper.getMainLooper());
+    private static final String HOME_ELIGIBLE = "document.body && document.body.dataset.mode==='home'"
+            + " && !document.hidden && document.getElementById('home-screen') && !document.getElementById('home-screen').hidden"
+            + " && !document.querySelector('.modal-screen:not([hidden])')";
 
     @Override
     public void onCreate(Bundle savedInstanceState) {
@@ -78,7 +93,22 @@ public final class MainActivity extends Activity {
         settings.setMixedContentMode(WebSettings.MIXED_CONTENT_NEVER_ALLOW);
         settings.setJavaScriptCanOpenWindowsAutomatically(false);
         settings.setMediaPlaybackRequiresUserGesture(true);
+        final WebView owner = gameView;
+        updateBridge = new UpdateBridge(updateMain::post, command -> updateRequest(owner, command));
+        gameView.addJavascriptInterface(updateBridge, "BlockOpsUpdates");
         gameView.setWebViewClient(new WebViewClient() {
+            @Override
+            public void onPageStarted(WebView view, String url, android.graphics.Bitmap icon) {
+                if (view != gameView) return;
+                boolean replacingDocument = documentGeneration++ > 0;
+                if (updateResumed && replacingDocument) updateApplication().setHome(MainActivity.this, false);
+                detachUpdateDialog();
+            }
+
+            @Override
+            public void onPageFinished(WebView view, String url) {
+                if (view == gameView) requestHomeHandshake();
+            }
             @Override
             public boolean shouldOverrideUrlLoading(WebView view, WebResourceRequest request) {
                 return !"GET".equals(request.getMethod())
@@ -144,8 +174,69 @@ public final class MainActivity extends Activity {
         }
     }
 
+    private BlockOpsApplication updateApplication() { return (BlockOpsApplication)getApplication(); }
+
+    private boolean currentLocalView(WebView view) {
+        return updateResumed && !isFinishing() && !isDestroyed() && view != null && view == gameView
+                && LocalAssetPolicy.mayNavigate(view.getUrl());
+    }
+
+    private void requestHomeHandshake() {
+        if (!currentLocalView(gameView)) return;
+        gameView.evaluateJavascript("if(typeof window.receiveBlockOpsUpdate==='function'){BlockOpsUpdates.homeState(("
+                + HOME_ELIGIBLE + ")?'home':'hidden');}", null);
+    }
+
+    private void updateRequest(WebView view, String command) {
+        if (!currentLocalView(view)) return;
+        if ("hidden".equals(command)) {
+            updateEligibilityGeneration++;
+            updateApplication().setHome(this, false); detachUpdateDialog(); return;
+        }
+        final long generation = documentGeneration;
+        final long eligibility = updateEligibilityGeneration;
+        // Read the current DOM for every action: a queued Home report cannot authorize a later overlay/mode.
+        String probe = "(function(){if (!(" + HOME_ELIGIBLE + ")) return false;"
+                + ("open".equals(command) ? "if(typeof window.pauseGame==='function')window.pauseGame();" : "")
+                + "return true;})()";
+        view.evaluateJavascript(probe, result -> {
+            if (!currentLocalView(view) || generation != documentGeneration || eligibility != updateEligibilityGeneration) return;
+            boolean home = "true".equals(result);
+            updateApplication().setHome(this, home);
+            if (!home) { detachUpdateDialog(); return; }
+            if ("check".equals(command)) updateApplication().updater().check(true);
+            else if ("open".equals(command)) {
+                if (updateDialog == null) updateDialog = new UpdateDialog(this, updateApplication().updater());
+                updateDialog.show();
+            }
+            // Handshake runs only after the callback exists, including same-revision page reloads.
+            publishUpdate(updateApplication().updater().snapshot());
+        });
+    }
+
+    private void publishUpdate(Snapshot state) {
+        if (!currentLocalView(gameView)) return;
+        gameView.evaluateJavascript(UpdateBridge.script(state), null);
+        if (updateDialog != null) updateDialog.render(state);
+    }
+
+    private void detachUpdateDialog() {
+        if (updateDialog != null) { updateDialog.detach(); updateDialog = null; }
+    }
+
+    private void detachUpdaterPresentation() {
+        detachUpdateDialog();
+        if (updateObservation != null) {
+            try { updateObservation.close(); } catch (Exception ignored) { /* Already detached. */ }
+            updateObservation = null;
+        }
+    }
+
     @Override
     protected void onPause() {
+        updateResumed = false;
+        updateEligibilityGeneration++;
+        detachUpdaterPresentation();
         pauseGame();
         // onPause suspends rendering, not JavaScript. Do not pauseTimers here:
         // the queued pauseGame evaluation must still be able to clear input.
@@ -156,7 +247,14 @@ public final class MainActivity extends Activity {
     @Override
     protected void onResume() {
         super.onResume();
+        updateResumed = true;
         if (gameView != null) gameView.onResume();
+        // Application.onActivityResumed runs after this callback. Handshake follows it on main.
+        updateMain.post(() -> {
+            if (!updateResumed || gameView == null || isDestroyed()) return;
+            if (updateObservation == null) updateObservation = updateApplication().observeUpdates(this::publishUpdate);
+            requestHomeHandshake();
+        });
         hideSystemBars();
     }
 
@@ -193,7 +291,11 @@ public final class MainActivity extends Activity {
     }
 
     private void showFailure(String message) {
+        documentGeneration++;
+        if (updateResumed) updateApplication().setHome(this, false);
+        detachUpdaterPresentation();
         if (gameView != null) {
+            gameView.removeJavascriptInterface("BlockOpsUpdates");
             root.removeView(gameView);
             gameView.destroy();
             gameView = null;
@@ -218,7 +320,11 @@ public final class MainActivity extends Activity {
 
     @Override
     protected void onDestroy() {
+        updateResumed = false;
+        documentGeneration++;
+        detachUpdaterPresentation();
         if (gameView != null) {
+            gameView.removeJavascriptInterface("BlockOpsUpdates");
             root.removeView(gameView);
             gameView.destroy();
             gameView = null;

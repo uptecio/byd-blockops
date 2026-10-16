@@ -7,15 +7,15 @@ import { homedir } from 'node:os';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 const suite = process.argv[2];
-if (!['installer', 'controller'].includes(suite)) throw new Error('Expected installer or controller suite');
+if (!['installer', 'controller', 'bridge'].includes(suite)) throw new Error('Expected installer, controller or bridge suite');
 for (const key of ['ANDROID_TEST_SERIAL', 'ANDROID_TEST_AVD', 'ANDROID_TEST_ARTIFACTS']) {
   if (!process.env[key]) throw new Error(`Explicit ${key} is required`);
 }
 const serial = process.env.ANDROID_TEST_SERIAL;
 const avd = process.env.ANDROID_TEST_AVD;
-if (serial !== 'emulator-5580' || avd !== 'bydgame_updater_api36') {
-  throw new Error('Only the owned API36 updater emulator is supported');
-}
+const api = serial === 'emulator-5580' && avd === 'bydgame_updater_api36' ? '36'
+  : suite === 'bridge' && serial === 'emulator-5584' && avd === 'bydgame_updater_api26_google' ? '26' : null;
+if (!api) throw new Error('Only the owned updater emulators are supported (API26 bridge only)');
 const artifacts = resolve(process.env.ANDROID_TEST_ARTIFACTS);
 if (!artifacts.startsWith(join(root, 'artifacts') + sep)) throw new Error('Artifacts must be inside this worktree/artifacts');
 await mkdir(artifacts, { recursive: true });
@@ -34,9 +34,9 @@ function run(command, args, options = {}) {
 }
 function identity() {
   const name = run(adb, ['-s', serial, 'emu', 'avd', 'name']).replace(/\r/g, '').split('\n')[0];
-  const api = run(adb, ['-s', serial, 'shell', 'getprop', 'ro.build.version.sdk']).trim();
+  const actualApi = run(adb, ['-s', serial, 'shell', 'getprop', 'ro.build.version.sdk']).trim();
   const boot = run(adb, ['-s', serial, 'shell', 'getprop', 'sys.boot_completed']).trim();
-  if (name !== avd || api !== '36' || boot !== '1') throw new Error(`Owned device identity mismatch: ${name}, API ${api}, boot ${boot}`);
+  if (name !== avd || actualApi !== api || boot !== '1') throw new Error(`Owned device identity mismatch: ${name}, API ${actualApi}, boot ${boot}`);
   return { serial, avd: name, api, fingerprint: run(adb, ['-s', serial, 'shell', 'getprop', 'ro.build.fingerprint']).trim() };
 }
 function mutate(args) {
@@ -80,7 +80,7 @@ const output = mutate(['shell', 'am', 'instrument', '-w', '-r', '-e', 'suite', s
   'au.local.blockops.test/au.local.blockops.updates.UpdaterInstrumentation']);
 await writeFile(join(artifacts, 'instrumentation.log'), output);
 process.stdout.write(output);
-const names = ['parseGithubJson', 'parseActualApk', 'permissionRequiresSecondTap', 'wrongSessionIgnored',
+const names = suite === 'bridge' ? ['threeCommandBridge', 'bridgeHomeAndEncoding', 'bridgeGates', 'bridgeLateCallback'] : ['parseGithubJson', 'parseActualApk', 'permissionRequiresSecondTap', 'wrongSessionIgnored',
   'pendingActionForegroundOnly', 'restartDoesNotRecommit', 'cancelOnlyOwnedSession', 'sessionRemovalTiming',
   'delayedSessionRemoval', 'removalCallbacksRemainResponsive', 'realOwnedSessions'];
 if (suite === 'controller') names.push('discoverOwnedSession', 'durablePreferences', 'nativeDialog', 'applicationLifecycle',

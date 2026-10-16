@@ -1,3 +1,4 @@
+import { entriesObject } from './entries-object.js';
 import * as THREE from 'three';
 import { createAvatarModel } from './avatar.js';
 import { disposeModel } from './game.js';
@@ -96,7 +97,7 @@ export class OnlineArena {
     game.matchView = {
       mapId: room.mapId, modeId: room.modeId, timeLeft: room.timeLeft, ended: room.phase === 'ended',
       winnerId: room.winnerId, winnerName: room.winnerName, winnerTeamId: room.winnerTeamId,
-      teamScores: { ...room.teamScores }, flags: room.flags ? Object.fromEntries(Object.entries(room.flags).map(([team, flag]) => [team, { ...flag }])) : null,
+      teamScores: { ...room.teamScores }, flags: room.flags ? entriesObject(Object.entries(room.flags).map(([team, flag]) => [team, { ...flag }])) : null,
       players: room.players.map(player => ({ id: player.id, name: player.name, teamId: player.teamId, skinId: player.skinId, kills: player.kills, deaths: player.deaths })),
     };
     game.match = { ...game.matchView, kills: own.kills, deaths: own.deaths };

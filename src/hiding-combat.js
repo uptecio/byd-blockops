@@ -1,3 +1,4 @@
+import { entriesObject } from './entries-object.js';
 import { rayBoxHit, segmentClear } from './spatial.js';
 
 export function spotDamageTargets(state, actors, map) {
@@ -26,7 +27,7 @@ export function raySpotHit(origin, direction, range, targets, world) {
 }
 
 export function spotBlastExposure(origin, target, world) {
-  const point = Object.fromEntries(['x', 'y', 'z'].map(axis => [axis, Math.max(target.bounds.min[axis], Math.min(target.bounds.max[axis], origin[axis]))]));
+  const point = entriesObject(['x', 'y', 'z'].map(axis => [axis, Math.max(target.bounds.min[axis], Math.min(target.bounds.max[axis], origin[axis]))]));
   const distance = Math.hypot(point.x - origin.x, point.y - origin.y, point.z - origin.z);
   return { point, distance, visible: segmentClear(origin, point, world, { ignoreSolidIds: target.shellIds }) };
 }

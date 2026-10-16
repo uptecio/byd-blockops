@@ -1,3 +1,4 @@
+import { entriesObject } from './entries-object.js';
 import { GEAR_BALANCE, GRENADE_TYPES } from './equipment-catalog.js';
 import { consumeGrenade } from './equipment.js';
 import { hasLineOfSight } from './collision.js';
@@ -130,8 +131,8 @@ export function throwGrenade(state, actor, grenadeType, { solids }) {
   if (state.projectiles.length >= GEAR_BALANCE.maxProjectiles) return denied('Too many grenades in flight');
   if (grenadeType === 'smoke' && state.smokes.length + state.reservedSmoke >= GEAR_BALANCE.maxSmoke) return denied('Too many smoke areas');
   const origin = eye(actor), direction = aim(actor);
-  const offset = Object.fromEntries(axes.map(axis => [axis, direction[axis] * physics.releaseDistance]));
-  const position = Object.fromEntries(axes.map(axis => [axis, origin[axis] + offset[axis]]));
+  const offset = entriesObject(axes.map(axis => [axis, direction[axis] * physics.releaseDistance]));
+  const position = entriesObject(axes.map(axis => [axis, origin[axis] + offset[axis]]));
   if (insideSolid(origin, solids) || insideSolid(position, solids) || firstHit(origin, offset, solids)) return denied('Grenade release blocked');
   const result = consumeGrenade(actor.equipment, grenadeType);
   if (!result.ok) return result;
@@ -166,7 +167,7 @@ function moveProjectile(projectile, duration, solids) {
     // A bounded collision loop handles wall/ground intersections in one substep.
     for (let collision = 0; collision < 4 && remaining > epsilon; collision++) {
       const velocity = { x: projectile.vx, y: projectile.vy, z: projectile.vz };
-      const delta = Object.fromEntries(axes.map(axis => [axis, velocity[axis] * remaining]));
+      const delta = entriesObject(axes.map(axis => [axis, velocity[axis] * remaining]));
       const hit = firstHit(projectile, delta, solids);
       for (const axis of axes) projectile[axis] += delta[axis] * (hit?.time ?? 1);
       if (!hit) break;

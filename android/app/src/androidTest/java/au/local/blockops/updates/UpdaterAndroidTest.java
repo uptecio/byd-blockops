@@ -30,6 +30,111 @@ public final class UpdaterAndroidTest {
     private final UpdaterInstrumentation runner;
     private final Context context;
     UpdaterAndroidTest(UpdaterInstrumentation runner) { this.runner = runner; context = runner.getTargetContext(); }
+    public void bridge() throws Exception {
+        Class<?> bridge;
+        try { bridge=Class.forName("au.local.blockops.updates.UpdateBridge"); }
+        catch(ClassNotFoundException missing) { throw new AssertionError("Missing narrow updater bridge",missing); }
+        java.util.Set<String> commands=new java.util.TreeSet<>();
+        int annotated=0;
+        for(java.lang.reflect.Method method:bridge.getMethods())if(method.isAnnotationPresent(android.webkit.JavascriptInterface.class)){
+            annotated++;commands.add(method.getName());
+            check(method.getReturnType()==void.class,"Bridge returns unexpected authority");
+            check(java.util.Arrays.equals(method.getParameterTypes(),"homeState".equals(method.getName())?new Class<?>[]{String.class}:new Class<?>[]{}),"Unexpected bridge arguments");
+        }
+        check(annotated==3,"Extra annotated overload");
+        check(commands.equals(new java.util.TreeSet<>(java.util.Arrays.asList("homeState","check","open"))),"Bridge exposes extra authority");
+        runner.passed("threeCommandBridge");
+        bridgeHomeAndEncoding();runner.passed("bridgeHomeAndEncoding");
+        bridgeLateCallback();runner.passed("bridgeLateCallback");
+        bridgeGates();runner.passed("bridgeGates");
+    }
+    private Object field(Object target,String name)throws Exception{
+        java.lang.reflect.Field field=target.getClass().getDeclaredField(name);field.setAccessible(true);return field.get(target);
+    }
+    private String evaluate(android.webkit.WebView view,String script)throws Exception{
+        java.util.concurrent.CountDownLatch done=new java.util.concurrent.CountDownLatch(1);String[] value={null};
+        runner.runOnMainSync(()->view.evaluateJavascript(script,result->{value[0]=result;done.countDown();}));
+        check(done.await(10,java.util.concurrent.TimeUnit.SECONDS),"WebView evaluation timeout");return value[0];
+    }
+    private android.webkit.WebView homeView(Activity activity)throws Exception{
+        android.webkit.WebView view=(android.webkit.WebView)field(activity,"gameView");
+        long deadline=SystemClock.elapsedRealtime()+30000;
+        while(SystemClock.elapsedRealtime()<deadline){
+            if("true".equals(evaluate(view,"document.body && document.body.dataset.mode === 'home' && typeof window.receiveBlockOpsUpdate === 'function' && !document.getElementById('home-updates').hidden")))return view;
+            SystemClock.sleep(100);
+        }
+        throw new AssertionError("Actual packaged game did not reach Home: "+evaluate(view,"document.body.innerText"));
+    }
+    private void bridgeHomeAndEncoding()throws Exception{
+        Activity activity=runner.startActivitySync(new Intent(context,au.local.blockops.MainActivity.class).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));
+        try{
+            android.webkit.WebView view=homeView(activity);
+            check(evaluate(view,"location.href").equals("\"https://appassets.androidplatform.net/assets/index.html\""),"Packaged origin changed");
+            if(android.os.Build.VERSION.SDK_INT==26)check(evaluate(view,"typeof Object.fromEntries").equals("\"undefined\""),"Native startup masked missing runtime API");
+            String message="Quote \" slash \\ line \u2028 paragraph \u2029 <img src=x onerror=alert(1)>";
+            Snapshot snapshot=new Snapshot(987654,"available","0.10.0","0.11.0",200,0,message,false);
+            Class<?> bridge=Class.forName("au.local.blockops.updates.UpdateBridge");
+            java.lang.reflect.Method encode=bridge.getMethod("script",Snapshot.class);
+            String script=(String)encode.invoke(null,snapshot);
+            check(script.indexOf('\u2028')<0&&script.indexOf('\u2029')<0,"Old JavaScript line separator leaked");
+            evaluate(view,script);
+            String actual=evaluate(view,"document.getElementById('update-status').textContent");
+            check(new JSONArray("["+actual+"]").getString(0).contains(message),"Native JSON text changed");
+            check(evaluate(view,"document.getElementById('update-status').children.length").equals("0"),"Release became markup");
+            evaluate(view,"BlockOpsUpdates.homeState('home')");runner.runOnMainSync(()->{});
+            check(field(activity,"updateObservation")!=null,"No native observer");
+        }finally{runner.runOnMainSync(activity::finish);}
+    }
+    private void bridgeGates()throws Exception{
+        Activity activity=runner.startActivitySync(new Intent(context,au.local.blockops.MainActivity.class).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));
+        try{
+            android.webkit.WebView view=homeView(activity);Object bridge=field(activity,"updateBridge");
+            java.lang.reflect.Method open=bridge.getClass().getMethod("open");
+            evaluate(view,"document.getElementById('settings-screen').hidden=false;BlockOpsUpdates.open()");
+            SystemClock.sleep(200);runner.runOnMainSync(()->{});check(field(activity,"updateDialog")==null,"Hidden Home opened native dialog");
+            evaluate(view,"document.getElementById('settings-screen').hidden=true;BlockOpsUpdates.homeState('garbage');BlockOpsUpdates.homeState('home')");
+            SystemClock.sleep(200);open.invoke(bridge);
+            long deadline=SystemClock.elapsedRealtime()+10000;boolean[] shown={false};
+            do { runner.runOnMainSync(()->{try{shown[0]=field(activity,"updateDialog")!=null;}catch(Exception e){throw new AssertionError(e);}});
+                if(!shown[0])SystemClock.sleep(25);
+            }while(!shown[0]&&SystemClock.elapsedRealtime()<deadline);
+            check(shown[0],"Local foreground Home cannot open native dialog");
+            runner.runOnMainSync(()->runner.callActivityOnPause(activity));
+            check(field(activity,"updateDialog")==null&&field(activity,"updateObservation")==null,"Pause retained native presentation");
+            open.invoke(bridge);SystemClock.sleep(200);runner.runOnMainSync(()->{});check(field(activity,"updateDialog")==null,"Background Activity opened dialog");
+            runner.runOnMainSync(()->runner.callActivityOnResume(activity));SystemClock.sleep(200);
+            runner.runOnMainSync(()->view.loadData("<html><body>foreign</body></html>","text/html","UTF-8"));SystemClock.sleep(200);
+            open.invoke(bridge);SystemClock.sleep(200);runner.runOnMainSync(()->{});check(field(activity,"updateDialog")==null,"Nonlocal document opened dialog");
+            runner.runOnMainSync(()->{try{java.lang.reflect.Method failure=activity.getClass().getDeclaredMethod("showFailure",String.class);failure.setAccessible(true);failure.invoke(activity,"Fixture renderer unavailable");}catch(Exception e){throw new AssertionError(e);}});
+            open.invoke(bridge);runner.runOnMainSync(()->{});check(field(activity,"updateDialog")==null,"Destroyed view opened dialog");
+        }finally{runner.runOnMainSync(activity::finish);}
+    }
+    private void bridgeLateCallback()throws Exception{
+        Activity activity=runner.startActivitySync(new Intent(context,au.local.blockops.MainActivity.class).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));
+        homeView(activity);Throwable[] problem={null};
+        runner.runOnMainSync(()->{android.webkit.WebView original=null;PendingProbeView pending=null;try{
+            original=(android.webkit.WebView)field(activity,"gameView");pending=new PendingProbeView(activity);
+            java.lang.reflect.Field view=activity.getClass().getDeclaredField("gameView");view.setAccessible(true);view.set(activity,pending);
+            java.lang.reflect.Method request=activity.getClass().getDeclaredMethod("updateRequest",android.webkit.WebView.class,String.class);request.setAccessible(true);
+            request.invoke(activity,pending,"open");android.webkit.ValueCallback<String> callback=pending.probe;
+            check(callback!=null,"No asynchronous eligibility probe");
+            runner.callActivityOnPause(activity);runner.callActivityOnResume(activity);
+            callback.onReceiveValue("true");check(field(activity,"updateDialog")==null,"Old paused-view callback opened after resume");
+            request.invoke(activity,pending,"open");callback=pending.probe;
+            request.invoke(activity,pending,"hidden");callback.onReceiveValue("true");
+            check(field(activity,"updateDialog")==null,"Old Home callback reopened after Home exit");
+        }catch(Throwable failure){problem[0]=failure;}finally{try{
+            java.lang.reflect.Field view=activity.getClass().getDeclaredField("gameView");view.setAccessible(true);view.set(activity,original);
+            if(pending!=null)pending.destroy();activity.finish();
+        }catch(Exception failure){problem[0]=failure;}}});
+        if(problem[0]!=null)throw new AssertionError(problem[0]);
+    }
+    private static final class PendingProbeView extends android.webkit.WebView {
+        android.webkit.ValueCallback<String> probe;
+        PendingProbeView(Context context){super(context);}
+        @Override public String getUrl(){return "https://appassets.androidplatform.net/assets/index.html";}
+        @Override public void evaluateJavascript(String script,android.webkit.ValueCallback<String> callback){if(script.startsWith("(function()"))probe=callback;}
+    }
     public void run() throws Exception {
         parseGithubJson(); runner.passed("parseGithubJson");
         parseActualApk(); runner.passed("parseActualApk");

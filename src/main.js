@@ -23,8 +23,12 @@ import { teammateMapState, drawTeammateMap } from './teammate-map.js';
 import { defaultSoloPowers, normalizeSoloPowers } from './solo-powers.js';
 import { createSoloPowersPinGate } from './solo-powers-pin.js';
 import { createSoloPowersUI } from './solo-powers-ui.js';
+import { createUpdateUI } from './update-ui.js';
 
 const $ = id => document.getElementById(id);
+// Updater failures cannot enter the arena startup error boundary.
+let updateUI;
+try { updateUI = createUpdateUI({ window, document }); } catch { $('home-updates').hidden = true; }
 let mode = 'home', settingsOrigin = 'home', game, preview, home, multiplayer, equipmentUI, audio, input, toastUntil = 0, confirmation = null;
 let backgroundSuspended = false, frameRequest = null;
 let mapSession = null, mapUpdateAt = 0;
@@ -37,6 +41,7 @@ function stopAfterFatal() {
   mode = 'fatal'; confirmation = null;
   // Each subsystem gets a shutdown attempt even when another is broken.
   for (const stop of [
+    () => updateUI?.setHomeVisible(false),
     () => invalidatePowerMenu(),
     () => resetPowerSession(),
     () => cancelAnimationFrame(frameRequest),
@@ -110,6 +115,7 @@ function setMode(next) {
   $('pause-secret-logo').hidden = next !== 'paused' || multiplayer?.isConnected() || multiplayer?.busy
     || !game?.hasRound || game.modeState?.ended || game.settings.progressionSource !== 'solo';
   $('results-screen').hidden = next !== 'results';
+  updateUI?.setHomeVisible(next === 'home');
   const online = multiplayer && multiplayer.isActive();
   document.querySelector('.pause-dialog h2').textContent = online ? 'MATCH STILL LIVE' : 'GAME PAUSED';
   document.querySelector('.pause-dialog .eyebrow').textContent = online ? 'CONTROLS PAUSED' : 'TAKE YOUR TIME';
@@ -479,6 +485,7 @@ try {
   progressionUI = createProgressionUI({ document, onEquip: patch => selectConfiguration({ ...selection, ...patch }) });
   renderProgression();
   preview = new WeaponPreview($('weapon-preview'));
+  updateUI?.setHomeVisible(mode === 'home');
   let previous = performance.now();
   function frame(now) {
     if (runtimeErrors.failed) return;
