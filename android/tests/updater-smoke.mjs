@@ -1,11 +1,11 @@
 import assert from 'node:assert/strict';
 import {readFile,writeFile,mkdir} from 'node:fs/promises';
 import {createHash} from 'node:crypto';
-import {resolve,join} from 'node:path';
+import {resolve,join,dirname} from 'node:path';
 import {execFile} from 'node:child_process';
 import {promisify} from 'node:util';
 import {nativeProgressionFixture} from './helpers/progression-native.js';
-import {updaterNativeFixture} from './helpers/updater-native.js';
+import {playProtectState,updaterNativeFixture} from './helpers/updater-native.js';
 import {setupSolo,goHome,readProfile,visibleZombie,dragAim} from '../../tests/helpers/progression-browser.js';
 import {choosePowers} from '../../tests/helpers/solo-powers-browser.js';
 import {enterRange,observeRange,fireRangeKill} from '../../tests/helpers/range-browser.js';
@@ -32,7 +32,8 @@ const keys=['block-ops-v1','block-ops-progression-v1','block-ops-progression-v1-
 const saves=page=>page.evaluate(keys=>{const result={};keys.forEach(key=>result[key]=localStorage.getItem(key));return result;},keys);
 const off={invincible:false,unlimitedAmmo:false,superSpeed:false,speedMultiplier:2},pin='0427';
 const prepareOnly=process.argv.includes('--prepare-only')||process.argv.includes('--resume-earn15');
-let page,observation,preservePending=false;const evidence={api:native.api,phases:[],kills:[]};
+const continuePending=process.argv.includes('--continue-pending-native');
+let page,observation,preservePending=continuePending;const evidence={api:native.api,phases:[],kills:[]};
 async function record(name,value){await writeFile(join(artifactDir,`${name}.json`),JSON.stringify(value,null,2),{mode:0o600});}
 async function installedBytes(fixture,label){
   const path=(await native.command('shell','pm','path','au.local.blockops')).stdout.trim().replace(/^package:/,'');
@@ -54,7 +55,14 @@ async function openUpdate(){await page.locator('#update-check').click();await pa
 async function retryCancelledCandidate(){
   await page.locator('#update-open').click();await native.button('Retry');
   await native.until(async()=>(await native.status()).phase==='ready','Home Retry retains complete candidate');
-  assert.match(await native.hierarchy(),/text="(?:INSTALL|Install)"/);assert.deepEqual((await native.status()).sessions,[]);
+  await native.until(async()=>{
+    const xml=await native.hierarchy();
+    return [...xml.matchAll(/<node\b[^>]+>/g)].some(([node])=>
+      /text="(?:INSTALL|Install)"/.test(node)&&node.includes('package="au.local.blockops"')&&
+      node.includes('resource-id="android:id/button1"')&&node.includes('enabled="true"')&&
+      node.includes('visible-to-user="true"'));
+  },'Home Retry renders enabled native Install');
+  assert.deepEqual((await native.status()).sessions,[]);
   await native.screenshot('cancel-retry-install');await record('cancel-retry',await native.status());
 }
 async function negativeCases(){
@@ -141,11 +149,54 @@ async function earn(){
   await f.background();await f.foreground();page=await f.relaunch();assert.deepEqual(await saves(page),stored,'Earned save survives baseline restart');
   await record('earned-save',stored);return stored;
 }
+async function finishNativeReplacement(retained,beforeReplacementPid,submission,{resumedPending=false}={}){
+  if(/mCurrentFocus=.*(?:packageinstaller|permissioncontroller)/.test((await native.command('shell','dumpsys','window')).stdout)){
+    const completedXml=await native.hierarchy();if(/text="(?:OPEN|Open)"/.test(completedXml))await native.button('Open');else if(/text="(?:DONE|Done)"/.test(completedXml))await native.button('Done');
+  }
+  page=await f.attach();assert.deepEqual(await saves(page),retained,'Native15→16 retains exact earned save bytes before gameplay');assert.deepEqual(await native.version(),{code:16,name:'0.11.1'});
+  const afterReplacementPid=(await native.command('shell','pidof','au.local.blockops')).stdout.trim();assert.notEqual(afterReplacementPid,beforeReplacementPid,'Real replacement kills original application/instrumentation');
+  const packageDump=(await native.command('shell','dumpsys','package')).stdout;
+  const active=packageDump.split('Active install sessions:')[1]?.split(/Finalized install sessions:|Historical install sessions:/)[0];assert.ok(active!==undefined&&!/Session \d+:/.test(active),'No active install sessions after replacement');
+  const session=packageDump.split('Historical install sessions:')[1]?.split(`Session ${submission.ownedSession}:`)[1]?.split(/\n  Session |\nLegacy install sessions:/)[0];
+  assert.ok(session&&/[Ii]nstallerPackageName=au.local.blockops/.test(session)&&session.includes('mFinalStatus=1'),'The recorded app-originating OS session succeeded');
+  await record('installed-session-provenance',{sessionId:submission.ownedSession,history:session,continuousHost:true,resumedPending,uninterruptedOriginalSubmission:!resumedPending});
+  await record('replacement-process',{beforeReplacementPid,afterReplacementPid});await installedBytes(manifest.fixtures.valid,'native16');
+  assert.equal(await page.evaluate(()=>location.href),'https://appassets.androidplatform.net/assets/index.html');await record('after-native16',await saves(page));await checkOff();await record('temporary-powers-reset',{verified:true});
+  await native.screenshot('retained16-home');f.clean();evidence.result=resumedPending?'PASS_RESUMED_PENDING_NATIVE16':'PASS';preservePending=false;console.log('PASS real signed upgrade and exact earned-save retention'+(resumedPending?' (resumed host spans final confirmation through replacement and postchecks)':''));
+}
 try {
   evidence.device=await f.identity();await record('fixture-identities',manifest);
   const observeNative16=process.argv.includes('--observe-native16');
-  if(!observeNative16)await native.mutate('install','-r','-t',manifest.instrumentation);
-  if(observeNative16){
+  if(!observeNative16&&!continuePending)await native.mutate('install','-r','-t',manifest.instrumentation);
+  if(continuePending){
+    for(const key of ['ANDROID_PREVIOUS_APP_PID','ANDROID_SUBMITTED_SESSION','ANDROID_PENDING_EVIDENCE_PATH','ANDROID_RETAINED_SAVE_PATH'])assert.ok(process.env[key],`Explicit ${key} required for pending continuation`);
+    assert.match(process.env.ANDROID_PREVIOUS_APP_PID,/^\d+$/);assert.match(process.env.ANDROID_SUBMITTED_SESSION,/^\d+$/);
+    const prior=dirname(resolve(process.env.ANDROID_PENDING_EVIDENCE_PATH));assert.notEqual(prior,artifactDir,'Preserve original submission evidence');
+    const submission=JSON.parse(await readFile(process.env.ANDROID_PENDING_EVIDENCE_PATH,'utf8'));
+    assert.equal(String(submission.pid),process.env.ANDROID_PREVIOUS_APP_PID);assert.equal(String(submission.ownedSession),process.env.ANDROID_SUBMITTED_SESSION);assert.equal(submission.phase,'installing');assert.equal(submission.ownedSealed,true);assert.deepEqual(submission.sessions,[submission.ownedSession]);
+    assert.deepEqual(JSON.parse(await readFile(join(prior,'fixture-identities.json'),'utf8')),manifest,'Continuation uses original exact bound fixture manifest');
+    const checkpoint=await readFile(process.env.ANDROID_RETAINED_SAVE_PATH);assert.equal(hash(checkpoint),hash(await readFile(join(prior,'retained15.json'))),'Explicit checkpoint is the original genuine retained save');const retained=JSON.parse(checkpoint);
+    assert.deepEqual(await native.version(),{code:15,name:'0.11.0'});assert.equal((await native.command('shell','pidof','au.local.blockops')).stdout.trim(),process.env.ANDROID_PREVIOUS_APP_PID,'Original submitted app process remains');
+    const packageDump=(await native.command('shell','dumpsys','package')).stdout;await record('pending-current-package',{packageDump});
+    const active=packageDump.split('Active install sessions:')[1]?.split(/Finalized install sessions:|Historical install sessions:/)[0];assert.ok(active!==undefined);
+    assert.deepEqual([...active.matchAll(/Session (\d+):/g)].map(match=>Number(match[1])),[submission.ownedSession],'Exactly the original owned session, no duplicate/new session');
+    for(const field of ['mOriginalInstallerPackageName=au.local.blockops ','installerPackageName=au.local.blockops ','appPackageName=au.local.blockops ','mCommitted=true ','mSealed=true ','mPermissionsManuallyAccepted=true ','mDestroyed=false ','mFinalStatus=0 '])assert.ok(active.includes(field),`Current original session requires ${field}`);
+    await installedBytes(manifest.candidate,'pending15');
+    await record('pending-continuation-admission',{prior,pid:submission.pid,sessionId:submission.ownedSession,checkpointSha256:hash(checkpoint),candidateSha256:manifest.candidate.sha256,fixture16Sha256:manifest.fixtures.valid.sha256,originalSubmissionHostInterrupted:true});
+    // Do not attach/start Activity, reinstall, instrument, reset or recommit before the scan.
+    let previousSafeScan=false;
+    if(process.env.ANDROID_COMPLETED_SCAN_ARTIFACTS){
+      const scanDir=resolve(process.env.ANDROID_COMPLETED_SCAN_ARTIFACTS);
+      assert.deepEqual(JSON.parse(await readFile(join(scanDir,'fixture-identities.json'),'utf8')),manifest);
+      const admission=JSON.parse(await readFile(join(scanDir,'pending-continuation-admission.json'),'utf8'));assert.equal(admission.pid,submission.pid);assert.equal(admission.sessionId,submission.ownedSession);assert.equal(admission.checkpointSha256,hash(checkpoint));
+      const observations=(await readFile(join(scanDir,'play-protect-observations.jsonl'),'utf8')).trim().split('\n').map(JSON.parse),actions=(await readFile(join(scanDir,'native-actions.jsonl'),'utf8')).trim().split('\n').map(JSON.parse);
+      assert.deepEqual(actions.map(action=>action.text),['Scan app'],'Prior observer performed only the authorized scan');assert.ok(observations.some(item=>item.state==='scanning'));assert.equal(playProtectState(observations.at(-1).xml,observations.at(-1).focus),'safe','Prior actual scan completed safely');
+      await record('prior-safe-scan-provenance',{scanDir,sessionId:submission.ownedSession,scanAt:actions[0].at,safeAt:observations.at(-1).at,scanObserverInterrupted:true});previousSafeScan=true;
+    }
+    await native.waitVersion(16,{scanAuthorized:process.env.ANDROID_ALLOW_PLAY_PROTECT_SCAN==='1',previousSafeScan});
+    await finishNativeReplacement(retained,process.env.ANDROID_PREVIOUS_APP_PID,submission,{resumedPending:true});
+  }
+  else if(observeNative16){
     assert.match(process.env.ANDROID_PREVIOUS_APP_PID||'',/^\d+$/);assert.match(process.env.ANDROID_SUBMITTED_SESSION||'',/^\d+$/);
     const provenance=JSON.parse(await readFile(process.env.ANDROID_PENDING_EVIDENCE_PATH,'utf8'));
     assert.equal(String(provenance.pid),process.env.ANDROID_PREVIOUS_APP_PID);assert.equal(String(provenance.ownedSession),process.env.ANDROID_SUBMITTED_SESSION);assert.equal(provenance.phase,'installing');
@@ -247,19 +298,7 @@ try {
   await record('pending-native-submission',submission);
   preservePending=true;
   await native.button(/text="(?:UPDATE|Update)"/.test(confirmationXml)?'Update':'Install');await native.waitVersion(16,{scanAuthorized:process.env.ANDROID_ALLOW_PLAY_PROTECT_SCAN==='1'});
-  if(/mCurrentFocus=.*(?:packageinstaller|permissioncontroller)/.test((await native.command('shell','dumpsys','window')).stdout)){
-    const completedXml=await native.hierarchy();if(/text="(?:OPEN|Open)"/.test(completedXml))await native.button('Open');else if(/text="(?:DONE|Done)"/.test(completedXml))await native.button('Done');
-  }
-  page=await f.attach();assert.deepEqual(await saves(page),retained,'Native15→16 retains exact earned save bytes before gameplay');assert.deepEqual(await native.version(),{code:16,name:'0.11.1'});
-  const afterReplacementPid=(await native.command('shell','pidof','au.local.blockops')).stdout.trim();assert.notEqual(afterReplacementPid,beforeReplacementPid,'Real replacement kills original application/instrumentation');
-  const packageDump=(await native.command('shell','dumpsys','package')).stdout;
-  const active=packageDump.split('Active install sessions:')[1]?.split(/Finalized install sessions:|Historical install sessions:/)[0];assert.ok(active!==undefined&&!/Session \d+:/.test(active),'No active install sessions after replacement');
-  const session=packageDump.split('Historical install sessions:')[1]?.split(`Session ${submission.ownedSession}:`)[1]?.split(/\n  Session |\nLegacy install sessions:/)[0];
-  assert.ok(session&&/[Ii]nstallerPackageName=au.local.blockops/.test(session)&&session.includes('mFinalStatus=1'),'The recorded app-originating OS session succeeded');
-  await record('installed-session-provenance',{sessionId:submission.ownedSession,history:session,continuousHost:true});
-  await record('replacement-process',{beforeReplacementPid,afterReplacementPid});await installedBytes(manifest.fixtures.valid,'native16');
-  assert.equal(await page.evaluate(()=>location.href),'https://appassets.androidplatform.net/assets/index.html');await record('after-native16',await saves(page));await checkOff();
-  await native.screenshot('retained16-home');f.clean();evidence.result='PASS';preservePending=false;console.log('PASS real signed upgrade chain and exact earned-save retention');
+  await finishNativeReplacement(retained,beforeReplacementPid,submission);
   }
   }
 }catch(error){evidence.result='FAIL';evidence.error=String(error);await native.screenshot('failure').catch(()=>{});await record('failure-hierarchy',{xml:await native.hierarchy().catch(()=>null)});throw error;}

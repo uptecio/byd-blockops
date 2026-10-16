@@ -27,8 +27,9 @@ public final class AndroidApkVerifier implements UpdatePorts.Verifier {
     static InstalledApp decodeInstalled(PackageInfo info, int sdk) throws UpdatePorts.Failure {
         try {
             if (info == null || !UpdatePolicy.PACKAGE_NAME.equals(info.packageName)) throw invalidInstalled();
+            if (sdk >= 28 && Build.VERSION.SDK_INT < 28) throw invalidInstalled();
             UpdatePolicy.parseVersion(info.versionName, false);
-            long code = sdk >= 28 ? info.getLongVersionCode() : info.versionCode;
+            long code = sdk >= 28 && Build.VERSION.SDK_INT >= 28 ? info.getLongVersionCode() : info.versionCode;
             String signer = currentSigner(info, sdk);
             if (code <= 0 || !UpdatePolicy.SIGNER_SHA256.equals(signer)) throw invalidInstalled();
             return new InstalledApp(info.packageName, info.versionName, code, signer, sdk);
@@ -38,7 +39,8 @@ public final class AndroidApkVerifier implements UpdatePorts.Verifier {
     }
 
     private static String currentSigner(PackageInfo info, int sdk) throws UpdatePorts.Failure {
-        Signature[] signers = sdk >= 28
+        if (sdk >= 28 && Build.VERSION.SDK_INT < 28) throw invalidApk();
+        Signature[] signers = sdk >= 28 && Build.VERSION.SDK_INT >= 28
                 ? (info.signingInfo == null ? null : info.signingInfo.getApkContentsSigners()) : info.signatures;
         if (signers == null || signers.length != 1 || signers[0] == null) throw invalidApk();
         return HttpsUpdateTransport.hex(HttpsUpdateTransport.sha256().digest(signers[0].toByteArray()));

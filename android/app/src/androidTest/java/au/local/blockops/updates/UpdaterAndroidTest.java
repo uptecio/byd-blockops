@@ -760,6 +760,13 @@ public final class UpdaterAndroidTest {
     }
     // Real PackageManager archive parsing and current certificate extraction, not android.jar stubs.
     private void parseActualApk() throws Exception {
+        InstalledApp installed = AndroidApkVerifier.readInstalled(context);
+        check(installed.versionCode > 0 && installed.signerSha256.equals(SIGNER), "Actual installed identity mismatch");
+        if (android.os.Build.VERSION.SDK_INT < 28) {
+            android.content.pm.PackageInfo legacy = context.getPackageManager().getPackageInfo(context.getPackageName(), android.content.pm.PackageManager.GET_SIGNATURES);
+            check(AndroidApkVerifier.decodeInstalled(legacy,26).signerSha256.equals(SIGNER), "Actual legacy signer mismatch");
+            rejected(() -> AndroidApkVerifier.decodeInstalled(legacy,28));
+        }
         Candidate candidate = fixture();
         InstalledApp prior = new InstalledApp("au.local.blockops", "0.9.0", 13, SIGNER, android.os.Build.VERSION.SDK_INT);
         ApkIdentity identity = new AndroidApkVerifier(context).inspect(candidate, prior);

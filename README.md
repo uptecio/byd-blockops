@@ -10,9 +10,17 @@ The APK is version **0.10.0**, Android version code **14**, using multiplayer pr
 
 APK SHA-256: `e208ef6fd6fdefb0cc6ea1e49eb31d4e0deff2956f3299252e86c51ae7a6385b`.
 
-Install over an existing copy signed with the same certificate to retain saved progress; do not uninstall first. Updates are currently manual: an in-game update button is **not yet implemented**. Android emulator checks passed, but physical BYD compatibility remains unverified. A newly created PIN may not survive an immediate force-stop before its storage write completes.
+Install over an existing copy signed with the same certificate to retain saved progress; do not uninstall first. The published v0.10.0 release requires manual updates. Android emulator checks passed, but physical BYD compatibility remains unverified. A newly created PIN may not survive an immediate force-stop before its storage write completes.
 
 Transfer the APK using an installation method supported by your vehicle. Whether a particular Shark 6 firmware allows APK installation needs to be checked on that vehicle. This app has not been tested on a physical BYD head unit. Play while parked; the app does not detect the vehicle's motion.
+
+## GitHub updater candidate — v0.11.0
+
+The local v0.11.0 candidate (Android code 15, multiplayer protocol 8) adds Android Home controls **Check updates** and **View update** for stable releases from this repository. It is not published yet; the download above remains the published v0.10.0. Bootstrap the updater by manually installing the same-signer v0.11.0 APK over your existing copy. Do not uninstall or clear app data. Browser builds have no APK update controls or GitHub update requests.
+
+On Home, an available update shows its version and download size. Choose Download, then Install after verification; Later leaves the game usable. Downloads require the app to stay in the foreground on Home, and are cancelled when you leave Home or background the app. A completed download is checked again before installation. Android may first ask you to allow this app to install updates; returning from Settings requires another explicit Install tap. Android installation and security prompts, including a possible Google Play Protect scan, remain under your control. There is no silent installation or automatic scan approval.
+
+Updates must have the same package and signing certificate, a newer Android version code, and a verified SHA-256 digest. The candidate adds REQUEST_INSTALL_PACKAGES to INTERNET; it requests no storage or notification permission. Signing certificate SHA-256: `6b2d84eb4133168fec0850ed710acffa01d8399b75c8410621b2d0ce9881cb49`. Physical BYD testing remains unperformed. See the [local verification record](docs/releases/2026-10-15-github-updater-verification.md) for the Android 8 baseline limitation and exact testing boundaries.
 
 ## Screenshots
 

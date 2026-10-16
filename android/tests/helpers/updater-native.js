@@ -8,9 +8,27 @@ import {setTimeout as delay} from 'node:timers/promises';
 export function playProtectState(xml,focus){
   if(!focus?.includes('com.android.vending/com.google.android.finsky.protectdialogs.activity.PlayProtectDialogsActivity'))return 'other';
   if(/harmful|malicious|unsafe|blocked|install anyway|couldn.?t scan|can.?t scan/i.test(xml))return 'security-boundary';
+  const vendingLabels=[...xml.matchAll(/<node\b[^>]+>/g)].map(match=>match[0]).filter(node=>node.includes('package="com.android.vending"')).map(node=>/\btext="([^"]*)"/.exec(node)?.[1]);
+  const safeLabels=['This app looks safe','Block Ops','You can continue to install it','Install'];
+  if(safeLabels.every(label=>vendingLabels.includes(label))&&vendingLabels.filter(Boolean).every(label=>safeLabels.includes(label)))return 'safe';
   if(xml.includes('text="App scan recommended"')&&xml.includes('text="Block Ops"')&&xml.includes('text="Scan app"'))return 'recommendation';
   if(/text="Scanning(?: app|…|\.\.\.)?"/.test(xml))return 'scanning';
   return 'security-boundary';
+}
+
+// Focus can advance before the accessibility observer sees the new window.
+// Only classify a hierarchy belonging to the same, still-focused package.
+export async function settledPlayProtect({readFocus,readHierarchy,now=Date.now,pause=()=>delay(100),timeout=3000}){
+  const deadline=now()+timeout;
+  while(now()<deadline){
+    const focus=await readFocus();
+    if(!focus?.includes('com.android.vending/'))return null;
+    const xml=await readHierarchy(),current=await readFocus();
+    if(!current?.includes('com.android.vending/'))return null;
+    if(current===focus&&/\bpackage="([^"]+)"/.exec(xml)?.[1]==='com.android.vending')return {focus,xml,state:playProtectState(xml,focus)};
+    await pause();
+  }
+  throw Error('Accessibility hierarchy did not match the focused Play Protect window');
 }
 
 export async function updaterNativeFixture({artifactDir,serial,avd}) {
@@ -40,24 +58,27 @@ export async function updaterNativeFixture({artifactDir,serial,avd}) {
     }
     const dump=await mutate('shell','uiautomator','dump','/data/local/tmp/blockops-updater-hierarchy.xml');assert.match(dump.stdout,/UI hierchary dumped to:/,'A failed dump may not reuse an older XML file');const xml=(await command('shell','cat','/data/local/tmp/blockops-updater-hierarchy.xml')).stdout;assert.ok(xml.includes('<hierarchy'),'Android must return a real accessibility hierarchy');return xml;
   }
-  async function button(text,{timeout=30000,scanAuthorized=false}={}){
+  async function button(text,{timeout=30000,scanAuthorized=false,safeInstallAuthorized=false}={}){
     let previous='',stable=0;
     const node=await until(async()=>{const xml=await hierarchy();const found=[...xml.matchAll(/<node\b[^>]+>/g)].map(m=>m[0]).find(n=>{
       const label=/\btext="([^"]*)"/.exec(n)?.[1]||/content-desc="([^"]*)"/.exec(n)?.[1];
       // API36's real Settings Compose row has no resource ID; do not generalize this exception.
       const settingsPermission=text==='Allow from this source'&&n.includes('package="com.android.settings"')&&n.includes('class="android.widget.TextView"');
       const playProtectScan=scanAuthorized&&text==='Scan app'&&n.includes('package="com.android.vending"')&&n.includes('class="android.widget.TextView"');
-      return label?.toLowerCase()===text.toLowerCase()&&!n.includes('enabled="false"')&&!n.includes('visible-to-user="false"')&&(/resource-id="[^"]+"/.test(n)||settingsPermission||playProtectScan);
+      const playProtectInstall=safeInstallAuthorized&&text==='Install'&&n.includes('package="com.android.vending"')&&n.includes('class="android.widget.TextView"');
+      return label?.toLowerCase()===text.toLowerCase()&&!n.includes('enabled="false"')&&!n.includes('visible-to-user="false"')&&(/resource-id="[^"]+"/.test(n)||settingsPermission||playProtectScan||playProtectInstall);
     });
       const windows=(await command('shell','dumpsys','window')).stdout,focus=/mCurrentFocus=Window\{([^}]+)\}/.exec(windows)?.[1];
+      if(safeInstallAuthorized)assert.equal(playProtectState(xml,focus),'safe','Only the exact current safe scan result may expose Play Protect Install');
       const pkg=/\bpackage="([^"]+)"/.exec(found||'')?.[1];
       const fingerprint=found&&focus?.includes(pkg)?`${found}|${focus}`:'';
       stable=fingerprint&&fingerprint===previous?stable+1:0;previous=fingerprint;
       return stable>=2&&found;
     },`native button ${text}`,timeout);
     const packageName=/\bpackage="([^"]+)"/.exec(node)?.[1];
-    assert.ok(['au.local.blockops','com.android.settings','com.google.android.packageinstaller','com.android.packageinstaller','com.google.android.permissioncontroller','com.android.permissioncontroller',...(scanAuthorized&&text==='Scan app'?['com.android.vending']:[])].includes(packageName),'Native controls belong to the expected application or system window');
+    assert.ok(['au.local.blockops','com.android.settings','com.google.android.packageinstaller','com.android.packageinstaller','com.google.android.permissioncontroller','com.android.permissioncontroller',...((scanAuthorized&&text==='Scan app')||(safeInstallAuthorized&&text==='Install')?['com.android.vending']:[])].includes(packageName),'Native controls belong to the expected application or system window');
     const windows=(await command('shell','dumpsys','window')).stdout,focus=/mCurrentFocus=Window\{([^}]+)\}/.exec(windows)?.[1];assert.ok(focus?.includes(packageName),'Never tap a stale native window');
+    if(safeInstallAuthorized)assert.ok(focus.includes('com.android.vending/com.google.android.finsky.protectdialogs.activity.PlayProtectDialogsActivity'),'Safe Install requires the same Play Protect Activity');
     const [,x1,y1,x2,y2]=/bounds="\[(\d+),(\d+)\]\[(\d+),(\d+)\]"/.exec(node).map(Number);
     await appendFile(join(artifactDir,'native-actions.jsonl'),JSON.stringify({text,node,focus,sequence:uiSequence,at:Date.now(),x:Math.round((x1+x2)/2),y:Math.round((y1+y2)/2)})+'\n',{mode:0o600});
     await mutate('shell','input','tap',String(Math.round((x1+x2)/2)),String(Math.round((y1+y2)/2)));
@@ -147,24 +168,32 @@ export async function updaterNativeFixture({artifactDir,serial,avd}) {
       child?.unref();child?.stdout.unref?.();child?.stderr.unref?.();
     },
     async version(){const text=(await command('shell','dumpsys','package','au.local.blockops')).stdout;return {code:Number(/versionCode=(\d+)/.exec(text)?.[1]),name:/versionName=(\S+)/.exec(text)?.[1]};},
-    async waitVersion(code,{scanAuthorized=false}={}){
-      let scanRequested=false,lastXml='';
+    async waitVersion(code,{scanAuthorized=false,previousSafeScan=false}={}){
+      let scanRequested=false,safeInstallRequested=false,lastXml='';
       await until(async()=>{
         const installed=(await this.version()).code===code;
         const focus=/mCurrentFocus=Window\{([^}]+)\}/.exec((await command('shell','dumpsys','window')).stdout)?.[1];
         if(!focus?.includes('com.android.vending'))return installed;
-        const xml=await hierarchy(),state=playProtectState(xml,focus);
-        if(xml!==lastXml){await appendFile(join(artifactDir,'play-protect-observations.jsonl'),JSON.stringify({at:Date.now(),focus,state,xml})+'\n',{mode:0o600});lastXml=xml;}
+        const observation=await settledPlayProtect({readFocus:async()=>/mCurrentFocus=Window\{([^}]+)\}/.exec((await command('shell','dumpsys','window')).stdout)?.[1],readHierarchy:hierarchy});
+        if(!observation)return false;
+        const {xml,state}=observation;
+        if(xml!==lastXml){await appendFile(join(artifactDir,'play-protect-observations.jsonl'),JSON.stringify({at:Date.now(),focus:observation.focus,state,xml})+'\n',{mode:0o600});lastXml=xml;}
         assert.notEqual(state,'security-boundary','Different Play Protect security finding: stop without override');
         assert.notEqual(state,'other','Unexpected Play Protect Activity: stop without override');
         if(state==='recommendation'&&!scanRequested){
+          assert.equal(previousSafeScan,false,'A previously completed scan must not be submitted again');
           assert.equal(scanAuthorized,true,'Explicit user authorization required before uploading updater fixture to Google');
           assert.equal(code,16,'Scan authorization is scoped to the updater fixture16');
           await this.screenshot('play-protect-before-authorized-scan');await button('Scan app',{scanAuthorized:true});scanRequested=true;
         }
+        if(state==='safe'&&!safeInstallRequested){
+          assert.equal(scanAuthorized,true);assert.equal(code,16);assert.ok(scanRequested||previousSafeScan,'Safe-result Install requires this scan or explicit verified prior scan provenance');
+          await this.screenshot('play-protect-safe-result');await writeFile(join(artifactDir,'play-protect-safe-result.json'),JSON.stringify({at:Date.now(),focus:observation.focus,xml,verdict:'This app looks safe',previousSafeScan}),{mode:0o600});
+          await button('Install',{safeInstallAuthorized:true});safeInstallRequested=true;
+        }
         return false;
       },`installed version ${code} after native confirmation`,180000);
-      await writeFile(join(artifactDir,'play-protect-install-observation.json'),JSON.stringify({scanRequested,installedCode:code,standaloneScanVerdict:null}),{mode:0o600});
+      await writeFile(join(artifactDir,'play-protect-install-observation.json'),JSON.stringify({scanRequested,previousSafeScan,safeInstallRequested,installedCode:code,standaloneScanVerdict:safeInstallRequested?'This app looks safe':null}),{mode:0o600});
     },
     async stop(){await mutate('shell','am','force-stop','au.local.blockops');},
   };
